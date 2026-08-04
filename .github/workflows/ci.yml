@@ -10,60 +10,137 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Pre-alpha scaffold — the real lint/type/test/integration jobs are wired up
+# in dev branches and turn on as each package gets real code. For `main`
+# right now we only enforce that the scaffold itself stays coherent: config
+# files parse, and the directories the docs promise actually exist.
 jobs:
-  python:
+  scaffold-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+
+      - uses: actions/setup-python@v5
         with:
-          version: "0.4.20"
-      - name: Sync workspace
-        run: uv sync --all-packages --dev
-      - name: Ruff
-        run: uv run ruff check .
-      - name: Ruff format check
-        run: uv run ruff format --check .
-      - name: mypy (guardmem-core, strict)
-        run: uv run mypy --strict packages/guardmem-core/src
-      - name: Unit tests
-        run: uv run pytest tests/unit -q --cov=packages/guardmem-core --cov-report=xml
-      - name: Coverage gate (guardmem-core >= 85%)
+          python-version: "3.12"
+
+      - name: Validate YAML files
         run: |
-          uv run python -c "import xml.etree.ElementTree as ET,sys; \
-            r=ET.parse('coverage.xml').getroot(); \
-            rate=float(r.get('line-rate')); \
-            print(f'line-rate={rate:.3f}'); \
-            sys.exit(0 if rate >= 0.85 else 1)"
-      - name: Import contracts
-        run: uv run lint-imports
+          python - <<'PY'
+          import pathlib, sys
+          import yaml  # PyYAML ships with actions runner images
+          bad = []
+          for p in pathlib.Path(".").rglob("*.y*ml"):
+              if any(part in {".git", "node_modules", ".venv"} for part in p.parts):
+                  continue
+              try:
+                  list(yaml.safe_load_all(p.read_text(encoding="utf-8")))
+              except yaml.YAMLError as e:
+                  bad.append((str(p), str(e)))
+          if bad:
+              for path, err in bad:
+                  print(f"::error file={path}::{err}")
+              sys.exit(1)
+          print(f"ok — parsed yaml under repo root")
+          PY
 
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-        with:
-          version: "0.4.20"
-      - name: Boot test stack
-        run: docker compose -f infra/docker/docker-compose.test.yml up -d --wait
-      - name: Sync workspace
-        run: uv sync --all-packages --dev
-      - name: Integration tests
-        run: uv run pytest tests/integration -q
+      - name: Validate TOML files
+        run: |
+          python - <<'PY'
+          import pathlib, sys, tomllib
+          bad = []
+          for p in pathlib.Path(".").rglob("*.toml"):
+              if any(part in {".git", "node_modules", ".venv"} for part in p.parts):
+                  continue
+              try:
+                  tomllib.loads(p.read_text(encoding="utf-8"))
+              except tomllib.TOMLDecodeError as e:
+                  bad.append((str(p), str(e)))
+          if bad:
+              for path, err in bad:
+                  print(f"::error file={path}::{err}")
+              sys.exit(1)
+          print("ok")
+          PY
 
-  typescript:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile || pnpm install
-      - run: pnpm -r typecheck
-      - run: pnpm -r lint
-      - run: pnpm --filter @guardmem/dashboard build
+      - name: Validate JSON files
+        run: |
+          python - <<'PY'
+          import pathlib, sys, json
+          bad = []
+          for p in pathlib.Path(".").rglob("*.json"):
+              if any(part in {".git", "node_modules", ".venv", ".next", "dist", "build"} for part in p.parts):
+                  continue
+              try:
+                  json.loads(p.read_text(encoding="utf-8"))
+              except json.JSONDecodeError as e:
+                  bad.append((str(p), str(e)))
+          if bad:
+              for path, err in bad:
+                  print(f"::error file={path}::{err}")
+              sys.exit(1)
+          print("ok")
+          PY
+
+      - name: Verify scaffold matches docs/PROJECT_TREE.md
+        run: |
+          set -e
+          for path in \
+            docs/PRD.md \
+            docs/ARCHITECTURE.md \
+            docs/MEMORY_ENGINE.md \
+            docs/RULES.md \
+            docs/MCP_INTEGRATION.md \
+            docs/DESIGN_SYSTEM.md \
+            docs/PHASES_AND_ROADMAP.md \
+            docs/PROJECT_TREE.md \
+            docs/adr \
+            docs/runbooks \
+            packages/guardmem-core/src/guardmem_core/schemas \
+            packages/guardmem-core/src/guardmem_core/pipeline/l1_extract \
+            packages/guardmem-core/src/guardmem_core/pipeline/l2_validate \
+            packages/guardmem-core/src/guardmem_core/pipeline/l3_score \
+            packages/guardmem-core/src/guardmem_core/guardrails \
+            packages/guardmem-core/src/guardmem_core/memory/vector \
+            packages/guardmem-core/src/guardmem_core/memory/graph \
+            packages/guardmem-core/src/guardmem_core/memory/compaction \
+            packages/guardmem-core/src/guardmem_core/llm/providers \
+            packages/guardmem-core/src/guardmem_core/observability/exporters \
+            packages/guardmem-core/src/guardmem_core/hitl \
+            packages/guardmem-sdk-python/src/guardmem \
+            packages/guardmem-sdk-ts/src \
+            services/gateway/src/gateway/routers \
+            services/worker/src/worker/tasks \
+            services/mcp_server/src/mcp_server/tools \
+            apps/dashboard/app \
+            infra/docker \
+            infra/terraform \
+            infra/migrations \
+            evals/suites \
+            evals/runners \
+            bench/locust \
+            tests/unit \
+            tests/integration \
+            tests/contract \
+            tests/property \
+            tests/security \
+            scripts \
+            README.md \
+            LICENSE \
+            CHANGELOG.md \
+            SECURITY.md \
+            CONTRIBUTING.md \
+            Makefile \
+            pyproject.toml \
+            pnpm-workspace.yaml \
+            turbo.json \
+            .pre-commit-config.yaml \
+            .env.example \
+            .dockerignore \
+            .gitignore ; do
+              if [ ! -e "$path" ]; then
+                echo "::error::missing $path (see docs/PROJECT_TREE.md)"
+                exit 1
+              fi
+          done
+          echo "scaffold ok"

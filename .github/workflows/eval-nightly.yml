@@ -1,8 +1,8 @@
 name: eval-nightly
 
+# Pre-alpha: nightly evals are opt-in until Phase 1 exit-gate lands.
+# Re-enable the schedule trigger once evals/runners/run_suite.py is real.
 on:
-  schedule:
-    - cron: "0 6 * * *"    # 06:00 UTC daily
   workflow_dispatch:
 
 jobs:

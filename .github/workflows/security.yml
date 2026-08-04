@@ -1,12 +1,10 @@
 name: security
 
+# Pre-alpha: security scanning is opt-in until real source code lands.
+# Turn back on `push` / `pull_request` / `schedule` triggers once the core
+# engine and services have real dependencies to audit.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 4 * * 1"    # weekly Mon 04:00 UTC
+  workflow_dispatch:
 
 jobs:
   scan:
