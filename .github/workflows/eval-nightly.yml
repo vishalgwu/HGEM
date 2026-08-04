@@ -1,0 +1,31 @@
+name: eval-nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"    # 06:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.20"
+      - name: Boot test stack
+        run: docker compose -f infra/docker/docker-compose.test.yml up -d --wait
+      - name: Sync workspace
+        run: uv sync --all-packages --dev
+      - name: Run eval suites
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run python evals/runners/run_suite.py --all --report reports/eval.json
+      - name: Regression diff vs main
+        run: uv run python evals/runners/report.py --diff-against main --input reports/eval.json
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: reports/

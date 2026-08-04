@@ -1,0 +1,52 @@
+name: guardmem-dev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-guardmem}
+      POSTGRES_USER: ${POSTGRES_USER:-guardmem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-guardmem}
+    ports: ["5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-guardmem}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-guardmem}
+      NEO4J_PLUGINS: '["apoc"]'
+    ports: ["7474:7474", "7687:7687"]
+    volumes:
+      - neo4j_data:/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes:
+      - redis_data:/data
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on: [postgres]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-guardmem}:${POSTGRES_PASSWORD:-guardmem}@postgres:5432/${POSTGRES_DB:-guardmem}
+      NEXTAUTH_SECRET: dev-secret
+      SALT: dev-salt
+      NEXTAUTH_URL: http://localhost:3001
+    ports: ["3001:3000"]
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports: ["6006:6006"]
+
+volumes:
+  pg_data: {}
+  neo4j_data: {}
+  redis_data: {}

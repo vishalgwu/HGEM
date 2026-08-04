@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.20"
+      - name: Sync workspace
+        run: uv sync --all-packages --dev
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: mypy (guardmem-core, strict)
+        run: uv run mypy --strict packages/guardmem-core/src
+      - name: Unit tests
+        run: uv run pytest tests/unit -q --cov=packages/guardmem-core --cov-report=xml
+      - name: Coverage gate (guardmem-core >= 85%)
+        run: |
+          uv run python -c "import xml.etree.ElementTree as ET,sys; \
+            r=ET.parse('coverage.xml').getroot(); \
+            rate=float(r.get('line-rate')); \
+            print(f'line-rate={rate:.3f}'); \
+            sys.exit(0 if rate >= 0.85 else 1)"
+      - name: Import contracts
+        run: uv run lint-imports
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.20"
+      - name: Boot test stack
+        run: docker compose -f infra/docker/docker-compose.test.yml up -d --wait
+      - name: Sync workspace
+        run: uv sync --all-packages --dev
+      - name: Integration tests
+        run: uv run pytest tests/integration -q
+
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile || pnpm install
+      - run: pnpm -r typecheck
+      - run: pnpm -r lint
+      - run: pnpm --filter @guardmem/dashboard build
