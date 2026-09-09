@@ -7,6 +7,7 @@ Worker, and MCP Server share one decision engine and one audit trail.
 ```
 guardmem-ai/
 ├── README.md
+├── DAILY_LOG.md                          # created S0.4, written every day (BUILD_NOTEBOOK 0.6)
 ├── LICENSE                              # Apache-2.0 (core) — see licensing note below
 ├── CHANGELOG.md
 ├── SECURITY.md                          # disclosure policy, threat model summary
@@ -20,7 +21,8 @@ guardmem-ai/
 ├── .pre-commit-config.yaml              # ruff, ruff-format, mypy, gitleaks, detect-secrets
 ├── .dockerignore
 │
-├── docs/
+├── docs/                                 # the only tree that exists today
+│   ├── README.md                         # index + spec ownership
 │   ├── PRD.md
 │   ├── ARCHITECTURE.md
 │   ├── RULES.md
@@ -28,6 +30,9 @@ guardmem-ai/
 │   ├── DESIGN_SYSTEM.md
 │   ├── MCP_INTEGRATION.md
 │   ├── PHASES_AND_ROADMAP.md
+│   ├── PROJECT_TREE.md                   # this file
+│   ├── BUILD_NOTEBOOK.md                 # editable master notebook
+│   ├── GuardMem_AI_Master_Build_Notebook.pdf   # frozen original - never edit or delete
 │   ├── adr/                             # architecture decision records
 │   │   ├── 0001-dual-store-vector-plus-graph.md
 │   │   ├── 0002-bitemporal-tombstones-over-hard-delete.md
@@ -38,7 +43,7 @@ guardmem-ai/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
 │   │   └── incident-model-provider-outage.md
-│   └── diagrams/                        # ascii + mermaid sources
+│   └── diagrams/                        # nine exported PNG diagrams
 │
 ├── packages/
 │   ├── guardmem-core/                   # ← the brain. zero web framework deps.
@@ -54,7 +59,14 @@ guardmem-ai/
 │   │       │   ├── verdict.py           # RiskVerdict, ConfidenceReport, Decision
 │   │       │   ├── policy.py            # PolicyPack, Rule, Obligation
 │   │       │   ├── receipt.py           # WriteReceipt, AuditEvent, Provenance
-│   │       │   └── review.py            # ReviewTask, ReviewDecision, Diff
+│   │       │   ├── review.py            # ReviewTask, ReviewDecision, Diff
+│   │       │   └── ontology.py          # Ontology, PredicateSpec - loader + validation
+│   │       ├── prompts/                 # RULES 3: versioned prompts, never inline f-strings
+│   │       │   ├── extract_memories/v1.md
+│   │       │   ├── adjudicate_conflict/v1.md
+│   │       │   └── review_brief/v1.md
+│   │       ├── ontology/                # tenant starter packs, loaded by schemas/ontology.py
+│   │       │   └── {clinical,legal,fintech}.yaml
 │   │       ├── pipeline/                # LAYER 1-3
 │   │       │   ├── orchestrator.py      # MemoryPipeline.run() — the single entrypoint
 │   │       │   ├── l1_extract/
@@ -102,7 +114,8 @@ guardmem-ai/
 │   │       │   ├── tracing.py           # OTel spans, trace_id propagation
 │   │       │   ├── exporters/           # langfuse.py phoenix.py otlp.py
 │   │       │   ├── metrics.py           # prometheus counters/histograms
-│   │       │   └── audit.py             # append-only, hash-chained audit log
+│   │       │   ├── audit.py             # append-only, hash-chained audit log
+│   │       │   └── SPANS.md             # span registry - RULES 6 needs an entry per span
 │   │       └── hitl/
 │   │           ├── queue.py             # priority queue, SLA timers, escalation
 │   │           ├── assignment.py        # reviewer routing by skill/namespace
@@ -136,15 +149,17 @@ guardmem-ai/
 │   │   ├── Dockerfile
 │   │   └── src/worker/
 │   │       ├── main.py
-│   │       ├── tasks/{evaluate.py,compact.py,reindex.py,digest.py,sla_sweeper.py}
+│   │       ├── tasks/{evaluate.py,compact.py,reindex.py,digest.py,sla_sweeper.py,
+│   │       │        outbox_relay.py}
 │   │       └── schedules.py             # cron: nightly GC, hourly drift probe
 │   │
 │   └── mcp_server/                      # stdio + streamable-HTTP transports
 │       ├── Dockerfile
 │       └── src/mcp_server/
 │           ├── server.py
-│           ├── tools/{search.py,propose.py,commit.py,forget.py,audit.py,review.py}
-│           ├── resources/{memory.py,policy.py,audit.py}
+│           ├── tools/{search.py,propose.py,commit.py,get_entity.py,timeline.py,
+│           │        forget.py,policy.py,audit.py,review.py}
+│           ├── resources/{memory.py,policy.py,ontology.py,audit.py}
 │           └── prompts/{extraction.py,adjudication.py,review_brief.py}
 │
 ├── apps/
@@ -182,7 +197,7 @@ guardmem-ai/
 ├── evals/
 │   ├── datasets/
 │   │   ├── longmemeval_subset/          # long-horizon recall
-│   │   ├── contradiction_probe/         # hand-built 400-pair contradiction set
+│   │   ├── contradiction_probe/         # hand-built: 60 pairs at S4.3, grown to 400 by S22.1
 │   │   ├── poisoning_redteam/           # injection + poisoning attempts
 │   │   └── vertical_{clinical,legal,fintech}/
 │   ├── suites/
@@ -192,6 +207,7 @@ guardmem-ai/
 │   │   ├── security.py                  # ASR (attack success rate) on redteam set
 │   │   └── hitl_agreement.py            # Cohen's κ, reviewer-vs-model agreement
 │   ├── runners/{run_suite.py,report.py}
+│   ├── reports/                          # versioned eval reports, <date>.md + .json (S22.1)
 │   └── baselines/                       # mem0 / zep / raw-RAG comparison configs
 │
 ├── bench/
@@ -231,6 +247,10 @@ guardmem-ai/
 | `evals/*` | `guardmem-core`, `guardmem-sdk-python` | `services/*` internals |
 
 **One-way arrow:** `apps → services → packages → stores`. A cycle fails CI (`import-linter` contract in `pyproject.toml`).
+
+**This tree is a blueprint, not a checklist.** Create each file at the step that needs it; do not
+scaffold empty modules ahead of time. An empty module that exists is indistinguishable at a glance
+from a finished one, which is exactly the confusion the build order exists to prevent.
 
 ## Licensing note
 Core engine Apache-2.0. `apps/dashboard` HITL queue + SSO/audit-export modules under BUSL-1.1

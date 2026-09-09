@@ -120,6 +120,11 @@ Four decisions drive everything else:
    compaction.decay → cold-tier / episodic rollup ▸ reindex ▸ drift probe ▸ SLA sweep
 ```
 
+> The decision box above is a **simplification for the flow diagram** — it shows the two extremes and
+> collapses the middle. The normative form is the 4×3 matrix plus seven ordered overrides in
+> `MEMORY_ENGINE.md` §3.4, which uses five thresholds (`τ_lo`, `τ_mid`, `τ_hi`, `ρ_lo`, `ρ_hi`).
+> Implement from that section, not from this diagram.
+
 ### Read path (short)
 
 ```

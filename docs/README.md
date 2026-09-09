@@ -63,6 +63,30 @@ The diagrams illustrate distinct parts of this design:
 | [Review and tuning loop](diagrams/guardmem_hitl_review_tuning_feedback_loop.png) | Design System and Build Notebook Day 20 |
 | [Build roadmap](diagrams/guardmem_build_roadmap_stages_and_checkpoints.png) | Phases and Roadmap and Build Notebook |
 
+## Which document owns what
+
+Every fact below has exactly **one** home. Change it there; everywhere else cites it. This table
+exists because the first review of this suite found the same number stated three different ways in
+three documents — that is how a spec rots.
+
+| Decision | Owner | Everyone else |
+|---|---|---|
+| Scoring math, schemas, thresholds, the decision matrix | [MEMORY_ENGINE.md](MEMORY_ENGINE.md) | cites it; code that disagrees is wrong until an ADR moves it |
+| Product scope, personas, SLAs, quality targets | [PRD.md](PRD.md) | cites §6.1 for latency and §6.2 for quality |
+| Component boundaries, write/read paths, failure behavior | [ARCHITECTURE.md](ARCHITECTURE.md) | §1 diagrams simplify; MEMORY_ENGINE is normative for the decision box |
+| Coding standards, invariants, testing gates, coverage | [RULES.md](RULES.md) | the notebook's Appendix D is a copy, not a second source |
+| Agent-facing tool, resource and prompt contracts | [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | the notebook copies schemas from it verbatim |
+| Dashboard and review-queue interface requirements | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) | design targets live here; *acceptance gates* live in the PRD |
+| Repository layout and dependency direction | [PROJECT_TREE.md](PROJECT_TREE.md) | a blueprint to build into, not files to pre-create |
+| Phase goals, exit gates, deferred scope, risk review | [PHASES_AND_ROADMAP.md](PHASES_AND_ROADMAP.md) | the notebook's week gates point here |
+| Step-by-step build work, per-step "done when", troubleshooting | [BUILD_NOTEBOOK.md](BUILD_NOTEBOOK.md) | the roadmap points here for steps |
+| Rationale for a hard-to-reverse choice | [adr/](adr/) | an ADR is how any of the above legitimately changes |
+
+Two numbers people reach for that are deliberately *not* duplicated: **median review time** is owned
+by `PRD.md` §6.2 (≤ 25 s acceptance gate; `DESIGN_SYSTEM.md` §3.1 sets a tighter 18 s design
+target, which is not a gate), and **coverage** is owned by `RULES.md` §5 (90% on `guardmem-core` at
+release; 85% is the Week-1 interim floor).
+
 ## How to use this baseline
 
 All runtime paths, setup commands, service URLs, package names, deployment examples,
@@ -109,3 +133,55 @@ Git history and any one of them can be restored:
 ```bash
 git checkout 74aa059 -- .gitignore LICENSE
 ```
+
+## Consistency pass
+
+A second pass read all nine documents, the five ADRs, the three runbooks and the master PDF against
+each other and reconciled what they disagreed about. The PDF and `BUILD_NOTEBOOK.md` were confirmed
+to hold the same content; the PDF stays frozen and the Markdown is where corrections go.
+
+Contradictions resolved:
+
+- **The decision matrix had a threshold that did not exist.** `MEMORY_ENGINE.md` §3.4 splits
+  confidence into four bands but named only `τ_lo` and `τ_hi`, leaving the 0.60 boundary as a magic
+  number that `decide()` could not read from settings. Added `τ_mid = 0.60`, relabelled the matrix
+  in threshold terms, stated the half-open band convention, and added `GM_TAU_MID` to the settings
+  object and the notebook's environment-variable appendix.
+- **Median review time was three different numbers** — 18 s in the design system, 20 s in the PRD,
+  25 s in the roadmap and notebook. The PRD now owns it as a ≤ 25 s acceptance gate; the design
+  system keeps 18 s explicitly as a design target rather than a gate.
+- **Coverage read as 85% in four places and 90% in RULES.** RULES now states 90% as the release
+  gate and 85% as the Week-1 interim floor, and the notebook and roadmap say which one they mean.
+- **ADR-0004 contradicted the spec of record three ways:** it gave the default K as 5 (it is 3),
+  described `ρ` as "the reject threshold" (`τ` gates confidence, `ρ` gates blast radius), and listed
+  confidence terms that do not exist in the composite. All three corrected, and its dangling
+  "(ADR pending)" reference now points at `ARCHITECTURE.md` §2.8.
+- **Pinned model ids were stale and malformed.** `claude-sonnet-4-5` and `claude-opus-4-1` are
+  previous-generation; the FAST tier carried a date suffix that is not part of a valid id. Now
+  `claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5`, with a RULES note that current ids are
+  complete as written.
+- **The notebook created a second repository.** S0.3 said `gh repo create guardmem-ai`; this project
+  is HGEM and already exists. S0.3 now restores the `.gitignore` this cleanup removed and verifies
+  the existing checkout, and S0.4 verifies the docs already in place instead of copying them in.
+- **`PROJECT_TREE.md` had no home for things other documents require:** the versioned `prompts/`
+  directory RULES §3 mandates, the ontology loader and starter packs, `observability/SPANS.md`,
+  the outbox relay task, `evals/reports/`, `DAILY_LOG.md`, and the MCP tools for `timeline` and
+  `policy.evaluate`. All added; its `docs/` listing, which named seven files, now matches reality.
+- **ADR-0005 listed a subset of the MCP tool surface.** Aligned with `MCP_INTEGRATION.md` §2.
+- **`PRD.md` FR-1.4 gave the default K as 5**, the same error as ADR-0004; the default is 3, and
+  the full risk-hint ladder now appears there. A `DESIGN_SYSTEM.md` trace mock also labelled a
+  K=5 extraction as FAST tier; K=5 runs on BALANCED.
+
+Duplication removed:
+
+- `PHASES_AND_ROADMAP.md` restated the notebook's day-by-day plan, so a schedule change needed two
+  edits. It now owns phase goals, exit gates, deferred scope and the risk review, and points at the
+  notebook for steps. The two criteria it held that the notebook lacked — a Lighthouse budget and
+  the gateway contract suite — moved into S15.1 and S8.1 before the tables came out.
+- The notebook's four week-gate checklists duplicated the phase exit gates. They now point at the
+  roadmap, and the Week 4 gate, which was missing entirely, was added.
+- The "Which document owns what" table above was added so the next contributor can tell where a
+  change belongs without diffing nine files.
+
+No document was deleted in this pass. The seven markdown files named on the master PDF's cover are
+load-bearing references from a frozen artifact and are kept for that reason alone.

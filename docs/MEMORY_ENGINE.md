@@ -53,7 +53,7 @@ class MemoryCandidate(_M):
     valid_from: datetime | None = None     # world-time the fact became true
     valid_to: datetime | None = None
     provenance: Provenance
-    extracted_by: str                      # "claude-haiku-4-5-20251001"
+    extracted_by: str                      # pinned id, e.g. "claude-haiku-4-5"
     prompt_version: str
     trace_id: str
 
@@ -305,22 +305,32 @@ approve/reject, refit weekly, gated by a κ check before promotion).
 
 ### 3.4 Decision Matrix
 
-Default thresholds (per-namespace, versioned): `τ_lo = 0.45`, `τ_hi = 0.78`, `ρ_lo = 0.35`,
-`ρ_hi = 0.70`.
+Default thresholds (per-namespace, versioned): `τ_lo = 0.45`, `τ_mid = 0.60`, `τ_hi = 0.78`,
+`ρ_lo = 0.35`, `ρ_hi = 0.70`.
+
+The matrix has **four** confidence bands, so it needs **three** confidence thresholds. `τ_mid`
+separates the escalate band from the auto-write-at-low-risk band; without it the 0.60 boundary
+below is a magic number and `decide()` cannot be configured from settings. All five thresholds
+are settings fields (`GM_TAU_LO`, `GM_TAU_MID`, `GM_TAU_HI`, `GM_RHO_LO`, `GM_RHO_HI`) and are
+carried on `thresholds_version`.
 
 ```
-                        R (impact risk)
-                 ≤0.35        0.35–0.70        >0.70
-             ┌────────────┬───────────────┬───────────────┐
-   C ≥ 0.78  │ AUTO_WRITE │ AUTO_WRITE*   │ HITL_REVIEW   │   * only if corroboration ≥ 2
-             ├────────────┼───────────────┼───────────────┤
- 0.60–0.78   │ AUTO_WRITE │ HITL_REVIEW   │ HITL_REVIEW   │
-             ├────────────┼───────────────┼───────────────┤
- 0.45–0.60   │ ESCALATE   │ ESCALATE      │ HITL_REVIEW   │
-             ├────────────┼───────────────┼───────────────┤
-   C < 0.45  │ REJECT     │ REJECT        │ HITL_REVIEW†  │   † CRITICAL impact: a human sees
-             └────────────┴───────────────┴───────────────┘     even the rejections
+                                   R (impact risk)
+                        ≤ ρ_lo      ρ_lo – ρ_hi       > ρ_hi
+                       (≤ 0.35)    (0.35 – 0.70)     (> 0.70)
+                    ┌────────────┬───────────────┬───────────────┐
+ C ≥ τ_hi           │ AUTO_WRITE │ AUTO_WRITE *  │  HITL_REVIEW  │   * only if corroboration ≥ 2
+ (≥ 0.78)           ├────────────┼───────────────┼───────────────┤
+ τ_mid ≤ C < τ_hi   │ AUTO_WRITE │  HITL_REVIEW  │  HITL_REVIEW  │
+ (0.60 – 0.78)      ├────────────┼───────────────┼───────────────┤
+ τ_lo ≤ C < τ_mid   │  ESCALATE  │   ESCALATE    │  HITL_REVIEW  │
+ (0.45 – 0.60)      ├────────────┼───────────────┼───────────────┤
+ C < τ_lo           │   REJECT   │    REJECT     │ HITL_REVIEW † │   † CRITICAL impact: a human
+ (< 0.45)           └────────────┴───────────────┴───────────────┘     sees even the rejections
 ```
+
+Bands are half-open: a band's lower bound is inclusive, its upper bound exclusive. `C` exactly at
+a threshold falls in the higher band. This matters for the totality property test (I4).
 
 Hard overrides applied **after** the matrix (obligations compose, they never relax):
 

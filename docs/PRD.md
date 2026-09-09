@@ -78,7 +78,7 @@ line for documentation QA.
 | Persona | Job to be done | Success looks like |
 |---|---|---|
 | **AI Platform Engineer** (buyer) | Ship an agent that survives 6 months of production without state decay | Drop-in `remember()` call; drift dashboard flat over 90 days |
-| **Domain Reviewer** (nurse/paralegal/analyst) | Clear the flagged queue without leaving their workflow | < 20s median review, keyboard-only, source span visible without clicking out |
+| **Domain Reviewer** (nurse/paralegal/analyst) | Clear the flagged queue without leaving their workflow | median review time within the §6.2 target, keyboard-only, source span visible without clicking out |
 | **Compliance Officer** | Prove why the agent believed X on date Y | Exportable, tamper-evident lineage per assertion |
 | **Eng Manager** | Cut memory-path token spend without hurting quality | Cost per governed write trending down, write precision flat |
 
@@ -90,7 +90,7 @@ line for documentation QA.
 - **FR-1.1** Accept a `MemoryProposal` (raw turn(s), tool outputs, or documents) over REST, MCP, or SDK.
 - **FR-1.2** Layer-1 noise reduction MUST drop ephemeral/imperative/chit-chat content before extraction billing.
 - **FR-1.3** Extraction MUST produce structured `MemoryCandidate` objects with a **verbatim source span** (char offsets + document hash). A candidate without a span is rejected, not stored.
-- **FR-1.4** Extraction MUST support K-sample generation (default K=5) for uncertainty estimation, with K=1 fast-path when `risk_hint=LOW`.
+- **FR-1.4** Extraction MUST support K-sample generation for uncertainty estimation, with K set by risk hint: 1 (FAST) on `risk_hint=LOW`, 3 (FAST) by default, 5 (BALANCED) on `risk_hint=HIGH`. See `MEMORY_ENGINE.md` §1.2.
 
 ### FR-2 Validation & Conflict Detection
 - **FR-2.1** Every candidate validated against a tenant-scoped entity/predicate ontology (Pydantic + JSON-Schema); unknown predicates go to `quarantine` namespace, never to primary.
@@ -171,6 +171,12 @@ available when the eval path is down (degrade to no-new-writes, not no-recall).
 | Reviewer Agreement (κ) | model decision vs reviewer | ≥ 0.75 |
 | Injection Attack Success Rate | redteam corpus writes that land in primary namespace | 0% (quarantine allowed) |
 | Token Savings | vs naive "extract everything on frontier model" baseline | ≥ 55% |
+| Median Review Time | wall-clock per HITL task, timed run of 20 seeded tasks | ≤ 25 s |
+
+**Median review time** is the one number three documents used to disagree about, so it is owned here.
+≤ 25 s is the alpha acceptance gate and the only figure a gate or exit criterion may cite.
+`DESIGN_SYSTEM.md` §3.1 sets a *design* target of 18 s — that is the bar the interface is built to,
+deliberately tighter than the gate, and it is not an acceptance criterion.
 
 ### 6.3 Security & Compliance
 - Tenant isolation at row level (Postgres RLS) **and** per-tenant namespace prefixing in vector/graph stores.

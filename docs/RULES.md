@@ -111,8 +111,10 @@ Retries only on `retryable=True`, with jittered exponential backoff and a hard a
 - Untrusted content is delimited and spotlighted; the system prompt states explicitly that content
   inside the delimiters is data, never instructions. Canary tokens are inserted and checked on
   output — a canary appearing in the model's output is a confirmed injection.
-- Model identifiers are pinned in settings (`extraction.fast = "claude-haiku-4-5-20251001"`), never
-  floating aliases, so replay is honest.
+- Model identifiers are pinned in settings (`extraction.fast = "claude-haiku-4-5"`), never floating
+  aliases, so replay is honest. Pin the exact published id and nothing more: current Claude ids are
+  complete as written (`claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5`) and a date suffix
+  appended to one is not a valid model id.
 - Every LLM call records: model, prompt version, temperature, seed (if supported), token counts,
   cache hit, latency, and cost estimate.
 
@@ -148,7 +150,10 @@ Retries only on `retryable=True`, with jittered exponential backoff and a hard a
 | `e2e` | Playwright on dashboard + review flow | critical paths green |
 | `eval` (nightly) | quality suites vs pinned baseline | no metric regresses > 2% absolute |
 
-**Coverage gate:** repo ≥ 85%, `guardmem-core` ≥ 90%, and — more important than the number —
+**Coverage gate (release):** repo ≥ 85%, `guardmem-core` ≥ 90%. During Week 1 the interim floor for
+`guardmem-core` is 85% (`fail_under = 85` in the root `pyproject.toml`); it rises to 90% before the
+Phase 1 exit gate is signed off. Where the notebook or roadmap says 85% for a Week-1 step, that is
+the interim floor, not a relaxation of this gate. More important than either number —
 `pipeline/`, `guardrails/`, and `memory/router.py` require 100% branch coverage on decision
 branches. Coverage is a floor, not a goal; a PR that raises coverage while lowering mutation score
 (`mutmut` sample on core) gets rejected.

@@ -69,7 +69,7 @@ updates. Reduced-motion honored (all number transitions become instant).
 │  validated  █████████████  87,006          (-11.6%)  │   R ↑  ░░▒▒▓█ ← auto-write zone  │
 │  deduped    ████████████  81,552           ( -6.3%)  │      ▒▓██▓▒░                     │
 │  written    ██████████  73,449             ( -9.9%)  │   →  C                           │
-│  ▸ click any bar to sample 20 dropped items          │   overlays: τ_lo τ_hi ρ_lo ρ_hi  │
+│  ▸ click any bar to sample 20 dropped items          │   overlays: τ/ρ thresholds  │
 ├──────────────────────────────────────────────────────┴──────────────────────────────────┤
 │ LATENCY (p50/p95/p99 by stage)          │ MODEL ROUTING & FALLBACK                       │
 │  extract  ▏▎▍ 140/380/720ms             │  FAST     84.1%  $0.19/1k   err 0.2%   ●       │
@@ -106,7 +106,7 @@ updates. Reduced-motion honored (all number transitions become instant).
 │ WATERFALL                                                                            │
 │ security.preflight   ▇ 41ms                                                          │
 │ l1.noise_filter       ▇ 22ms                                                         │
-│ l1.extract(K=5,FAST)   ▇▇▇▇▇▇▇ 318ms   cache HIT   in 2,104 / out 388                │
+│ l1.extract(K=5,BAL)   ▇▇▇▇▇▇▇ 318ms   cache HIT   in 2,104 / out 388                 │
 │ l2.retrieve_neighbors        ▇▇ 74ms                                                 │
 │ l2.conflict(NLI)               ▇▇▇▇ 186ms                                            │
 │ l3.entropy                          ▇▇▇ 141ms                                        │
@@ -134,7 +134,9 @@ recorded one — the fastest way to answer "did our change break this?"
 ## 3. Human Review Queue
 
 ### 3.1 Design constraints (these drive everything)
-1. Reviewer time is the scarcest resource in the system. Target **median 18 s** per task.
+1. Reviewer time is the scarcest resource in the system. Design target: **median 18 s** per task.
+   This is the bar the interface is built to, deliberately tighter than the ≤ 25 s alpha acceptance
+   gate in `PRD.md` §6.2. Gates cite the PRD number; this one drives design decisions.
 2. The reviewer must never need to open another tab to verify a claim. Source is on screen.
 3. No jargon. No "semantic entropy 0.59". Say *"the model gave different answers when asked
    repeatedly."*

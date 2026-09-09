@@ -12,9 +12,10 @@ next three frameworks is a treadmill.
 ## Decision
 
 The primary interface for agent runtimes is **MCP** — Model Context Protocol.
-`services/mcp_server` exposes `memory.search`, `memory.propose`,
-`memory.commit`, `memory.forget`, `audit.*`, and `review.*` as MCP tools,
-plus policy + provenance as MCP resources.
+`services/mcp_server` exposes `memory.search`, `memory.propose`, `memory.commit`,
+`memory.get_entity`, `memory.timeline`, `memory.forget`, `policy.evaluate`,
+`audit.*`, and `review.*` as MCP tools, plus policy, ontology, and provenance as
+MCP resources. The full contract is `MCP_INTEGRATION.md` §2–§4.
 
 Framework-specific middleware (`packages/guardmem-sdk-python/middleware/*`)
 is thin — it maps that framework's memory hook onto the MCP tool calls.

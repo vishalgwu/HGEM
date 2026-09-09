@@ -193,35 +193,45 @@ DONE WHEN: all keys are pasted into a password manager, and none of them are in 
 
 TIME: 10 min
 
+**The repository already exists.** This project lives in `HGEM`, which currently holds `docs/` and
+nothing else. Do not create a second repo - build the tree inside this one.
+
 DO:
 ```bash
-mkdir guardmem-ai && cd guardmem-ai
-git init -b main
-gh repo create guardmem-ai --private --source=. --remote=origin
+cd /path/to/HGEM
+git status                      # expect: on main, clean, docs/ only
+
+# the docs reset removed .gitignore; restore it before the first build artifact appears
 
 printf '.venv/\n__pycache__/\n.env\n.env.*\n!.env.example\nnode_modules/\n.next/\n.data/\n*.pyc\n.coverage\nhtmlcov/\n.ruff_cache/\n.mypy_cache/\ndist/\n' > .gitignore
-git add .gitignore && git commit -m "chore: initial commit"
-git push -u origin main
+git add .gitignore && git commit -m "chore(s0.3): restore gitignore before the build starts"
+git push
 ```
 
 Then on GitHub: Settings -> Branches -> protect `main`, require PR + status checks.
 
-DONE WHEN: `git push` works and `main` is protected.
+DONE WHEN: `.gitignore` is committed, `git push` works, and `main` is protected. Create a venv and
+confirm `git status` is still clean before moving on - a tracked `.venv/` is tedious to remove
+later.
 
 ## S0.4 -- Copy the design docs in
 
 TIME: 5 min
 
+**The design suite is already in `docs/`.** Verify it rather than copying it in.
+
 DO:
 ```bash
-mkdir -p docs/adr docs/runbooks
-# copy PRD.md ARCHITECTURE.md RULES.md MEMORY_ENGINE.md DESIGN_SYSTEM.md
-#      MCP_INTEGRATION.md PHASES_AND_ROADMAP.md BUILD_NOTEBOOK.md into docs/
+ls docs/                                   # 9 markdown docs + the master PDF
+ls docs/adr docs/runbooks docs/diagrams    # 5 ADRs, 3 runbooks, 9 diagrams
+
 touch DAILY_LOG.md
-git add . && git commit -m "docs: add design suite and build notebook"
+git add DAILY_LOG.md && git commit -m "docs(s0.4): start the daily log"
 ```
 
-DONE WHEN: `docs/` holds all eight documents and they are pushed.
+DONE WHEN: `docs/` holds the nine markdown documents plus the master PDF, and `DAILY_LOG.md` exists
+at the repo root. Read `docs/README.md` first - it says which document owns which decision, so you
+know where a change belongs before you make one.
 
 WHY THIS MATTERS: from here on, when you prompt Claude Code, you point it at these files. That is
 what keeps a 28-day build coherent instead of drifting into eight different architectures.
@@ -447,11 +457,12 @@ GM_NEO4J_USER=neo4j
 GM_NEO4J_PASSWORD=guardmem123
 GM_ANTHROPIC_API_KEY=
 GM_OPENAI_API_KEY=
-GM_MODEL_FAST=claude-haiku-4-5-20251001
-GM_MODEL_BALANCED=claude-sonnet-4-5
-GM_MODEL_FRONTIER=claude-opus-4-1
+GM_MODEL_FAST=claude-haiku-4-5
+GM_MODEL_BALANCED=claude-sonnet-5
+GM_MODEL_FRONTIER=claude-opus-5
 GM_EMBED_MODEL=text-embedding-3-large
 GM_TAU_LO=0.45
+GM_TAU_MID=0.60
 GM_TAU_HI=0.78
 GM_RHO_LO=0.35
 GM_RHO_HI=0.70
@@ -482,6 +493,7 @@ class Settings(BaseSettings):
     embed_model: str
 
     tau_lo: float = Field(0.45, ge=0, le=1)
+    tau_mid: float = Field(0.60, ge=0, le=1)
     tau_hi: float = Field(0.78, ge=0, le=1)
     rho_lo: float = Field(0.35, ge=0, le=1)
     rho_hi: float = Field(0.70, ge=0, le=1)
@@ -494,8 +506,16 @@ class Settings(BaseSettings):
 settings = Settings()   # import this, do not construct it again
 ```
 
+The decision matrix has four confidence bands, so it needs three confidence thresholds. `tau_mid`
+is the 0.60 boundary in MEMORY_ENGINE 3.4 - without it that number is hard-coded inside `decide()`
+and the matrix cannot be tuned per namespace.
+
+Model ids are the exact published strings. Do not append a date suffix to a current Claude id;
+`claude-haiku-4-5-20251001` is not a valid model.
+
 DONE WHEN: `uv run python -c "from guardmem_core.settings import settings; print(settings.tau_hi)"`
-prints `0.78`, and deleting a required var from `.env` makes it fail loudly at import.
+prints `0.78`, a validator rejects thresholds supplied out of order (`tau_lo < tau_mid < tau_hi`),
+and deleting a required var from `.env` makes it fail loudly at import.
 
 COMMIT: `feat(s1.4): typed settings`
 
@@ -995,7 +1015,9 @@ WHERE: `pipeline/l3_score/decision.py`
 TIME: 60 min
 
 Pure function. No I/O, no clock, no randomness. Apply the matrix, then the seven hard overrides in
-order.
+order. The matrix reads five thresholds - `tau_lo`, `tau_mid`, `tau_hi`, `rho_lo`, `rho_hi` - all
+passed in as a `Thresholds` value, never read from settings inside the function. Bands are
+half-open: a `C` exactly on a boundary belongs to the higher band.
 
 DONE WHEN:
 - hypothesis property test: `decide()` is total over C,R in [0,1]^2 and deterministic (invariant I4)
@@ -1214,8 +1236,9 @@ Config flag `GM_GRAPH_BACKEND=neo4j|networkx`.
 DONE WHEN: the full integration suite passes against both backends unchanged.
 
 ### S7.2 -- Coverage push and gap fixing
-TIME: 90 min. Get `guardmem-core` to >= 85%. Look specifically at error branches — they are what
-you skipped.
+TIME: 90 min. Get `guardmem-core` to >= 85%. That is the **Week-1 interim floor**; RULES 5 sets the
+release gate at 90%, and the gap closes before Phase 1 is signed off. Look specifically at error
+branches - they are what you skipped.
 
 ### S7.3 -- MCP contract tests
 TIME: 45 min. Validate every tool's inputSchema/outputSchema with jsonschema; assert no drift.
@@ -1223,12 +1246,12 @@ TIME: 45 min. Validate every tool's inputSchema/outputSchema with jsonschema; as
 ### S7.4 -- Week 1 retro
 TIME: 30 min. Write the DAILY_LOG entry. Answer honestly: does the scoring separate good from bad?
 
-WEEK 1 EXIT GATE (all must be true):
-- [ ] Claude Desktop -> propose -> decide -> write -> search, with provenance
-- [ ] contradictory fact supersedes with tombstone + audit event
-- [ ] `replay_trace.py` reproduces decisions identically
-- [ ] no unsourced write is possible (property test + DB constraint)
-- [ ] core coverage >= 85%, `make lint typecheck test` green
+WEEK 1 EXIT GATE: the Phase 1 checklist in PHASES_AND_ROADMAP.md section 1, which owns it. In
+short: Claude Desktop round-trip with provenance, supersession with tombstone and audit event,
+deterministic replay, no unsourced write possible, Checkpoint B signed off, coverage at the gate,
+suite green. Do not start week 2 with a box unticked — every week after this one assumes all of it.
+
+Note on coverage: >= 85% is the Week-1 interim floor, and RULES 5 sets the release gate at 90%.
 
 ---
 
@@ -1250,7 +1273,8 @@ Lifespan creates: Postgres pool, Redis pool, one `httpx.AsyncClient` per provide
 Routers: `health`, `memory`, `review`, `policy`, `audit`, `telemetry`.
 Routers contain no logic — validate, call one core function, shape response (RULES 2.4).
 
-DONE WHEN: `uvicorn gateway.main:app` serves `/healthz` and `/docs` shows the OpenAPI schema.
+DONE WHEN: `uvicorn gateway.main:app` serves `/healthz`, `/docs` shows the OpenAPI schema, and the
+schemathesis contract suite runs green against the published spec (RULES 5, `contract` suite).
 COMMIT: `feat(s8.1): fastapi gateway skeleton`
 
 ### S8.2 -- Auth, tenancy, RLS context
@@ -1426,12 +1450,10 @@ inclusion/exclusion list emitted into the trace.
 DONE WHEN: `memory.search` with `token_budget=800` returns under budget and explains what it cut.
 COMMIT: `feat(s14.3): token-budgeted context packer`
 
-WEEK 2 EXIT GATE:
-- [ ] latency SLAs met under 50 rps (measured, written into DAILY_LOG)
-- [ ] every failure mode in ARCHITECTURE section 4 has a passing chaos test
-- [ ] injection ASR into primary namespace: 0%
-- [ ] blended cost per governed candidate measured and under $0.0009
-- [ ] one trace visible in Langfuse, Phoenix, and Prometheus
+WEEK 2 EXIT GATE: the Phase 2 checklist in PHASES_AND_ROADMAP.md section 2, which owns it. In
+short: latency SLAs met under 50 rps, a passing chaos test per ARCHITECTURE section 4 failure mode,
+injection ASR 0% into primary, measured cost under $0.0009, one trace consistent across all three
+observability backends. Write the measured numbers into DAILY_LOG as you take them.
 
 ---
 
@@ -1452,7 +1474,8 @@ pnpm add @tanstack/react-query recharts d3 lucide-react
 ```
 Put the tokens from DESIGN_SYSTEM.md 1.1 into `globals.css` and map them into the Tailwind theme.
 Never write a raw hex in a component.
-DONE WHEN: a token-only test page renders both palettes (control-panel dark, review-queue light).
+DONE WHEN: a token-only test page renders both palettes (control-panel dark, review-queue light),
+and Lighthouse scores >= 90 on that page.
 COMMIT: `feat(s15.1): dashboard scaffold and design tokens`
 
 ### S15.2 -- BFF route handlers and auth session
@@ -1581,11 +1604,10 @@ tasks by keyboard.
 DONE WHEN: e2e green in CI.
 COMMIT: `test(s21.3): playwright e2e for both surfaces`
 
-WEEK 3 EXIT GATE:
-- [ ] median review time under 25 s over 20 timed seeded tasks
-- [ ] reviewer decisions visibly feed the tuner; kappa reported
-- [ ] "why was this flagged" answerable in <= 2 clicks
-- [ ] axe clean, e2e green
+WEEK 3 EXIT GATE: the Phase 3 checklist in PHASES_AND_ROADMAP.md section 3, which owns it. In
+short: median review time inside the PRD 6.2 target over 20 timed seeded tasks, reviewer decisions
+feeding the tuner with kappa reported, "why was this flagged" answerable in two clicks, funnel
+counts reconciling with the audit log, axe clean and e2e green.
 
 ---
 
@@ -1704,7 +1726,14 @@ DONE WHEN: a stranger reproduces your headline numbers without asking you a ques
 This is the real definition of done.
 
 ### S28.4 -- Final ADRs and public eval report
-TIME: 45 min. Five ADRs from PROJECT_TREE.md, plus the eval report with a stated limitations section.
+TIME: 45 min. Review the five ADRs in docs/adr/ against what actually got built and add one for any
+substantive design change made during the month, plus the eval report with a stated limitations
+section.
+
+WEEK 4 EXIT GATE: the Phase 4 checklist in PHASES_AND_ROADMAP.md section 4, which owns it. In
+short: deployed and load-tested with measured SLAs replacing the PRD targets, an eval report with
+baselines and limitations, the nightly regression gate proven by a deliberate regression, and a
+cold-start run from a clean clone.
 
 ---
 
@@ -1758,7 +1787,7 @@ D28 readme, demo video, cold-start verification, adrs
 | `GM_OPENAI_API_KEY` | S9.1 | fallback provider |
 | `GM_MODEL_FAST/BALANCED/FRONTIER` | S1.4 | pinned model ids, never aliases |
 | `GM_EMBED_MODEL` | S3.2 | embedding model |
-| `GM_TAU_LO/TAU_HI/RHO_LO/RHO_HI` | S1.4 | decision thresholds |
+| `GM_TAU_LO/TAU_MID/TAU_HI/RHO_LO/RHO_HI` | S1.4 | decision thresholds (MEMORY_ENGINE 3.4) |
 | `GM_DEFAULT_K` | S1.4 | extraction samples |
 | `GM_MAX_CONCURRENT_SCORES` | S1.4 | semaphore bound |
 | `GM_LLM_TIMEOUT_S` / `GM_STORE_TIMEOUT_S` | S1.4 | mandatory timeouts (RULES 2.2) |
@@ -1786,6 +1815,8 @@ D28 readme, demo video, cold-start verification, adrs
 | Evals | numbers reproduce within 2% across runs on a clean clone |
 
 ## D. The seven invariants (tape these to the wall)
+
+Copied verbatim from `RULES.md` section 5, which owns them. If they ever differ, RULES is right.
 
 ```
 I1  every AUTO_WRITE assertion has a non-null source_span
