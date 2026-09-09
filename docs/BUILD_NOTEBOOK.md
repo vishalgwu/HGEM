@@ -946,6 +946,9 @@ def semantic_entropy(samples: list[str], entail: EntailFn) -> float:
 DONE WHEN: the worked example in MEMORY_ENGINE.md 3.1 reproduces `H_norm = 0.590` to 3 decimals.
 That exact assertion goes in the test file.
 
+Also drop a candidate that lands in zero clusters containing sample 0's meaning: that is a
+minority hallucination, and it is worth the fiddly code because it removes a real failure class.
+
 NOTE: this is the same machinery as LID's semantic-entropy detector. Keep `EntailFn` as an injected
 callable so LID can back it later without touching this module.
 
@@ -961,6 +964,9 @@ TIME: 50 min
 Implement `C = w_H(1-H) + w_g S_src + w_s S_sch + w_c S_cor + w_k S_con` with the v1 weights.
 Store the weights version string on every `ConfidenceReport` — you will change these weights and
 need to know which decisions used which.
+
+v1 weights are 0.35 / 0.25 / 0.10 / 0.15 / 0.15. Check `S_cor = 1 - exp(-0.8*(n_sources - 1))`
+returns 0.0 / 0.55 / 0.80 / 0.91 for 1 / 2 / 3 / 4 sources.
 
 DONE WHEN: unit tests pin each term independently; a test asserts weights sum to 1.0.
 
@@ -1041,9 +1047,99 @@ DONE WHEN: `uv run python scripts/replay_trace.py <trace_id>` prints "identical"
 
 COMMIT: `feat(s5.6): pipeline orchestrator and deterministic replay`
 
-END OF DAY 5 CHECK: this is the milestone that matters. Text in, audited decision out.
-If scoring cannot separate your hand-labelled good and bad candidates (AUROC < 0.75 on 200 items),
-stop and fix it before writing another line of the gateway.
+### Do NOT do in this stage
+
+- Do not add I/O to `decide()`. Not a settings read, not a clock call, not a feature flag lookup.
+- Do not tune weights or thresholds to make a test pass. Thresholds are inputs; tests pin behavior
+  at a given threshold, they do not discover it.
+- Do not make the audit write asynchronous or best-effort.
+- Do not skip the minority-cluster drop in S5.1 because it is fiddly.
+
+---
+
+## CHECKPOINT B — the pipeline works (make or break)
+
+After Day 5. About 60 minutes. This is the most important gate in the project.
+
+Everything after this point -- gateway, guardrails, dashboard, HITL, evals, deploy -- assumes the
+scoring can tell good candidates from bad ones. If it cannot, you are about to spend three weeks
+building operations tooling for a system that does not work. Learn that now. Day 5 is cheap.
+Day 25 is not.
+
+### Automated checks
+
+```bash
+make lint && make typecheck && make test-all
+uv run pytest tests/property/ -v          # I1, I2, I3, I4 must all be green
+uv run pytest tests/unit/test_i5_audit.py -v
+uv run python scripts/replay_trace.py <a-recent-trace-id>   # must print "identical"
+uv run pytest --cov=guardmem_core --cov-report=term-missing | tail -20
+```
+
+### The discrimination test (the actual gate)
+
+Not optional, and not replaceable by unit tests.
+
+1. Take 200 candidates from the seed transcript.
+2. A human labels each one good (should be stored) or bad (should not). About two hours.
+   No model grading.
+3. Run the pipeline. Collect `C` for each.
+4. Compute AUROC of `C` against the human labels.
+
+```
+AUROC >= 0.80   -> PASS. Proceed to Day 6.
+AUROC 0.75-0.80 -> MARGINAL. Proceed, but record it and revisit when thresholds are tuned.
+AUROC < 0.75    -> FAIL. Stop. Do not build the gateway.
+```
+
+If it fails, diagnose in this order rather than adding features:
+
+1. Is entropy doing anything? Compute AUROC of `1 - H_norm` alone. If entropy alone beats the
+   composite, the weights are wrong and the other terms are adding noise.
+2. Is grounding doing anything? AUROC of `S_src` alone. If it is near 0.5, the span linker is
+   matching too loosely; tighten the fuzzy threshold above 92.
+3. Are the labels consistent? Have the human re-label 30 items blind. If they disagree with
+   themselves more than 10% of the time, the task is underspecified and the ontology needs work
+   before the scorer does.
+4. Is K too small? Try K=5 on the whole set. If AUROC jumps, the cost ladder needs adjusting,
+   not the formula.
+
+Ship the simplest thing that discriminates. Entropy alone is a respectable baseline; a working
+single-signal scorer beats an elegant composite that does not separate.
+
+### Manual verification
+
+| # | Check | How to verify |
+|---|---|---|
+| B1 | Worked entropy example reproduces H_norm = 0.590 | the test asserts it to 3 decimals |
+| B2 | Critical-impact candidate with C=0.99 still gets R >= 0.80 | the S5.3 test |
+| B3 | `decide()` has no I/O | read the function; no awaits, no settings reads, no clock |
+| B4 | Escalation cannot recurse | test with `already_escalated=True` |
+| B5 | Audit write is in the same transaction as the state change | read the path; look for a commit between them |
+| B6 | Tampering with an audit row is detected at the exact break point | the S5.5 test |
+| B7 | Replay produces an identical decision | run it on three different traces |
+| B8 | Every matrix cell and every override has a test | count: 12 cells + 7 overrides = 19 cases |
+
+### Failure modes this gate catches
+
+- A scorer that produces plausible numbers with no discriminative power. This is the default
+  outcome of implementing a formula correctly without ever validating it, and it is invisible
+  to unit tests.
+- `decide()` reading settings at call time, which makes replay lie.
+- Audit written after the commit, which makes the chain unfalsifiable.
+- Overrides applied in the wrong order, so a stricter obligation gets relaxed by a later one.
+
+### Sign-off
+
+```
+CHECKPOINT B: PASS / MARGINAL / FAIL
+Date:
+AUROC:              (n=200, human-labelled)
+AUROC entropy-only:
+Coverage:           %
+Decision:
+Notes:
+```
 
 ---
 
