@@ -226,6 +226,122 @@ run, so the target can pass honestly rather than tolerating exit 5.
 
 ---
 
+## 2026-09-10 — Day 1 · environment rebuild (S1.1 re-verified)
+
+Tore the virtual environment down to nothing and rebuilt it from the documented
+cold start, to prove S1.1 reproduces rather than merely persists.
+
+**Shipped**
+
+- **Teardown.** Deleted `.venv` outright — 48,176 files, 1.63 GB. Checked first
+  that it was gitignored with zero tracked files, so nothing unreproducible was
+  at risk.
+- **Rebuild, exactly as README documents it:** `uv venv --python 3.12 --prompt
+  HGEM --seed .venv` → `uv pip install -r requirements.lock.txt` (311) →
+  `uv pip install -e packages/guardmem-core` → `python -m spacy download
+  en_core_web_lg`.
+- **The rebuild reproduces the old environment exactly.** 313/313 packages at
+  identical versions, Python 3.12.12, `_editable_impl_guardmem_core.pth` present,
+  `spacy.load('en_core_web_lg')` returns a 6-pipe model. The 313 reconciles as
+  311 (lock, pip included) + `guardmem-core` (editable) + `en_core_web_lg` (not
+  on PyPI).
+- **S1.1 DONE WHEN re-confirmed** on the fresh env: `uv run python -c "import
+  guardmem_core"` — python prints nothing, exit 0.
+- **7/7 gates green:** ruff check, ruff format --check, mypy --strict,
+  lint-imports, pytest, detect-secrets, pip-audit.
+- **Negative-tested both import gates** rather than trusting a green tick. With
+  `import fastapi` appended to `__init__.py`, `lint-imports` exits 1 naming
+  `guardmem_core -> fastapi (l.7)`, and the runtime contract test fails with
+  `['fastapi', 'starlette']` — the transitive `starlette` being exactly what the
+  static contract cannot see. Restored to HEAD; tree clean.
+
+**What broke / what I learned**
+
+- **The two dependency artifacts have drifted, and they now actively fight each
+  other.** Day 1 recorded them as agreeing "today" with the decision deferred to
+  S1.2. They no longer agree:
+
+  | Source | testcontainers |
+  |---|---|
+  | `requirements.lock.txt` and `requirements/dev.txt` | `4.13.3` (exact pin) |
+  | `uv.lock`, resolved from the `>=4.8` floor in `pyproject.toml` | `4.15.0` |
+
+  Caught in the act: right after the rebuild the env held 4.13.3, and the very
+  next `uv run` printed `Uninstalled 1 package / Installed 1 package` and left
+  4.15.0 behind. So `uv run` — which is what the S1.2 `Makefile` uses for
+  `make test` — silently re-syncs to `uv.lock`, while README's install path puts
+  the pin back. The environment is bistable and whichever command ran last wins.
+  Nothing errors, which is what makes it worth writing down.
+
+  Left at 4.15.0, the post-`uv run` state, because that is what any `make test`
+  will converge on. **This is the S1.2 decision, now with evidence:** either
+  generate `requirements/` from `uv export`, or pin the dev group in
+  `pyproject.toml` so `uv.lock` agrees. Picking one is a real trade — the
+  curated `requirements/` files carry a step citation per entry, and a
+  machine-generated export throws that away.
+
+- **`import-linter`'s cache produced a false FAIL, and can just as easily
+  produce a false PASS.** After the negative test above, `lint-imports` kept
+  reporting `guardmem_core -> fastapi (l.7)` against a source tree with no
+  `fastapi` anywhere and an empty `git diff`. `.import_linter_cache/` held the
+  violating parse verbatim. Grimp keys that cache on file **mtime**, and the
+  restore (`cp` to a backup, `mv` it back) gave the file an mtime *older* than
+  the cached entry, so the cache was never invalidated. `rm -rf
+  .import_linter_cache` and it passes. The direction that actually matters is
+  the inverse: the same mechanism will happily serve a stale PASS over a file
+  restored by `git checkout`, which is a gate silently not gating. Added
+  `.import_linter_cache/` to `.gitignore` with that note — it was previously
+  ignored only by the `*` Grimp writes inside the directory itself, which is the
+  same "third-party tool's internals doing our repo hygiene" problem already
+  fixed for `.pytest_cache/`. Worth a `rm -rf` of tool caches in the S1.2 CI job
+  rather than trusting cache invalidation.
+
+- **`lint-imports` exits 1 whenever its stdout goes to `/dev/null` on Windows.**
+  Not a contract failure — the contract is green. `import-linter` renders a
+  `:brick: Building graph...` spinner through `rich`; with stdout at `/dev/null`
+  rich takes its `legacy_windows_render` path, which encodes via **cp1252** and
+  raises `UnicodeEncodeError: 'charmap' codec can't encode characters in
+  position 0-2`. Redirect to a real file, pipe to `cat`, or run it plainly and
+  it exits 0 every time. `PYTHONIOENCODING=utf-8` fixes it; `NO_COLOR=1` does
+  not. This is a landmine for S1.2: the moment `lint-imports` goes into the
+  `Makefile` or CI behind any `>/dev/null`, it becomes a gate that fails for a
+  reason having nothing to do with imports — on Windows only, so CI on Linux
+  would stay green and the local run would not. Set `PYTHONIOENCODING=utf-8` in
+  the `Makefile` and the workflow env.
+
+- **Reproduced the cold-start break deliberately.** Between the lock install and
+  the editable install, `import guardmem_core` raised `ModuleNotFoundError` —
+  the exact failure the debug pass fixed in the docs. It is a useful reminder
+  that `[tool.uv.sources]` says where to *resolve* a package, never to install
+  it, and that the S1.1 text as originally written could not pass its own
+  acceptance check.
+
+- **The step as originally written is still the dangerous version.** It says run
+  `uv sync`. Against a populated env that removes ~300 of 313 packages. Not run;
+  the corrected S1.1 in `BUILD_NOTEBOOK.md` is what was built.
+
+**Still open**
+
+- The `testcontainers` split above — decide at S1.2.
+- Branch protection on `main` (S0.3) — needs GitHub Settings; no `gh` CLI here.
+- API keys still blank in `.env`. Anthropic needed Day 2; OpenAI needed Day 3
+  for embeddings.
+- Two doc corrections outstanding: `docs/README.md` still says the repo
+  "contains only `docs/`" and still claims the PDF and `BUILD_NOTEBOOK.md` hold
+  the same content. The PDF was re-checked this session — SHA-256 still
+  `D4E49FEF…57CD`, and it has zero occurrences of "Checkpoint" or `tau_mid`,
+  so the claim is measurably false. Root `README.md`'s layout block also omits
+  `packages/` and `tests/`.
+
+**Tomorrow's first step**
+
+`S1.2` — pre-commit, Makefile, CI skeleton. Bring the `.pre-commit-config.yaml`
+pins up to what is installed (ruff 0.7.0 → 0.16.6, mypy 1.13.0 → 2.3.1), and
+settle the `requirements/` vs `uv.lock` split before `make test` bakes `uv run`
+into the daily loop.
+
+---
+
 <!--
 Template for the next entry:
 

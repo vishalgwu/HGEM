@@ -19,6 +19,14 @@ dist/
 .pytest_cache/
 .hypothesis/
 .uv-cache/
+# Grimp writes its own `.gitignore` containing `*` inside this directory, so it
+# is already ignored in practice - but that is the tool's internals doing our
+# repo hygiene, which is the same reason .pytest_cache/ is listed above.
+# Worth knowing: this cache is keyed on file mtime, so restoring a file with an
+# OLDER mtime (a `mv` of a backup, a `git checkout` of a prior revision) leaves
+# Grimp serving the previous result. That produces a false FAIL, and equally a
+# false PASS. Delete the directory when lint-imports disagrees with the source.
+.import_linter_cache/
 
 # --- Coverage & test output --------------------------------------------------
 .coverage
