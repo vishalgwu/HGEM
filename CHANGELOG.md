@@ -17,6 +17,12 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.1 — uv workspace.** Root `pyproject.toml` configuring the workspace,
+  ruff, mypy, pytest, coverage and import-linter; `packages/guardmem-core` with
+  its own `pyproject.toml` and `src/guardmem_core/__init__.py`; the six `tests/`
+  directories; `.python-version` pinned to 3.12; `uv.lock` (49 packages). The
+  first import-linter contract is live and verified to fail on a violation:
+  `guardmem_core` may not import fastapi, starlette, uvicorn, mcp or arq.
 - Python 3.12 dependency set, collected from the design suite and pinned:
   layered `requirements/` files (69 direct packages, each citing the build step
   or spec clause that requires it) plus `requirements.lock.txt`, the fully
@@ -33,6 +39,15 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **Four defects in `BUILD_NOTEBOOK.md` S1.1**, corrected in the notebook itself
+  as its closing rule requires. The step told you to run `uv sync`, which is
+  exact and would have uninstalled ~300 of the 311 installed packages; its
+  acceptance check `uv run python -c "import guardmem_core"` could not pass,
+  because `[tool.uv.sources]` says where to resolve a package but does not
+  install it without a matching `dependencies` entry; it lacked
+  `extend-exclude = ["docs"]`, so current ruff would reformat Python code blocks
+  inside the design documents; and it omitted the `import-linter` contracts and
+  `branch = true` coverage that `RULES.md` §2.4 and §5 both require.
 - **`arq` / `redis` version conflict.** `arq` 0.28.0 constrains `redis<6`;
   resolving the dependency groups independently lands redis on 8.x, which
   silently drags the worker queue back to `arq` 0.25.0 with no error. Pinned

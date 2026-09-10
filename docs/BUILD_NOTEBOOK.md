@@ -260,6 +260,7 @@ DO — create `pyproject.toml` at the root:
 name = "guardmem-workspace"
 version = "0.1.0"
 requires-python = ">=3.12"
+dependencies = ["guardmem-core"]   # required, see note below
 
 [tool.uv.workspace]
 members = ["packages/*", "services/*"]
@@ -267,9 +268,14 @@ members = ["packages/*", "services/*"]
 [tool.uv.sources]
 guardmem-core = { workspace = true }
 
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-asyncio>=1.0", "pytest-cov>=5.0", "hypothesis>=6.112",
+       "mypy>=1.13", "ruff>=0.7", "testcontainers>=4.8", "respx>=0.21", "import-linter>=2.0"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["docs"]          # required, see note below
 [tool.ruff.lint]
 select = ["E","F","I","N","UP","B","C4","ASYNC","S","T20","SIM","RUF","C901"]
 ignore = ["S101"]          # assert is fine in tests
@@ -287,10 +293,41 @@ asyncio_mode = "auto"
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+branch = true                      # RULES 5 requires branch coverage, not line
+source = ["packages/guardmem-core/src"]
+
 [tool.coverage.report]
 fail_under = 85
 show_missing = true
+
+[tool.importlinter]                # RULES 2.4 + PROJECT_TREE require this
+root_packages = ["guardmem_core"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "guardmem-core imports no web framework"
+type = "forbidden"
+source_modules = ["guardmem_core"]
+forbidden_modules = ["fastapi", "starlette", "uvicorn", "mcp", "arq"]
 ```
+
+**Four corrections to this step, found by building it.** The version above already
+includes them; this is why they are there.
+
+1. **`dependencies = ["guardmem-core"]` on the root project is required.**
+   `[tool.uv.sources]` only says *where* to resolve the package from — it does not
+   pull it in. Without the dependency, nothing installs it and the DONE WHEN check
+   below fails with `ModuleNotFoundError`.
+2. **`extend-exclude = ["docs"]` is required.** Current ruff formats Python code
+   blocks *inside* Markdown. Without the exclusion, `ruff format --check .` fails on
+   the design suite and `ruff format .` silently rewrites it — it collapses the
+   aligned `NewType` block in S1.5, among others.
+3. **`[tool.importlinter]` and `[tool.coverage.run] branch`** were required by
+   `RULES.md` §2.4 and §5 but never specified here.
+4. **Pin the interpreter.** `requires-python = ">=3.12"` lets uv resolve against
+   3.13. Write `3.12` into a `.python-version` file at the repo root so the lock and
+   the venv agree with `target-version = "py312"`.
 
 ```bash
 mkdir -p packages/guardmem-core/src/guardmem_core
@@ -313,15 +350,33 @@ build-backend = "hatchling.build"
 ```
 
 ```bash
-uv sync
-uv add --dev pytest pytest-asyncio pytest-cov hypothesis mypy ruff testcontainers respx
+printf '3.12\n' > .python-version
+uv lock                                        # writes uv.lock, does NOT touch .venv
+uv pip install -e packages/guardmem-core       # editable, additive
 ```
+
+> **Do not run bare `uv sync` in this repo.** `uv sync` is *exact*: it uninstalls
+> every package not in the lock. Run against the environment built from
+> `requirements-dev.txt` it removes ~300 of 311 packages — fastapi, presidio,
+> phoenix, the whole dev toolchain — and says nothing about it beyond a list of
+> `-` lines. `uv run` is *inexact* and safe: it installs what is missing and
+> leaves extras alone. Both behaviours verified on uv 0.9.8.
+>
+> The dev tools the original step installed with `uv add --dev` are already
+> declared in `[dependency-groups]` above and pinned in `requirements/dev.txt`.
 
 PROMPT:
 > "Read docs/RULES.md. Create the uv workspace exactly as specified in BUILD_NOTEBOOK step S1.1,
 > with a guardmem-core package containing an empty `__init__.py`. Do not add any other files."
 
 DONE WHEN: `uv run python -c "import guardmem_core"` prints nothing and exits 0.
+(uv itself may print sync progress on stderr; it is the *python* command that must
+print nothing.) Also confirm `ruff check .`, `ruff format --check .`,
+`mypy packages/guardmem-core/src` and `lint-imports` all exit 0.
+
+WATCH OUT: `pytest` exits **5** ("no tests collected") until the first test exists,
+so a naive `make test` target fails at S1.2 on a repo with no tests. Either ship
+S1.2 with its first real test or have the target tolerate exit 5.
 
 COMMIT: `chore(s1.1): uv workspace and tooling config`
 

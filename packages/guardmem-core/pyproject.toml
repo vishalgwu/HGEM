@@ -1,0 +1,29 @@
+[project]
+name = "guardmem-core"
+version = "0.1.0"
+description = "GuardMem AI decision engine - extraction, validation, scoring, decision, audit."
+requires-python = ">=3.12"
+# ARCHITECTURE.md 2.2: this package runs identically in the gateway (strict
+# mode), the worker (async mode) and the eval harness, which is why it carries
+# no web-framework dependency. PROJECT_TREE.md pins that as a hard rule and the
+# import-linter contract in the root pyproject.toml enforces it.
+#
+# These are exactly the dependencies S1.1 calls for. Two more are listed under
+# requirements/base.txt as part of this package's eventual runtime and enter
+# here at the step that first needs them:
+#     pyyaml    S3.5  ontology loader + S12.2 policy packs
+#     tenacity  S9.3  jittered backoff on retryable errors
+# Adding them now would be scaffolding a dependency ahead of its use.
+dependencies = [
+  "pydantic>=2.9",
+  "pydantic-settings>=2.5",
+  "httpx>=0.27",
+  "structlog>=24.4",
+  "anyio>=4.6",
+  "numpy>=2.1",
+  "rapidfuzz>=3.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,141 @@
+[project]
+name = "guardmem-workspace"
+version = "0.1.0"
+requires-python = ">=3.12"
+# The workspace root depends on guardmem-core so that it is actually installed
+# into the environment. `[tool.uv.sources]` below only says WHERE to resolve the
+# package from - it does not pull it in on its own. Without this line the S1.1
+# acceptance check, `uv run python -c "import guardmem_core"`, fails with
+# ModuleNotFoundError.
+dependencies = ["guardmem-core"]
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.uv.sources]
+guardmem-core = { workspace = true }
+
+# Dev toolchain (BUILD_NOTEBOOK.md S1.1). Version floors live here; exact pins
+# live in uv.lock and in requirements/dev.txt. See the note at the bottom of
+# this file about those two coexisting.
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=5.0",
+  "hypothesis>=6.112",
+  "mypy>=1.13",
+  "ruff>=0.7",
+  "testcontainers>=4.8",
+  "respx>=0.21",
+  "import-linter>=2.0",
+]
+
+# ---------------------------------------------------------------------------
+# ruff - lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+# docs/ is specification prose, not source. Modern ruff formats Python code
+# blocks *inside* Markdown, so without this exclusion `make lint` fails on the
+# design suite and `ruff format .` silently rewrites it - collapsing the aligned
+# NewType block in BUILD_NOTEBOOK.md S1.5, among others. The specs are the
+# source of truth for the code, not the other way round.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E","F","I","N","UP","B","C4","ASYNC","S","T20","SIM","RUF","C901"]
+ignore = ["S101"]          # assert is fine in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "T20"]
+
+# RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
+# 10, but relying on a tool default for a documented engineering gate is how
+# gates quietly change under you.
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# RULES.md 2.2 and 2.3 name two "custom ruff rules", GM001 (`except: pass`
+# around a guardrail) and GM002 (an outbound call with no timeout). Ruff has no
+# plugin system, so no such custom rule can exist - but both are already covered
+# by stock rules that the `S` and `ASYNC` selectors above enable:
+#     GM001  ->  S110  try-except-pass        (+ E722 bare-except)
+#     GM002  ->  S113  request-without-timeout
+# Verified present in ruff 0.16.6. Do not write custom rules for these.
+
+# ---------------------------------------------------------------------------
+# mypy - strict on the core package
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# coverage
+# ---------------------------------------------------------------------------
+# fail_under is 85, the Week-1 interim floor. RULES.md 5 sets the release gate
+# at 90 on guardmem-core, and this number rises before the Phase 1 exit gate is
+# signed off. branch = true is not optional: RULES.md 5 requires 100% BRANCH
+# coverage on the decision branches in pipeline/, guardrails/ and
+# memory/router.py, which line coverage alone cannot measure.
+[tool.coverage.run]
+branch = true
+source = ["packages/guardmem-core/src"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+# ---------------------------------------------------------------------------
+# import-linter - dependency direction
+# ---------------------------------------------------------------------------
+# PROJECT_TREE.md "Ownership & Dependency Rules" and RULES.md 2.4 both require
+# these contracts; S1.1 never actually specified them. Only the contracts that
+# are meaningful today are declared - the layered contract (apps -> services ->
+# packages -> stores) arrives when services/ and apps/ do.
+[tool.importlinter]
+root_packages = ["guardmem_core"]
+# Required whenever a contract forbids modules outside the root packages.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "guardmem-core imports no web framework"
+type = "forbidden"
+source_modules = ["guardmem_core"]
+forbidden_modules = ["fastapi", "starlette", "uvicorn", "mcp", "arq"]
+
+# ---------------------------------------------------------------------------
+# A note on pyproject vs requirements/
+# ---------------------------------------------------------------------------
+# Two dependency artifacts exist in this repo and they serve different jobs:
+#
+#   pyproject.toml + uv.lock   authoritative for the workspace packages. Ranges
+#                              here, exact pins in the lock. This is what
+#                              RULES.md 2 means by "uv for env/lock".
+#   requirements/*.txt         the human-readable inventory, where every entry
+#                              cites the step or spec clause that requires it,
+#                              plus requirements.lock.txt for a plain
+#                              pip-compatible install.
+#
+# They will drift if nobody watches them. Revisit at S1.2 and decide whether to
+# generate requirements/ from `uv export` rather than maintaining both by hand.
+#
+# WARNING - do not run bare `uv sync` in this repo yet. `uv sync` is exact: it
+# removes every package not in the lock, which today would uninstall roughly 300
+# of the 311 packages installed from requirements-dev.txt (fastapi, presidio,
+# phoenix, the whole dev toolchain). `uv run` is inexact and safe - it installs
+# what is missing and leaves extras alone. Verified both behaviours on
+# uv 0.9.8 before writing this.
