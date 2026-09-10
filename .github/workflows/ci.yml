@@ -1,0 +1,122 @@
+# CI - BUILD_NOTEBOOK.md S1.2
+#
+# Runs the same gates a developer runs locally, through the same Makefile
+# targets. That is the point: if CI invoked `ruff`/`mypy`/`pytest` directly, the
+# Makefile could drift from CI and nobody would notice until a green local run
+# failed here. `make lint && make typecheck && make test` is also the literal
+# S1.2 acceptance check.
+#
+# Two jobs, because they answer different questions:
+#   gates  - does the code pass lint, types and tests?
+#   hooks  - does the pre-commit config itself work, and is the tree free of
+#            secrets? RULES.md 4 requires gitleaks AND detect-secrets in
+#            pre-commit *and* CI, and this is where the CI half is satisfied.
+#            The heavier scans (trivy, semgrep, pip-audit) get their own
+#            security.yml at the step that introduces them - PROJECT_TREE.md.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Least privilege: nothing here writes to the repo.
+permissions:
+  contents: read
+
+# A new push to the same ref makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same reason as the Makefile: keep tool output encoding identical across
+  # platforms so a gate never fails for an encoding reason.
+  PYTHONIOENCODING: utf-8
+  # Fail instead of silently reaching for a different interpreter.
+  UV_PYTHON_DOWNLOADS: automatic
+
+jobs:
+  gates:
+    name: lint / typecheck / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pinned for the same reason model ids are pinned in RULES.md 3 - a
+          # floating toolchain makes a green build unreproducible. Matches the
+          # uv recorded in DAILY_LOG.
+          version: "0.9.8"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        # Reads .python-version, which pins 3.12 so the lock, the venv and
+        # ruff's target-version all agree.
+        run: uv python install
+
+      - name: Install the workspace
+        # `uv sync` is EXACT - it installs precisely the lock and nothing else.
+        # pyproject.toml warns against running it locally, where it would
+        # uninstall ~300 packages that come from requirements.lock.txt. That
+        # warning does not apply here: this environment is created fresh on
+        # every run, so there is nothing to destroy, and exactness is what makes
+        # the build reproducible.
+        #
+        # `--locked` is the gate: it fails if uv.lock is out of date with
+        # pyproject.toml, so a dependency edit that was never re-locked cannot
+        # merge.
+        run: uv sync --locked --dev
+
+      - name: Lint
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Test
+        run: make test
+
+  hooks:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        # Full history: gitleaks is far more useful when it can see more than
+        # the tip commit.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.8"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.12
+        run: uv python install
+
+      - name: Install the workspace
+        run: uv sync --locked --dev
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: pre-commit-${{ runner.os }}-
+
+      - name: Run every hook
+        run: uv run pre-commit run --all-files --show-diff-on-failure

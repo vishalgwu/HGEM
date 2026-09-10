@@ -387,41 +387,115 @@ COMMIT: `chore(s1.1): uv workspace and tooling config`
 TIME: 30 min
 WHY: if the gates are not in place on day 1, you will not add them on day 15.
 
-DO — `.pre-commit-config.yaml`:
+DO — `.pre-commit-config.yaml`. Pin the revs to the versions actually installed,
+not the ones below; see correction 1.
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.0
-    hooks: [{id: ruff, args: [--fix]}, {id: ruff-format}]
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
-    hooks: [{id: mypy, additional_dependencies: [pydantic]}]
+    rev: v0.16.6
+    hooks: [{id: ruff-check, args: [--fix]}, {id: ruff-format}]
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.0
+    rev: v8.30.1
     hooks: [{id: gitleaks}]
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks: [{id: detect-secrets, args: ["--baseline", ".secrets.baseline"]}]
+  - repo: local          # mypy + import-linter run the PROJECT toolchain
+    hooks:
+      - {id: mypy, name: mypy --strict, entry: uv run mypy packages/guardmem-core/src,
+         language: system, pass_filenames: false, require_serial: true}
+      - {id: lint-imports, name: import-linter, entry: uv run lint-imports,
+         language: system, pass_filenames: false, require_serial: true}
 ```
 
-`Makefile`:
+`Makefile` — `.DEFAULT_GOAL := help`, plus `export PYTHONIOENCODING := utf-8`
+and these targets:
 ```make
-.PHONY: dev down test lint typecheck seed eval migrate
-dev:       ; docker compose -f infra/docker/docker-compose.dev.yml up -d
-down:      ; docker compose -f infra/docker/docker-compose.dev.yml down
-test:      ; uv run pytest tests/unit tests/property --cov=guardmem_core
-test-all:  ; uv run pytest --cov=guardmem_core
-lint:      ; uv run ruff check . && uv run ruff format --check .
+lint:      ; uv run ruff check . && uv run ruff format --check . && uv run lint-imports
 typecheck: ; uv run mypy packages/guardmem-core/src
-migrate:   ; uv run alembic upgrade head
-seed:      ; uv run python scripts/seed_demo_tenant.py
-eval:      ; uv run python evals/runners/run_suite.py --all
+test:      ; uv run pytest tests/unit tests/property --cov
+test-all:  ; uv run pytest --cov
+hooks:     ; uv run pre-commit install
+fmt:       ; uv run ruff check . --fix && uv run ruff format .
+audit:     ; uv run pip-audit
+clean:     ; # delete .ruff_cache .mypy_cache .pytest_cache .import_linter_cache ...
+dev:       ; docker compose -f infra/docker/docker-compose.dev.yml up -d   # S1.3
+down:      ; docker compose -f infra/docker/docker-compose.dev.yml down    # S1.3
+migrate:   ; uv run alembic upgrade head                                   # S3.1
+seed:      ; uv run python scripts/seed_demo_tenant.py                     # S3.6
+eval:      ; uv run python evals/runners/run_suite.py --all                # S22.1
 ```
 
-`.github/workflows/ci.yml`: run `lint`, `typecheck`, `test` on push and PR, Python 3.12, cache uv.
+`.github/workflows/ci.yml`: two jobs on push and PR — `gates` running `make lint`,
+`make typecheck`, `make test`; and `hooks` running `pre-commit run --all-files`,
+which is where RULES §4's "gitleaks and detect-secrets in CI" is satisfied. Both
+install with `uv sync --locked --dev` and cache on `uv.lock`. Set
+`permissions: contents: read` and a `concurrency` group that cancels superseded runs.
 
 ```bash
-uv run pre-commit install
+make hooks     # or: uv run pre-commit install
 ```
 
-DONE WHEN: `make lint && make typecheck && make test` all pass on an empty repo, and the CI badge
+**Eight corrections to this step, found by building it.** The version above
+already includes them.
+
+1. **Every pinned rev was stale, and one hook id is deprecated.** S1.2 pinned
+   ruff `v0.7.0`, mypy `v1.13.0` and gitleaks `v8.21.0`; this repo resolved ruff
+   0.16.6 and mypy 2.3.1 on Day 0, and gitleaks is now `v8.30.1`. A hook that
+   lints with a different ruff than `make lint` is a gate that greenlights code
+   CI rejects. Pin the ruff-pre-commit rev to the *same* version as the ruff in
+   `requirements/dev.txt`. Also `id: ruff` now reports as "ruff (legacy alias)";
+   the current id is `ruff-check`.
+2. **`mirrors-mypy` cannot typecheck this package.** It installs mypy into an
+   isolated virtualenv that sees only `additional_dependencies`, which S1.2 gives
+   as `[pydantic]` — while `guardmem-core` already depends on pydantic-settings,
+   httpx, structlog, anyio, numpy and rapidfuzz. As soon as real code imports one,
+   the hook fails on missing stubs while `make typecheck` passes. Run the project's
+   own mypy through a `local` hook so the hook, the Makefile and CI are one command.
+3. **detect-secrets was missing.** RULES §4 requires "gitleaks + detect-secrets in
+   pre-commit and CI"; S1.2 listed only gitleaks. `.secrets.baseline` already exists
+   from S0.2 for exactly this hook. Exclude the lock files — they are a wall of
+   hashes and yield only false positives.
+4. **`--cov=guardmem_core` makes coverage lie.** Naming the package on the command
+   line when `source_pkgs` is already set in `pyproject.toml` makes coverage resolve
+   it *after* import, which emits `CoverageWarning: module-not-measured` and drops
+   real code from the report. Use bare `--cov`. RULES §5 leans on this number.
+5. **`lint` must include `lint-imports`.** RULES §2.4 makes the dependency-direction
+   contract a gate. Left out of `lint`, the DONE WHEN below passes without ever
+   running it.
+6. **`export PYTHONIOENCODING := utf-8` is required.** `lint-imports` renders a
+   spinner through `rich`; on Windows, when stdout is not a console, rich falls back
+   to a legacy writer that encodes via cp1252 and raises `UnicodeEncodeError` on the
+   emoji. The gate then exits 1 for a reason unrelated to imports — and only on
+   Windows, so CI stays green while the local run fails.
+7. **The ruff exclusion has to cover every `.md`, not just `docs/`.** `ruff-format`
+   declares `types_or: [python, pyi, jupyter, markdown]`, so pre-commit hands it
+   Markdown, and both hooks run `--force-exclude` so the config still applies.
+   With only `extend-exclude = ["docs"]`, the hook reformats Python code blocks in
+   the ROOT markdown — README, DAILY_LOG, CHANGELOG, CONTRIBUTING. Illustrative
+   code in prose is often deliberately not canonical; a snippet showing what *not*
+   to do has to stay wrong. Use `extend-exclude = ["docs", "*.md"]`.
+8. **Makefile recipes must be portable to `cmd.exe`.** GNU Make on Windows falls
+   back to cmd.exe when it cannot resolve a shell, so `[ -f x ]`, `||`, subshells
+   and single quotes are out; `&&` is fine. Parentheses in an unquoted `@echo` are
+   a syntax error under `sh` — `make help` exits 2. Anything needing real logic
+   goes to `python -c` with arguments passed via argv, which behaves the same on
+   both. Note also that `sh` collapses unquoted runs of spaces, so column-aligned
+   help text is not portable; write `name - description` instead.
+
+WATCH OUT: **S0.1 assumes macOS.** `make` is not installed on Windows and does not
+ship with Git for Windows. `winget install ezwinports.make` gives GNU Make 4.4.1
+with no MSYS dependency; it lands in `%LOCALAPPDATA%\Microsoft\WinGet\Packages\...`
+and is added to the user PATH, so restart the shell before `make` resolves.
+
+Note on CI and `uv sync`: `pyproject.toml` warns never to run bare `uv sync`, and
+locally that is right — it is exact and would uninstall ~300 packages installed
+from `requirements.lock.txt`. CI is the exception and uses it deliberately: the
+environment is created fresh on every run so there is nothing to destroy, and
+`--locked` additionally fails the build when `uv.lock` is stale against
+`pyproject.toml`, so a dependency edit that was never re-locked cannot merge.
+
+DONE WHEN: `make lint && make typecheck && make test` all pass, and the CI badge
 goes green on a pushed branch.
 
 COMMIT: `chore(s1.2): pre-commit, makefile, ci`

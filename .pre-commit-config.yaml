@@ -1,0 +1,92 @@
+# Pre-commit gates - BUILD_NOTEBOOK.md S1.2
+#
+# "If the gates are not in place on day 1, you will not add them on day 15."
+#
+# Three deviations from S1.2 as written, each deliberate:
+#
+# 1. REVISIONS ARE CURRENT, NOT THE ONES IN THE NOTEBOOK. S1.2 pins ruff v0.7.0,
+#    mypy v1.13.0 and gitleaks v8.21.0. This repo resolved ruff 0.16.6 and mypy
+#    2.3.1 on Day 0, and gitleaks is now v8.30.1. Pinning the notebook's values
+#    would mean the hook and the CLI disagree about what passes - a lint gate
+#    that greenlights code `make lint` rejects is worse than no gate. The ruff
+#    rev below is deliberately the same version as the pinned ruff in
+#    requirements/dev.txt and pyproject.toml's dev group. Bump all three
+#    together or not at all.
+#
+# 2. mypy AND import-linter RUN AS `local` HOOKS, NOT `mirrors-mypy`.
+#    mirrors-mypy installs mypy into its own isolated virtualenv, so it only
+#    sees what `additional_dependencies` lists - S1.2 lists `[pydantic]` alone,
+#    while guardmem-core already depends on pydantic-settings, httpx, structlog,
+#    anyio, numpy and rapidfuzz. The moment real code imports any of those, the
+#    hook fails on missing stubs while `make typecheck` passes, and the two
+#    drift permanently. Running the project's own mypy means the hook, `make
+#    typecheck` and CI are the same command against the same interpreter.
+#    import-linter is here for the same reason and because RULES.md 2.4 makes
+#    the dependency-direction contract a gate, not a suggestion.
+#
+# 3. detect-secrets IS ADDED. RULES.md 4 requires "gitleaks + detect-secrets in
+#    pre-commit and CI" - S1.2 lists only gitleaks. `.secrets.baseline` already
+#    exists from S0.2 precisely so this hook can pass.
+#
+# Install with `make hooks` (or `uv run pre-commit install`).
+
+minimum_pre_commit_version: "4.0.0"
+
+default_language_version:
+  python: python3.12
+
+repos:
+  # --- format + lint -------------------------------------------------------
+  # `ruff-check`, not `ruff`. S1.2 says `id: ruff`, which this version still
+  # accepts but reports as "ruff (legacy alias)"; the two have identical entry
+  # points today and there is no reason to adopt a deprecated id on day one.
+  #
+  # The `extend-exclude` in pyproject.toml IS load-bearing here, contrary to
+  # what you might assume from a "Python linter". `ruff-format` declares
+  # `types_or: [python, pyi, jupyter, markdown]`, so pre-commit hands it every
+  # Markdown file, and both hooks run `--force-exclude` precisely so the
+  # exclusion still applies to explicitly-passed paths. Without `*.md` in that
+  # exclusion the hook rewrites Python code blocks inside the prose - which for
+  # a spec-driven repo means the specification gets edited by the formatter.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # --- secret scanning (RULES.md 4) ----------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        # The lock files are a wall of hashes; scanning them yields only false
+        # positives, and they contain no credentials by construction.
+        exclude: ^(requirements\.lock\.txt|uv\.lock|\.secrets\.baseline)$
+
+  # --- type + architecture gates (project toolchain, not an isolated env) ---
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy --strict (guardmem-core)
+        entry: uv run mypy packages/guardmem-core/src
+        language: system
+        pass_filenames: false
+        require_serial: true
+        # Also trigger on pyproject.toml: the strictness settings live there, so
+        # a config change can break typing without any .py file changing.
+        files: ^(packages/guardmem-core/src/.*\.py|pyproject\.toml)$
+
+      - id: lint-imports
+        name: import-linter contracts (RULES.md 2.4)
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(packages/.*\.py|pyproject\.toml)$

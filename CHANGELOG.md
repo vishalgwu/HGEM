@@ -17,6 +17,20 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.2 — gates.** `.pre-commit-config.yaml` (ruff-check, ruff-format,
+  gitleaks, detect-secrets, and mypy + import-linter as `local` hooks running the
+  project toolchain); a `Makefile` whose `help` is the default goal and whose
+  `lint` target includes the import-linter contracts; and
+  `.github/workflows/ci.yml` with a `gates` job running `make lint/typecheck/test`
+  and a `hooks` job running `pre-commit run --all-files`, which is where
+  `docs/RULES.md` §4's requirement for gitleaks and detect-secrets *in CI* is met.
+  Both jobs install with `uv sync --locked --dev`, so a dependency edit that was
+  never re-locked cannot merge.
+- **`tests/unit/test_dependency_consistency.py`** — four tests making the
+  two-lockfile invariant enforceable rather than aspirational: no package may
+  disagree between `uv.lock` and `requirements.lock.txt`; `uv.lock` must remain a
+  subset of it; every dev-group entry must be an exact `==` pin; and the dev group
+  must match `requirements/dev.txt`.
 - **S1.1 — uv workspace.** Root `pyproject.toml` configuring the workspace,
   ruff, mypy, pytest, coverage and import-linter; `packages/guardmem-core` with
   its own `pyproject.toml` and `src/guardmem_core/__init__.py`; the six `tests/`
@@ -39,6 +53,25 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **Eight defects in `BUILD_NOTEBOOK.md` S1.2**, corrected in the notebook in the
+  same commit. Every pinned hook revision was stale and `id: ruff` is now a
+  deprecated alias; `mirrors-mypy` typechecks in an isolated environment that
+  cannot see six of `guardmem-core`'s seven dependencies; detect-secrets was
+  missing despite RULES §4; `--cov=guardmem_core` makes coverage report
+  `module-not-measured` and silently stop measuring; `lint` omitted the
+  import-linter contracts that RULES §2.4 makes a gate; `PYTHONIOENCODING=utf-8`
+  is required or `lint-imports` exits 1 on Windows for an encoding reason;
+  `extend-exclude` must cover every `.md`, not only `docs/`; and Makefile recipes
+  must avoid shell metacharacters to survive `cmd.exe`.
+- **The two dependency artifacts no longer drift.** The `[dependency-groups] dev`
+  block carries exact pins mirroring `requirements/dev.txt`, so `uv lock` cannot
+  resolve away from the requirements files. Verified by three consecutive
+  `uv run` calls leaving testcontainers at 4.13.3 and redis at 5.3.1.
+- **`ruff format` no longer rewrites Python inside root Markdown.** The Day 1
+  `extend-exclude = ["docs"]` protected the design suite but left `README.md`,
+  `DAILY_LOG.md`, `CHANGELOG.md`, `CONTRIBUTING.md` and `SECURITY.md` exposed,
+  because `ruff-format` declares `types_or: [..., markdown]` and the hooks run
+  `--force-exclude`. Now `extend-exclude = ["docs", "*.md"]`.
 - **Four defects in `BUILD_NOTEBOOK.md` S1.1**, corrected in the notebook itself
   as its closing rule requires. The step told you to run `uv sync`, which is
   exact and would have uninstalled ~300 of the 311 installed packages; its
@@ -64,11 +97,9 @@ repository; the log records what happened while changing it.
   states the PDF and `BUILD_NOTEBOOK.md` "hold the same content"; that sentence
   is inaccurate. **Build from the Markdown.** The PDF is protected and must not
   be edited — corrections go in `BUILD_NOTEBOOK.md`.
-- **Pinned tool versions in the notebook have drifted a major release.** S1.2
-  pins ruff `v0.7.0` and mypy `v1.13.0` in `.pre-commit-config.yaml`; current
-  resolution gives ruff 0.16.6 and mypy 2.3.1, and `pytest-asyncio` went 0.x to
-  1.x with configuration changes. Re-check `asyncio_mode = "auto"` when S1.2 is
-  built.
+- **The CI badge is unverified.** `README.md` now carries one, and the workflow
+  structure plus `uv lock --check` were validated locally, but GitHub Actions has
+  not executed a run yet.
 - Branch protection on `main` is not yet enabled (`BUILD_NOTEBOOK.md` S0.3).
 
 ## Project history

@@ -1,5 +1,7 @@
 # GuardMem AI
 
+[![CI](https://github.com/vishalgwu/HGEM/actions/workflows/ci.yml/badge.svg)](https://github.com/vishalgwu/HGEM/actions/workflows/ci.yml)
+
 **A memory governance gateway for long-running AI agents.**
 
 > **Status: pre-implementation.** This repository currently contains the design
@@ -65,7 +67,11 @@ Four stances drive the rest of the design:
 
 ```
 docs/              the design suite - start here
+packages/          guardmem-core, the decision engine
+tests/             unit / integration / contract / property / security
 requirements/      layered, pinned Python dependencies
+.github/workflows/ CI gates
+Makefile           the developer entry points - run `make` for the list
 .env.example       environment template
 ```
 
@@ -108,12 +114,17 @@ python -m spacy download en_core_web_lg      # presidio needs this; ~400 MB
 cp .env.example .env                         # then paste your API keys into .env
 ```
 
-Verify the result — this is the same check CI will run:
+Install the git hooks, then verify — these are the same gates CI runs:
 
 ```bash
-python -c "import guardmem_core"             # must exit 0
-pytest                                        # must pass
+make hooks                                   # pre-commit, once per clone
+make lint && make typecheck && make test     # all three must pass
 ```
+
+`make` on Windows: it is not installed by default and does not ship with Git for
+Windows. `winget install ezwinports.make` gives GNU Make 4.4.1 with no MSYS
+dependency; restart your shell afterwards so the PATH change takes effect. Run
+`make` with no target for the full list.
 
 The second install line is not optional and is easy to skip. `requirements.lock.txt`
 pins only third-party packages; `guardmem_core` lives in this repo and is
@@ -137,8 +148,11 @@ arrives at build step S1.3 as `infra/docker/docker-compose.dev.yml`.
 
 ## Status
 
-Implementation has not started. The repository was reset to a documentation
-baseline on 2026-09-09, and the build begins at `BUILD_NOTEBOOK.md` step S1.1.
+The engine is not implemented yet. The repository was reset to a documentation
+baseline on 2026-09-09; `BUILD_NOTEBOOK.md` steps S1.1 (uv workspace) and S1.2
+(pre-commit, Makefile, CI) are done, so the toolchain and the gates are real
+while `guardmem_core` is still an empty package. The next step is S1.3, the
+local datastore stack.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

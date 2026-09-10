@@ -342,6 +342,115 @@ into the daily loop.
 
 ---
 
+## 2026-09-10 — Day 1 · S1.2 (pre-commit, Makefile, CI)
+
+**Shipped**
+
+- **`.pre-commit-config.yaml`** — ruff-check + ruff-format, gitleaks,
+  detect-secrets, and mypy + import-linter as `local` hooks. All six pass on
+  `--all-files`. pre-commit bootstrapped a Go toolchain for gitleaks on its own,
+  which was the risk I expected to have to work around and did not.
+- **`Makefile`** — `help` (default), `hooks`, `fmt`, `lint`, `imports`,
+  `typecheck`, `test`, `test-all`, `audit`, `clean`, plus `dev`/`down`/`migrate`/
+  `seed`/`eval` for the steps that create their inputs.
+- **`.github/workflows/ci.yml`** — two jobs. `gates` runs `make lint`,
+  `make typecheck`, `make test`; `hooks` runs `pre-commit run --all-files`, which
+  is where RULES §4's "gitleaks and detect-secrets in CI" is actually satisfied.
+  Both install with `uv sync --locked --dev`, cached on `uv.lock`,
+  `permissions: contents: read`, concurrency cancels superseded runs.
+- **`tests/unit/test_dependency_consistency.py`** — four tests that make the
+  two-locks invariant enforceable instead of aspirational: no version may
+  disagree between `uv.lock` and `requirements.lock.txt`, `uv.lock` must stay a
+  subset of it, every dev-group entry must be an exact `==` pin, and the dev
+  group must match `requirements/dev.txt`.
+- **Installed GNU Make 4.4.1** (`winget install ezwinports.make`). It is not on
+  Windows by default and does not ship with Git for Windows, so the S1.2
+  acceptance check was unrunnable locally before this.
+- **S1.2 DONE WHEN passes:** `make lint && make typecheck && make test`, chained
+  exit 0, 6 tests. `docs/BUILD_NOTEBOOK.md` S1.2 rewritten with all eight
+  corrections, as its own closing rule requires.
+
+**Decisions taken**
+
+- **The dependency split is settled: keep both artifacts, pin both.** The dev
+  group in `pyproject.toml` now carries exact `==` pins mirroring
+  `requirements/dev.txt`, so `uv lock` cannot resolve away from it. Verified: three
+  consecutive `uv run` calls now leave testcontainers at 4.13.3 and redis at 5.3.1,
+  matching the pip lock. The bistability recorded yesterday is gone. The
+  alternative — generating `requirements/` from `uv export` — was rejected because
+  it would discard the per-entry citation of the step or RULES clause that
+  justifies each package, which is the thing that makes that file worth reading.
+
+**What broke / what I learned**
+
+- **Pinning the dev group nearly undid the Day 0 `arq` decision.** Mirroring
+  `requirements/dev.txt` exactly meant writing
+  `testcontainers[postgres,neo4j,redis]`, and the `redis` extra resolved redis to
+  **8.1.0** — while `requirements/stores.txt` pins **5.3.1** on purpose, because
+  `arq` 0.28.0 constrains `redis<6`. `uv sync --dry-run` showed it plainly:
+  `- redis==5.3.1 / + redis==8.1.0`. Fixing one drift had introduced another, in
+  the same commit. Dropped the extras: no test runs a container today, and the
+  extras belong in the commit that first does. This is why the new consistency
+  test asserts the *subset* property and not just version agreement — version
+  agreement alone would not have caught it.
+
+- **`--cov=guardmem_core` makes coverage quietly wrong.** The notebook's `make
+  test` names the package on the command line while `source_pkgs` already declares
+  it in `pyproject.toml`. That combination emits `CoverageWarning:
+  module-not-measured` and drops the module from measurement. Harmless at zero
+  statements, which is exactly why it would have gone unnoticed until there was
+  real code and a 90% gate depending on the number. Bare `--cov` is clean; isolated
+  by running both forms side by side.
+
+- **The `extend-exclude = ["docs"]` fix from Day 1 was half a fix.** `ruff-format`
+  declares `types_or: [python, pyi, jupyter, markdown]`, so pre-commit hands it
+  every Markdown file, and both ruff hooks run `--force-exclude` so the config
+  applies even to explicitly-passed paths. `docs/` was protected; the ROOT markdown
+  — README, DAILY_LOG, CHANGELOG, CONTRIBUTING, SECURITY — was not. Proved it with
+  a deliberately misformatted `python` block: rewritten at the root, skipped under
+  `docs/`. No root file has a python fence today, which is the only reason it had
+  not bitten. Now `extend-exclude = ["docs", "*.md"]`, and `ruff format .` went
+  from considering 8 files to 3. Illustrative code in prose is often deliberately
+  wrong — a snippet showing what not to do has to stay that way.
+
+- **`mirrors-mypy` could not have worked here.** It typechecks in an isolated
+  virtualenv seeing only `additional_dependencies`, which S1.2 gives as
+  `[pydantic]`; `guardmem-core` already declares six more. The hook would start
+  failing on missing stubs the moment real code imports one, while `make typecheck`
+  passed — two different answers to the same question. Both mypy and import-linter
+  are `local` hooks running the project toolchain, so hook, Makefile and CI are one
+  command.
+
+- **`id: ruff` is a deprecated alias.** The installed hook set reports it as
+  "ruff (legacy alias)"; `ruff-check` is current. Read the cached
+  `.pre-commit-hooks.yaml` rather than guessing — which is also how the markdown
+  `types_or` above turned up.
+
+- **My own Makefile had the bug its header warns about.** Unquoted parentheses in
+  the `help` recipe are a `sh` syntax error, and `make help` exited 2 on the first
+  run. Quoting would fix `sh` and break `cmd.exe`, which prints the quotes. Also
+  `sh` collapses unquoted runs of spaces, so column-aligned help is not portable at
+  all — the entries read `name - description` now, which degrades cleanly.
+
+**Still open**
+
+- Branch protection on `main` (S0.3) — needs GitHub Settings; no `gh` CLI here.
+- API keys still blank in `.env`. Anthropic needed Day 2; OpenAI Day 3.
+- The CI badge in `README.md` is unverified until this branch is pushed and
+  Actions runs for the first time. Workflow structure and `uv lock --check` were
+  validated locally, but no run has executed.
+- `docs/README.md` still says the repo "contains only `docs/`" and still claims
+  the master PDF and `BUILD_NOTEBOOK.md` hold the same content. Both were false
+  yesterday and are more false now.
+
+**Tomorrow's first step**
+
+`S1.3` — the docker-compose dev stack: Postgres+pgvector, Redis, Neo4j, Langfuse,
+Phoenix. `make dev` already points at
+`infra/docker/docker-compose.dev.yml`; that step creates it.
+
+---
+
 <!--
 Template for the next entry:
 

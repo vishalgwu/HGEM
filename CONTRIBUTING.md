@@ -1,10 +1,12 @@
 # Contributing to GuardMem AI
 
-> **Status: pre-implementation.** The build has not started. Most gates below
-> become enforceable at the step that creates them — `make lint` needs the
-> Makefile from S1.2, coverage needs code to cover. They are written down now
-> because, as `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the gates are not in place
-> on day 1, you will not add them on day 15."*
+> **Status: pre-implementation.** `guardmem_core` is still an empty package, but
+> the gates around it are real as of S1.2 — `make lint`, `make typecheck`,
+> `make test`, the pre-commit hooks and CI all run today. The suite-level gates
+> below (integration, contract, e2e, eval) become enforceable at the step that
+> creates them; coverage needs code to cover. They are written down now because,
+> as `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the gates are not in place on day 1,
+> you will not add them on day 15."*
 
 ## Before you change anything
 
@@ -31,18 +33,22 @@ python -m spacy download en_core_web_lg
 cp .env.example .env                         # paste your own keys; never commit .env
 ```
 
-Confirm the environment before you start:
+Install the hooks and confirm the environment before you start:
 
 ```bash
-ruff check . && ruff format --check .
-mypy packages/guardmem-core/src
-lint-imports
-pytest
+make hooks                                   # pre-commit, once per clone
+make lint && make typecheck && make test     # the same gates CI runs
 ```
 
-All four must exit 0. If `pytest` reports `ModuleNotFoundError: guardmem_core`,
-you skipped the editable install on the second line — `requirements-dev.txt`
-carries only third-party packages.
+All three must exit 0. `make lint` covers ruff, ruff-format and the
+import-linter contracts; run `make` with no target for the full list.
+
+`make` is not installed on Windows and does not ship with Git for Windows —
+`winget install ezwinports.make`, then restart your shell.
+
+If `pytest` reports `ModuleNotFoundError: guardmem_core`, you skipped the
+editable install on the second line — `requirements-dev.txt` carries only
+third-party packages.
 
 **Never run bare `uv sync`.** It is *exact* and uninstalls everything absent from
 `uv.lock` — about 300 of the 311 installed packages. Use `uv run`, which is
