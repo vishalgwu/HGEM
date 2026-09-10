@@ -20,3 +20,10 @@ numpy==2.5.3                  # S5.1 semantic entropy over meaning clusters
 rapidfuzz==3.14.6             # S2.3 span linker fuzzy fallback, ratio >= 92 (MEMORY_ENGINE 1.3)
 pyyaml==6.0.3                 # S3.5 ontology starter packs + S12.2 policy packs
 tenacity==9.1.4               # RULES.md 2.3 jittered backoff, retryable=True only
+
+# NOTE - pyyaml and tenacity are listed here as part of this package's eventual
+# runtime, but are deliberately NOT yet in packages/guardmem-core/pyproject.toml.
+# A dependency enters the package manifest at the step that first imports it
+# (S3.5 and S9.3 respectively); declaring it earlier is scaffolding. The two
+# files are meant to differ by exactly these two lines - if they differ by
+# anything else, one of them is wrong.

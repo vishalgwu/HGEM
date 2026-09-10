@@ -1,14 +1,64 @@
+# --- Python environments -----------------------------------------------------
 .venv/
+venv/
+ENV/
+
+# --- Python build & cache artifacts ------------------------------------------
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# --- Tool caches -------------------------------------------------------------
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+.uv-cache/
+
+# --- Coverage & test output --------------------------------------------------
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit*.xml
+
+# --- Secrets and local configuration -----------------------------------------
+# .env.* is broad on purpose: it catches .env.local, .env.prod and anything else
+# someone invents. The negation below is what keeps the committed template
+# tracked, and it must stay after the pattern that would otherwise exclude it.
 .env
 .env.*
 !.env.example
+
+# --- Local runtime data ------------------------------------------------------
+# Raw payload blobs in dev (GM_BLOB_PATH); GCS in prod.
+.data/
+
+# --- Node / dashboard (arrives at S15.1) -------------------------------------
 node_modules/
 .next/
-.data/
-*.pyc
-.coverage
-htmlcov/
-.ruff_cache/
-.mypy_cache/
-dist/
+.turbo/
+
+# --- Terraform (arrives at S26.1) --------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+!*.tfvars.example
+
+# --- Editors and operating systems -------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Deliberately NOT ignored ------------------------------------------------
+# uv.lock and requirements.lock.txt are committed. They are what makes a build
+# reproducible, and a lockfile that only exists on one laptop is not a lockfile.

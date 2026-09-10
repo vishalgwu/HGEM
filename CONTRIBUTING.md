@@ -25,10 +25,29 @@ The two that catch people most often:
 ```bash
 uv venv --python 3.12 --prompt HGEM --seed .venv
 .venv\Scripts\activate                       # or: source .venv/Scripts/activate
-uv pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt       # third-party deps + dev toolchain
+uv pip install -e packages/guardmem-core     # the workspace package, editable
 python -m spacy download en_core_web_lg
 cp .env.example .env                         # paste your own keys; never commit .env
 ```
+
+Confirm the environment before you start:
+
+```bash
+ruff check . && ruff format --check .
+mypy packages/guardmem-core/src
+lint-imports
+pytest
+```
+
+All four must exit 0. If `pytest` reports `ModuleNotFoundError: guardmem_core`,
+you skipped the editable install on the second line — `requirements-dev.txt`
+carries only third-party packages.
+
+**Never run bare `uv sync`.** It is *exact* and uninstalls everything absent from
+`uv.lock` — about 300 of the 311 installed packages. Use `uv run`, which is
+inexact and safe, or `uv pip install`. The reasoning is recorded at the bottom of
+`pyproject.toml`.
 
 Python 3.12, `uv` for Python packaging, `pnpm` for TypeScript. Never
 `pip install` into the system interpreter.

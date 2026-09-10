@@ -9,6 +9,14 @@
 # 311/311 packages present at exactly these versions, zero mismatches, and
 # `pip-audit` reports no known vulnerabilities.
 #
+# This lock covers THIRD-PARTY packages only. `guardmem_core` lives in this
+# repository and is installed separately and editable:
+#
+#     uv pip install -e packages/guardmem-core
+#
+# Installing this file alone leaves `import guardmem_core` failing on an
+# otherwise correct environment. See README.md "Local setup".
+#
 # NOT captured here, because it is not a PyPI package: the spaCy model
 # en_core_web_lg 3.8.0 that presidio requires. Install it separately with
 # `python -m spacy download en_core_web_lg` - see requirements/guardrails.txt.

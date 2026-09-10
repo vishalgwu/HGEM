@@ -93,7 +93,7 @@ testpaths = ["tests"]
 # memory/router.py, which line coverage alone cannot measure.
 [tool.coverage.run]
 branch = true
-source = ["packages/guardmem-core/src"]
+source_pkgs = ["guardmem_core"]
 
 [tool.coverage.report]
 fail_under = 85

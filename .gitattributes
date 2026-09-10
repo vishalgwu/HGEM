@@ -1,0 +1,43 @@
+# Line-ending determinism.
+#
+# The build runs on Windows locally and on Linux in CI. Without this file the
+# blob that lands in git depends on each contributor's core.autocrlf setting,
+# which is how a repository ends up with mixed endings and diffs that show every
+# line changed. Normalise to LF in the repository; git still checks out CRLF on
+# Windows where the platform wants it.
+* text=auto eol=lf
+
+# Files that must keep CRLF when checked out on Windows.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Files that must keep LF everywhere - a CRLF here breaks the tool that reads it.
+*.sh        text eol=lf
+Makefile    text eol=lf
+*.mk        text eol=lf
+Dockerfile  text eol=lf
+*.py        text eol=lf
+*.pyi       text eol=lf
+
+# Binary. Never diff, never normalise. The master notebook PDF is protected by
+# docs/README.md and must stay byte-identical to its recorded SHA-256, which
+# any end-of-line conversion would destroy.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Generated - collapse in review, and mark so GitHub language stats ignore them.
+uv.lock                 linguist-generated=true -diff
+requirements.lock.txt   linguist-generated=true
+pnpm-lock.yaml          linguist-generated=true -diff
+
+# Documentation should not count as the repository's language.
+docs/** linguist-documentation=true

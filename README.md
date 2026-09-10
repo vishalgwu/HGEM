@@ -101,11 +101,29 @@ uv venv --python 3.12 --prompt HGEM --seed .venv
 .venv\Scripts\activate                       # PowerShell
 # source .venv/Scripts/activate              # Git Bash / macOS / Linux
 
-uv pip install -r requirements.lock.txt
+uv pip install -r requirements.lock.txt      # third-party deps, 311 packages
+uv pip install -e packages/guardmem-core     # the workspace package itself
 python -m spacy download en_core_web_lg      # presidio needs this; ~400 MB
 
 cp .env.example .env                         # then paste your API keys into .env
 ```
+
+Verify the result — this is the same check CI will run:
+
+```bash
+python -c "import guardmem_core"             # must exit 0
+pytest                                        # must pass
+```
+
+The second install line is not optional and is easy to skip. `requirements.lock.txt`
+pins only third-party packages; `guardmem_core` lives in this repo and is
+installed from source in editable mode, so your edits take effect without
+reinstalling. Omit it and every import of `guardmem_core` fails with
+`ModuleNotFoundError` on an otherwise perfectly good environment.
+
+> **Do not run bare `uv sync` here.** It is *exact* — it uninstalls everything
+> not in `uv.lock`, which today means roughly 300 of the 311 packages above.
+> `uv run` is inexact and safe. See the note at the bottom of `pyproject.toml`.
 
 `requirements.lock.txt` is the fully-resolved transitive set — 311 packages,
 verified to reproduce the environment exactly rather than approximately.
