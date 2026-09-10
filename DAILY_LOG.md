@@ -451,6 +451,57 @@ Phoenix. `make dev` already points at
 
 ---
 
+## 2026-09-10 — Day 1 · S1.2 first CI run
+
+Pushed the branch. The `gates` job — the actual S1.2 acceptance check — passed
+on ubuntu first time. The `hooks` job failed, on a tree where all six hooks
+pass locally.
+
+**What broke**
+
+- **`.secrets.baseline` is not portable, and nobody would have noticed until
+  something worse happened.** `detect-secrets` records result paths with the
+  separator of the machine that generated the baseline. Ours was generated on
+  Windows at S0.2, so it stores `docs\BUILD_NOTEBOOK.md`. Linux CI scans
+  `docs/BUILD_NOTEBOOK.md`, misses the key, and reports an already-reviewed
+  finding as a brand-new secret. Confirmed by looking the key up both ways
+  against the committed baseline: the POSIX form is a MISS.
+
+  Forward slashes work on *both* platforms — verified that the hook resolves a
+  POSIX key correctly on Windows and does not rewrite it back to backslashes —
+  so the baseline is now POSIX and `tests/unit/test_secrets_baseline.py` pins
+  it, along with key/filename agreement and no-stale-paths.
+
+  Worth being precise about why this one matters more than its size suggests.
+  The failure is quiet in the dangerous direction: a mismatched path resurfaces
+  a *previously approved* finding, and the obvious reaction under a red build is
+  to re-run the hook and commit whatever baseline it emits. That is the exact
+  motion that allowlists an unreviewed secret. Regenerating on Windows will
+  reintroduce it, which is why it needed a test and not a note.
+
+- **My first fix was worse than the bug.** Replacing every `\` in the file
+  also rewrote the `exclude` regexes, whose backslashes escape literal dots:
+  `^requirements\.lock\.txt$` became `^requirements/.lock/.txt$`, silently
+  disabling the lock-file exclusion. Caught by reading the diff rather than the
+  test result — the hooks still passed. The fix now replaces the two path
+  strings by their exact JSON representation and touches nothing else; the diff
+  is four lines.
+
+- **A `sort_keys=True` round-trip is not a small edit.** Re-serialising the
+  baseline reordered it into a 66-line diff for a two-line change. Editing the
+  raw text keeps the tool's own formatting.
+
+**Still open**
+
+- The `hooks` job has not yet passed. `gates` has. Re-verify both after this push.
+- Branch protection on `main` (S0.3); API keys blank in `.env`.
+
+**Tomorrow's first step**
+
+`S1.3` — the docker-compose dev stack.
+
+---
+
 <!--
 Template for the next entry:
 

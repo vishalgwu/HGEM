@@ -53,6 +53,11 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **`.secrets.baseline` is now platform-portable.** It was generated on Windows
+  and stored result paths as `docs\BUILD_NOTEBOOK.md`, which Linux CI never
+  matches - so a reviewed finding reappeared as an unreviewed one and the
+  `hooks` job failed on its first run. Paths are POSIX now, and
+  `tests/unit/test_secrets_baseline.py` fails the build if backslashes return.
 - **Eight defects in `BUILD_NOTEBOOK.md` S1.2**, corrected in the notebook in the
   same commit. Every pinned hook revision was stale and `id: ruff` is now a
   deprecated alias; `mirrors-mypy` typechecks in an isolated environment that
@@ -97,9 +102,10 @@ repository; the log records what happened while changing it.
   states the PDF and `BUILD_NOTEBOOK.md` "hold the same content"; that sentence
   is inaccurate. **Build from the Markdown.** The PDF is protected and must not
   be edited — corrections go in `BUILD_NOTEBOOK.md`.
-- **The CI badge is unverified.** `README.md` now carries one, and the workflow
-  structure plus `uv lock --check` were validated locally, but GitHub Actions has
-  not executed a run yet.
+- **The CI badge reflects one known-red run.** The first execution of the
+  workflow passed the `gates` job and failed `hooks`, on a `.secrets.baseline`
+  generated on Windows whose backslash paths never match on Linux. Fixed and
+  guarded by a test; re-verify the badge after the next push.
 - Branch protection on `main` is not yet enabled (`BUILD_NOTEBOOK.md` S0.3).
 
 ## Project history
