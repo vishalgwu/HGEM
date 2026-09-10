@@ -115,10 +115,10 @@ repository; the log records what happened while changing it.
   states the PDF and `BUILD_NOTEBOOK.md` "hold the same content"; that sentence
   is inaccurate. **Build from the Markdown.** The PDF is protected and must not
   be edited — corrections go in `BUILD_NOTEBOOK.md`.
-- **The CI badge reflects one known-red run.** The first execution of the
-  workflow passed the `gates` job and failed `hooks`, on a `.secrets.baseline`
-  generated on Windows whose backslash paths never match on Linux. Fixed and
-  guarded by a test; re-verify the badge after the next push.
+- **CI actions run on deprecated Node 20.** GitHub warns that
+  `actions/checkout@v4`, `actions/cache@v4` and `astral-sh/setup-uv@v5` are being
+  forced onto Node 24. Bump the majors; deliberately not bundled into a fix
+  commit.
 - Branch protection on `main` is not yet enabled (`BUILD_NOTEBOOK.md` S0.3).
 
 ## Project history

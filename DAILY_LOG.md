@@ -559,8 +559,11 @@ need admin auth this session does not have.
 
 **Still open**
 
-- `hooks` has not yet gone green in CI. Verified in a Linux container against
-  the actual commit before pushing this time.
+- ~~`hooks` has not yet gone green in CI.~~ **Resolved.** Run 34538444846 on
+  `bdc2945` is green on both jobs, so S1.2's DONE WHEN is now satisfied in full
+  — `make lint && make typecheck && make test` locally, and the badge green on a
+  pushed branch. The container check predicted it exactly, which is the argument
+  for reproducing before pushing rather than after.
 - CI warns `actions/checkout@v4`, `actions/cache@v4` and `astral-sh/setup-uv@v5`
   run on deprecated Node 20. Worth bumping; not urgent, and deliberately not
   bundled into a fix commit.
