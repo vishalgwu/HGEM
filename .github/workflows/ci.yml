@@ -65,6 +65,13 @@ jobs:
           version: "0.9.8"
           enable-cache: true
           cache-dependency-glob: uv.lock
+          # Distinct per job. Both jobs run in parallel and would otherwise
+          # derive the same cache key, so whichever finishes second cannot
+          # reserve it and every run carries "Failed to save: Unable to reserve
+          # cache ... another job may be creating this cache". Harmless, but a
+          # warning that fires every time is one people learn to scroll past,
+          # and this cache is a few MB.
+          cache-suffix: gates
 
       - name: Install Python 3.12
         # Reads .python-version, which pins 3.12 so the lock, the venv and
@@ -112,6 +119,7 @@ jobs:
           version: "0.9.8"
           enable-cache: true
           cache-dependency-glob: uv.lock
+          cache-suffix: hooks
 
       - name: Install Python 3.12
         run: uv python install

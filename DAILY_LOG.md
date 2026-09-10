@@ -647,6 +647,17 @@ here, and nothing masked.
   all parse.
 - Local: `make lint`, `make typecheck`, `make test` (10 tests), and all six hooks.
 
+**After the push — one more warning, now also gone**
+
+The bump cleared the Node 20 deprecation on the `gates` job (annotations 1 → 0),
+but `pre-commit` still carried one: *"Failed to save: Unable to reserve cache …
+another job may be creating this cache."* Both jobs run in parallel and derived
+the same `setup-uv` cache key, so whichever finished second could not reserve
+it. Benign — the loser just skips saving — but a warning that fires on every run
+is one people learn to scroll past, which is the actual cost. Fixed with a
+per-job `cache-suffix` rather than documented as a wart; the cache is a few MB
+and two of them is not a real expense.
+
 **Still open**
 
 - Branch protection on `main` (S0.3) — needs GitHub Settings; no `gh` CLI here.
@@ -654,6 +665,10 @@ here, and nothing masked.
 - Dependabot config, which RULES §4 asks for weekly, does not exist yet. It is
   the prerequisite for SHA-pinning the actions, and belongs with the security
   workflow rather than here.
+- A `git push` hung once and exited quietly without transferring anything;
+  `git ls-remote` showed the branch still on the previous commit. Retrying
+  worked immediately. Worth knowing that a silent push here is not proof of a
+  push — check the remote ref.
 
 **Tomorrow's first step**
 
