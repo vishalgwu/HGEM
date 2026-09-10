@@ -1,0 +1,32 @@
+# gitleaks configuration - BUILD_NOTEBOOK.md S1.2
+#
+# RULES.md 4 requires gitleaks AND detect-secrets. They overlap deliberately:
+# gitleaks scans the staged diff for credential-shaped strings, detect-secrets
+# scans file contents against a reviewed baseline. The overlap is the point -
+# two different detectors miss different things.
+#
+# The overlap also creates one guaranteed false positive, handled below.
+
+[extend]
+# Keep every built-in rule. This file adds an allowlist; it does not narrow
+# detection.
+useDefault = true
+
+[[allowlists]]
+description = """
+.secrets.baseline is detect-secrets' record of reviewed findings. It stores the
+sha1 HASH of each finding, never the finding itself - it is the opposite of a
+credential store. Those hashes are 40 hex characters with high entropy, so
+gitleaks' generic-api-key rule matches them every time the baseline changes,
+which is exactly when a real review has just happened.
+
+Leaving this unallowlisted trains the worst possible habit: gitleaks fails on a
+detect-secrets baseline update, and the fix that makes the build green is to
+stop looking at baseline updates. That is the one file where a careless change
+can allowlist a genuine secret.
+
+Nothing is lost by skipping it here. The file's contents are owned by
+detect-secrets, and tests/unit/test_secrets_baseline.py independently asserts
+that every entry is well-formed and points at a file that still exists.
+"""
+paths = ['''^\.secrets\.baseline$''']

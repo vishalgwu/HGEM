@@ -61,11 +61,28 @@ repos:
     hooks:
       - id: gitleaks
 
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.5.0
+  # detect-secrets runs as a `local` hook purely so it can be forced into
+  # Python's UTF-8 mode. It hashes the secret STRING, and it opens files with the
+  # interpreter's default encoding - cp1252 on Windows, utf-8 on Linux. Any file
+  # containing a non-ASCII byte therefore hashes differently on the two
+  # platforms, and the baseline silently stops matching on the other one.
+  #
+  # That is not theoretical: `docs/MCP_INTEGRATION.md:22` contains the
+  # placeholder `gm_live_…` with a UTF-8 ellipsis (e2 80 a6). Windows decoded it
+  # as cp1252 `â€¦` and recorded sha1 53b0d961…; Linux decodes it correctly and
+  # computes f0f6a8c9…, misses the baseline, and reports an already-reviewed
+  # finding as a new secret. That is what failed the first two CI runs.
+  #
+  # `-X utf8` makes both platforms agree. Regenerate the baseline the same way:
+  #     uv run python -X utf8 -m detect_secrets scan --baseline .secrets.baseline
+  # and re-normalise the paths afterwards - the scanner writes them with the
+  # local separator, which tests/unit/test_secrets_baseline.py rejects.
+  - repo: local
     hooks:
       - id: detect-secrets
-        args: ["--baseline", ".secrets.baseline"]
+        name: Detect secrets
+        entry: uv run python -X utf8 -m detect_secrets.pre_commit_hook --baseline .secrets.baseline
+        language: system
         # The lock files are a wall of hashes; scanning them yields only false
         # positives, and they contain no credentials by construction.
         exclude: ^(requirements\.lock\.txt|uv\.lock|\.secrets\.baseline)$

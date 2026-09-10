@@ -53,6 +53,19 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **detect-secrets hashes are locale-dependent, and now cannot be.** The tool
+  hashes the secret string and opens files with the interpreter's default
+  encoding, so a file containing any non-ASCII byte hashes differently on Windows
+  (cp1252) and Linux (utf-8). `docs/MCP_INTEGRATION.md:22` holds `gm_live_…` with
+  a UTF-8 ellipsis; Windows recorded sha1 `53b0d961…`, Linux computes
+  `f0f6a8c9…`, and CI reported a reviewed finding as a new secret. The hook now
+  runs `python -X utf8 -m detect_secrets.pre_commit_hook`, so both platforms
+  decode identically.
+- **`.gitleaks.toml`** allowlists `.secrets.baseline` and nothing else.
+  detect-secrets stores 40-character sha1 hashes there, which `generic-api-key`
+  matches on entropy - so gitleaks failed exactly when a reviewed baseline update
+  landed. `useDefault = true` keeps every rule; verified by probe that the same
+  string is still caught in any other file.
 - **`.secrets.baseline` is now platform-portable.** It was generated on Windows
   and stored result paths as `docs\BUILD_NOTEBOOK.md`, which Linux CI never
   matches - so a reviewed finding reappeared as an unreviewed one and the

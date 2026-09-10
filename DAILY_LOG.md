@@ -502,6 +502,76 @@ pass locally.
 
 ---
 
+## 2026-09-10 — Day 1 · S1.2 CI, root cause
+
+Two more CI runs, both `gates` green and `hooks` red. Stopped guessing and
+reproduced the job in a Linux container instead — `docker run python:3.12-slim`,
+fresh clone of the pushed branch, `uv sync --locked --dev`, `pre-commit run
+--all-files`. That gave the message the API would not: `Secret Type: Secret
+Keyword / Location: docs/MCP_INTEGRATION.md:22`.
+
+**The real root cause: detect-secrets hashes are locale-dependent.**
+
+`detect-secrets` hashes the secret *string*, and opens files with the
+interpreter's default encoding — cp1252 on Windows, utf-8 on Linux. Line 22 of
+`MCP_INTEGRATION.md` holds the placeholder `gm_live_…` with a UTF-8 ellipsis
+(`e2 80 a6`). The two platforms decode that differently, so they hash it
+differently:
+
+| decode | secret | sha1 |
+|---|---|---|
+| utf-8 (Linux) | `gm_live_…` | `f0f6a8c9…` |
+| cp1252 (Windows) | `gm_live_â€¦` | `53b0d961…` ← what the baseline held |
+
+Linux computed a hash the baseline did not contain, so an already-reviewed
+finding read as a brand-new secret. Confirmed by hashing the raw bytes under
+each codec and matching against the committed value — the baseline was written
+from a mis-decoded string.
+
+So the baseline was non-portable in *two* independent ways: path separators
+(yesterday's fix) and hash encoding (this one). The separator fix was correct
+and insufficient, which is why the second run failed identically.
+
+Fixed structurally rather than by patching the value: `detect-secrets` is now a
+`local` hook running `python -X utf8 -m detect_secrets.pre_commit_hook`, so both
+platforms decode identically by construction. Baseline regenerated the same way
+and re-normalised to POSIX paths — regenerating writes the local separator back,
+which the guard test catches.
+
+**gitleaks then flagged the detect-secrets baseline.** The new hash is 40 hex
+characters with entropy 3.69, so `generic-api-key` matched it — meaning gitleaks
+fails precisely when a reviewed baseline update lands. Left alone that trains
+the worst possible reflex: the way to a green build becomes "stop looking at
+baseline diffs", on the one file where a careless change allowlists a real
+secret. Added `.gitleaks.toml` allowlisting that path only, with `useDefault =
+true` so no rule is weakened.
+
+Negative-tested, because an allowlist that is too broad is worse than the false
+positive it removes: the same high-entropy string is CAUGHT in a normal file and
+ALLOWED in `.secrets.baseline`.
+
+**What I would do differently**
+
+Reproduce first. Two pushes were spent on a hypothesis that was true but
+partial, and the container gave the exact answer in about four minutes. The
+annotations API only ever says "Process completed with exit code 1"; job logs
+need admin auth this session does not have.
+
+**Still open**
+
+- `hooks` has not yet gone green in CI. Verified in a Linux container against
+  the actual commit before pushing this time.
+- CI warns `actions/checkout@v4`, `actions/cache@v4` and `astral-sh/setup-uv@v5`
+  run on deprecated Node 20. Worth bumping; not urgent, and deliberately not
+  bundled into a fix commit.
+- Branch protection on `main` (S0.3); API keys blank in `.env`.
+
+**Tomorrow's first step**
+
+`S1.3` — the docker-compose dev stack.
+
+---
+
 <!--
 Template for the next entry:
 
