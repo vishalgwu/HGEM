@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - observability bus
+# ---------------------------------------------------------------------------
+# ARCHITECTURE.md 2.5. Note the split that matters: telemetry may be sampled and
+# lossy; the AUDIT LOG may not. The hash-chained audit log is a plain Postgres
+# table written in the same transaction as the state change (RULES.md
+# non-negotiable #4) - it needs no library and appears in no requirements file.
+#
+# Span names follow guardmem.<layer>.<op> and every new span needs an entry in
+# observability/SPANS.md (RULES.md 6).
+#
+# Introduced: BUILD_NOTEBOOK.md S13.1 - S13.2
+# ---------------------------------------------------------------------------
+
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0    # OTel instrumentation packages are 0.xxbN
+opentelemetry-instrumentation-httpx==0.65b0      # by upstream convention; that is not a typo
+opentelemetry-instrumentation-asyncpg==0.65b0
+prometheus-client==0.26.0     # S13.2 guardmem_decisions_total, guardmem_confidence_bucket
+langfuse==4.15.2              # LLM-native traces with prompt/version linkage
+arize-phoenix==20.9.0         # eval + drift; pulls ~160 transitive packages, so install it
+                              # only where you actually run it (worker/eval host, not gateway)

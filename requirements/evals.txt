@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - evals, tuning, and benchmarks
+# ---------------------------------------------------------------------------
+# Week 4 replaces claims with numbers. Also covers scripts/threshold_tuner.py,
+# which is built earlier (S20.2) but is statistical, not runtime, code.
+#
+# Introduced: BUILD_NOTEBOOK.md S20.2, S22.1 - S25.2
+# ---------------------------------------------------------------------------
+
+scikit-learn==1.9.0           # S20.2 logistic regression refit of tau/rho and the risk betas;
+                              # Cohen's kappa for hitl_agreement.py (PRD FR-9.3)
+scipy==1.18.1                 # AUROC / statistics for Checkpoint B and the eval suites
+pandas==3.0.5                 # eval report tabulation
+matplotlib==3.11.1            # S23.2 the Drift@N chart - "the single most important artifact"
+locust==2.46.5                # S25.1 load tests, bench/locust/{write_path,read_path}.py
+                              # gevent monkey-patches ssl at import, so locust must be the FIRST
+                              # thing imported in a process. Run it as the `locust` CLI; importing
+                              # it inside an app that already imported ssl raises RecursionError.
+datasets==5.0.1               # S22.1 LongMemEval subset loading

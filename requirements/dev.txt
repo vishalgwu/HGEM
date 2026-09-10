@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - test, lint, type, and security tooling
+# ---------------------------------------------------------------------------
+# RULES.md 5 defines seven test suites and their gates:
+#   unit / integration / contract / property / security / e2e / eval (nightly)
+# Coverage gate: repo >= 85%, guardmem-core >= 90% at release (85% is the
+# Week-1 interim floor only). Decision branches in pipeline/, guardrails/, and
+# memory/router.py require 100% branch coverage.
+#
+# Introduced: BUILD_NOTEBOOK.md S1.1 - S1.2
+# ---------------------------------------------------------------------------
+
+pytest==9.1.1
+pytest-asyncio==1.4.0         # asyncio_mode = "auto" in pyproject (S1.1)
+pytest-cov==7.1.0
+pytest-xdist==3.8.0           # the integration suite is testcontainer-bound and slow
+hypothesis==6.168.0           # property suite: invariants I1-I7, 500 examples (RULES.md 5)
+mypy==2.3.1                   # --strict on packages/guardmem-core (RULES.md 2.1)
+ruff==0.16.6                  # lint + format; custom rules GM001 (except:pass) / GM002 (no timeout)
+testcontainers[postgres,neo4j,redis]==4.13.3   # integration suite, no skips on main
+respx==0.23.1                 # httpx mocking - RULES.md 5: no network in unit tests
+schemathesis==4.26.1          # contract suite over the gateway OpenAPI spec (S8.1)
+jsonschema==4.26.0            # S7.3 MCP tool inputSchema/outputSchema drift checks
+mutmut==3.7.0                 # RULES.md 5: coverage that rises while mutation score falls is rejected
+pre-commit==4.6.2             # S1.2 hook runner
+detect-secrets==1.5.0         # RULES.md 4 secret scanning (pre-commit + CI)
+pip-audit==2.10.1             # RULES.md 4 dependency CVE scan in CI
+import-linter==2.15           # PROJECT_TREE "One-way arrow": apps -> services -> packages -> stores
+types-pyyaml==6.0.12.20260906 # mypy --strict needs stubs for the ontology loader
+
+# ---------------------------------------------------------------------------
+# NOT pip-installable - required by RULES.md 4 and S26.3 but installed by other
+# means. Listed here so the full toolchain has one place to be read:
+#
+#   uv          Python env + lock          curl -LsSf https://astral.sh/uv/install.sh | sh
+#   pnpm        TS workspace (S15.1)       corepack enable && corepack prepare pnpm@latest
+#   node 22+    dashboard runtime
+#   docker      dev stack (S1.3)
+#   gitleaks    secret scanning            pre-commit hook + CI
+#   semgrep     string-built SQL/Cypher    (pip-installable, but usually run as a CI action)
+#   trivy       container image scanning
+#   cosign      release signing + SBOM
+#   opa         Rego policy evaluation, if S12.2 shells out instead of evaluating in-process
+#   playwright  dashboard e2e (S21.3) - installed via pnpm in apps/dashboard, not pip
+# ---------------------------------------------------------------------------

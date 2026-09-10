@@ -1,0 +1,11 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI (HGEM) - full runtime + development toolchain
+# ---------------------------------------------------------------------------
+# Install:   uv pip install -r requirements-dev.txt
+#
+# This is what a contributor's HGEM venv should hold. `make lint`, `make
+# typecheck`, and `make test` (BUILD_NOTEBOOK.md S1.2) all assume it.
+# ---------------------------------------------------------------------------
+
+-r requirements.txt
+-r requirements/dev.txt

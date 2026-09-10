@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - deployable services: gateway, worker, mcp_server
+# ---------------------------------------------------------------------------
+# These are the thin deployable units. PROJECT_TREE.md: "Deployable units are
+# thin; all intelligence lives in packages/guardmem-core." A router validates,
+# calls one core function, and shapes the response (RULES.md 2.4).
+#
+# Introduced: BUILD_NOTEBOOK.md S6.1 (mcp), S8.1 (gateway), S8.4 (worker)
+# ---------------------------------------------------------------------------
+
+fastapi==0.141.1              # S8.1 gateway ingress
+uvicorn[standard]==0.52.4     # S8.1 ASGI server
+arq==0.28.0                   # S8.4 Redis-stream worker: async eval, compaction, outbox relay
+                              # 0.28 is the newest release; it constrains redis<6, which is why
+                              # requirements/stores.txt pins redis==5.3.1.
+mcp[cli]==2.2.0               # S6.1 MCP server, stdio + streamable-http (ADR-0005)
+
+# Gateway middleware chain: request_id -> auth -> tenancy -> ratelimit -> body_hash
+python-multipart==0.0.32      # S8.1 form/multipart bodies on document upload
+authlib==1.8.0                # PRD 6.3 OIDC SSO for humans; MCP_INTEGRATION 1 OAuth 2.1 + PKCE
+pyjwt[crypto]==2.13.0         # S8.2 scoped API-key / bearer verification
+cryptography==50.0.1          # PII vault encryption + GDPR crypto-shredding (ADR-0002)
+slowapi==0.1.10               # S8.3 token-bucket rate limiting keyed by tenant:api_key

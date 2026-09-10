@@ -1,0 +1,21 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - dual-store persistence
+# ---------------------------------------------------------------------------
+# ADR-0001: every durable assertion is written to BOTH a vector store and a
+# graph store, coordinated by the Postgres outbox (ARCHITECTURE.md 2.4).
+# Backends are swappable behind the VectorStore/GraphStore Protocols, so both
+# options for each are listed here.
+#
+# Introduced: BUILD_NOTEBOOK.md S3.1 - S3.4
+# ---------------------------------------------------------------------------
+
+sqlalchemy==2.0.52            # S3.1 async core + alembic metadata
+asyncpg==0.31.0               # S3.1 async Postgres driver (RULES.md 2.2: all I/O async)
+alembic==1.19.2               # S3.1 forward-only migrations (RULES.md 7)
+pgvector==0.5.0               # S3.2 pgvector types; default vector backend
+qdrant-client==1.19.0         # PRD FR-4.1 alternate vector backend above 10M vectors
+neo4j==6.3.0                  # S7.1 graph backend, GM_GRAPH_BACKEND=neo4j
+networkx==3.6.1               # S3.4 dev/single-tenant graph backend (build this one first)
+redis==5.3.1                  # queue, rate limits, review leases, semantic cache
+                              # PINNED to 5.x: arq 0.28 requires redis<6. See requirements.txt note.
+rank-bm25==0.2.2              # FR-4.4 hybrid retrieval: dense + BM25 + graph expand

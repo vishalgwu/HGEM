@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - OPTIONAL local NLI / reranking models
+# ---------------------------------------------------------------------------
+# NOT required for the alpha. MEMORY_ENGINE.md 2.2(a) allows either a local
+# cross-encoder (DeBERTa-v3-MNLI class) OR a BALANCED-tier LLM judge, and
+# BUILD_NOTEBOOK S4.3 says explicitly: "start with an LLM judge at BALANCED
+# tier; swap in a local cross-encoder in week 2 if latency demands it."
+#
+# Install this file only when you hit the Week-2 risk in PHASES_AND_ROADMAP 7
+# (p95 eval > 2.5 s). It is ~2.5 GB of wheels; do not put it in the gateway
+# image on speculation.
+#
+# Introduced: BUILD_NOTEBOOK.md S4.3 (conditional), PHASES_AND_ROADMAP.md 7
+# ---------------------------------------------------------------------------
+
+sentence-transformers==6.0.1  # cross-encoder NLI + optional local reranker (ARCHITECTURE read path)
+transformers==5.17.0
+torch==2.14.0                 # CPU wheels by default; for CUDA use the pytorch.org index

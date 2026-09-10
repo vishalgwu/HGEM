@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - packages/guardmem-core runtime
+# ---------------------------------------------------------------------------
+# The decision engine. PROJECT_TREE.md "Ownership & Dependency Rules" says this
+# layer may import "stdlib, pydantic, httpx, store drivers" and may NOT import
+# fastapi, mcp, or anything HTTP-server. Nothing web-framework-shaped belongs in
+# this file - that is what keeps `guardmem_core.pipeline` runnable identically in
+# the gateway, the worker, and the eval harness (ARCHITECTURE.md 2.2).
+#
+# Introduced: BUILD_NOTEBOOK.md S1.1
+# Python: >=3.12  (RULES.md 2 "Baseline")
+# ---------------------------------------------------------------------------
+
+pydantic==2.13.5              # S1.6 schema layer; strict/frozen/extra=forbid (RULES.md 2.1)
+pydantic-settings==2.15.0     # S1.4 typed settings object, GM_* env prefix
+httpx==0.28.1                 # one AsyncClient per provider, created in lifespan (RULES.md 2.2)
+structlog==26.1.0             # RULES.md 6: structured JSON logging only
+anyio==4.15.1                 # anyio.to_thread.run_sync for CPU-bound NLI/embedding math
+numpy==2.5.3                  # S5.1 semantic entropy over meaning clusters
+rapidfuzz==3.14.6             # S2.3 span linker fuzzy fallback, ratio >= 92 (MEMORY_ENGINE 1.3)
+pyyaml==6.0.3                 # S3.5 ontology starter packs + S12.2 policy packs
+tenacity==9.1.4               # RULES.md 2.3 jittered backoff, retryable=True only

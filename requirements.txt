@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI (HGEM) - full runtime dependency set
+# ---------------------------------------------------------------------------
+# Install:   uv pip install -r requirements.txt
+#   or:      pip install -r requirements.txt     (inside the HGEM venv)
+#
+# Python 3.12 (BUILD_NOTEBOOK.md 0.5; every pyproject in the spec pins >=3.12).
+# Every version below was resolved together on 2026-09-10 and verified to
+# co-install with no conflicts - 318 packages including transitives.
+#
+# LAYERING - this mirrors the dependency direction enforced by import-linter
+# (PROJECT_TREE.md "Ownership & Dependency Rules"), so the layer a package sits
+# in is meaningful, not cosmetic:
+#
+#   requirements/base.txt           packages/guardmem-core   (no web framework, ever)
+#   requirements/stores.txt         vector + graph backends
+#   requirements/llm.txt            model providers, FAST/BALANCED/FRONTIER
+#   requirements/services.txt       gateway, worker, mcp_server
+#   requirements/guardrails.txt     injection, PII vault, poisoning defense
+#   requirements/observability.txt  OTel, Prometheus, Langfuse, Phoenix
+#   requirements/evals.txt          eval suites, threshold tuner, benchmarks
+#
+# NOT included here, on purpose:
+#   requirements/ml-local.txt   optional local cross-encoder (~2.5 GB) - S4.3 says
+#                               start with an LLM judge and only swap this in if
+#                               week-2 latency demands it
+#   requirements/dev.txt        test/lint/type tooling - see requirements-dev.txt
+#
+# NOTE ON THE ONE REAL CONFLICT IN THIS SET:
+#   arq 0.28.0 requires redis<6. Taking redis 8.x instead would silently pull arq
+#   back to 0.25.0. The newer queue is worth more than the newer client here, so
+#   redis is pinned to 5.3.1 and arq to 0.28.0. Revisit when arq supports redis 6+.
+#
+# TypeScript dependencies are NOT tracked here. apps/dashboard gets its own
+# package.json at S15.1 via `pnpm create next-app` (Next.js 15, React 19,
+# TanStack Query, Recharts, D3, shadcn/ui, Tailwind, Playwright).
+# ---------------------------------------------------------------------------
+
+-r requirements/base.txt
+-r requirements/stores.txt
+-r requirements/llm.txt
+-r requirements/services.txt
+-r requirements/guardrails.txt
+-r requirements/observability.txt
+-r requirements/evals.txt

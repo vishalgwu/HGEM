@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# GuardMem AI - model providers and the routing tier
+# ---------------------------------------------------------------------------
+# ARCHITECTURE.md 2.8: FAST (noise filter, low-risk extraction) / BALANCED
+# (conflict adjudication, NLI) / FRONTIER (ESCALATE only). Cross-provider
+# fallback is a hard requirement, not a nice-to-have - a single-provider build
+# cannot satisfy the degradation matrix in ARCHITECTURE.md 4.
+#
+# Pinned model ids live in settings, never here (RULES.md 3):
+#   GM_MODEL_FAST=claude-haiku-4-5  BALANCED=claude-sonnet-5  FRONTIER=claude-opus-5
+#
+# Introduced: BUILD_NOTEBOOK.md S2.2 (anthropic), S9.1 (the rest)
+# ---------------------------------------------------------------------------
+
+anthropic==1.4.0              # S2.2 primary provider - extraction + adjudication
+openai==3.11.0                # S9.1 fallback provider + GM_EMBED_MODEL=text-embedding-3-large
+tiktoken==0.14.0              # S10.1 token accounting for the per-tenant cost ledger
+
+# Optional additional providers named in PROJECT_TREE llm/providers/.
+# Ollama needs no SDK - it is called over its HTTP API with httpx.
+boto3==1.43.91                # bedrock.py
+google-cloud-aiplatform==2.1.0  # vertex.py
