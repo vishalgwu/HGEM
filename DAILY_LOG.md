@@ -165,6 +165,67 @@ Also worth recording:
 
 ---
 
+## 2026-09-10 — Day 1 · debug pass
+
+A screen of everything built so far, before moving on to S1.2. Three real
+defects, two of them mine.
+
+**Fixed**
+
+- **A fresh clone could not import `guardmem_core`.** Found by actually cloning
+  and following README verbatim rather than reading it. `requirements.lock.txt`
+  pins third-party packages only; the workspace package needs
+  `uv pip install -e packages/guardmem-core`, which no document mentioned —
+  README and CONTRIBUTING were written before the workspace existed at S1.1.
+  This is the S28.3 cold-start gate failing on day 1. Both documents now carry
+  the step, the verification commands, and a description of the failure mode.
+  Re-tested cold from a fresh clone afterwards: import and pytest both green,
+  and all five contributor gates pass in that clone.
+- **Coverage would have measured nothing in CI.** `source` by path only works
+  while the package is installed editable; installed properly, the imported code
+  comes from site-packages and coverage silently reports 0% — which reads as a
+  broken test suite, not a broken config. Now `source_pkgs = ["guardmem_core"]`,
+  which follows the import.
+- **`.gitignore` was thin and `.gitattributes` was absent.** `.pytest_cache/`
+  escaped only because pytest writes its own `.gitignore` inside it; relying on a
+  third-party tool's internals for repo hygiene is not a plan. Added the missing
+  patterns — `*.egg-info/` and `build/` now matter because S1.1 made this a
+  buildable package — plus terraform for S26.1. `.gitattributes` normalises line
+  endings, since this builds on Windows locally and Linux in CI. Verified
+  `git add --renormalize .` is a no-op, so it locks in the current state rather
+  than rewriting anything, and `*.pdf binary` protects the master notebook —
+  hash re-checked after the change, still `D4E49FEF…57CD`.
+
+**Added** — `tests/unit/test_package_contract.py`, the first real test. It
+asserts at *runtime* what import-linter asserts statically. Those catch
+different things: `lint-imports` reads source and fails on a written
+`import fastapi`; this test watches `sys.modules` in an isolated subprocess and
+also catches a framework pulled in *indirectly*. Proved it by making
+`guardmem_core` import fastapi — the test failed reporting
+`['fastapi', 'starlette']`, and that transitive `starlette` is exactly what the
+static contract cannot see.
+
+Shipping it also resolved the pytest exit-5 problem from S1.1. The right fix for
+"coverage reports 0% because nothing imports the package" is a test, not a
+looser gate.
+
+**What I got wrong** — my own `# noqa: S603` in that test was dead code, caught
+by RUF100: the flake8-bandit rules are already off for `tests/` via
+per-file-ignores. Kept the rationale as a plain comment. Also corrected a stale
+claim in the `requirements.lock.txt` header, which said the venv matched it
+311/311 — still true, but incomplete once `guardmem-core` is installed alongside.
+
+**State** — 7/7 gates green locally, 5/5 in a fresh clone, `pip-audit` clean.
+`en-core-web-lg` and `guardmem-core` show as *skipped* by pip-audit because
+neither is on PyPI; that is expected, not a failure.
+
+**Tomorrow's first step**
+
+`S1.2` — pre-commit, Makefile, CI skeleton. `make test` now has a real test to
+run, so the target can pass honestly rather than tolerating exit 5.
+
+---
+
 <!--
 Template for the next entry:
 
