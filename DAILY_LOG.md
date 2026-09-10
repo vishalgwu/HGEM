@@ -575,6 +575,93 @@ need admin auth this session does not have.
 
 ---
 
+## 2026-09-10 — Day 1 · S1.2 debug and audit pass
+
+A screen of everything built so far before moving to S1.3. CI was already green
+by this point, so there were no failure logs left to read — the two failures had
+been diagnosed and fixed earlier the same day. What remained was one real
+workflow warning, some dead weight, and four documentation claims that were no
+longer true.
+
+**Scope check first.** Nothing in CI fails for a future step's reason. The
+workflow runs only lint, typecheck, test and the hooks; the Makefile's
+`dev`/`down`/`migrate`/`seed`/`eval` targets point at files that arrive at S1.3,
+S3.1, S3.6 and S22.1, and CI never invokes them. So there is nothing deferred
+here, and nothing masked.
+
+**Fixed — workflow**
+
+- **Node 20 deprecation.** Every run warned that `actions/checkout@v4`,
+  `actions/cache@v4` and `astral-sh/setup-uv@v5` target Node 20 and are being
+  forced onto Node 24. Bumped to `checkout@v5`, `cache@v6`, `setup-uv@v7` after
+  confirming those majors exist upstream. Full-SHA pinning is the hardened form
+  RULES §4 eventually wants, but it needs the weekly Dependabot that section
+  also calls for; majors are the honest interim and the workflow says so.
+- **A comment in my own workflow said the opposite of what the setting does.**
+  `UV_PYTHON_DOWNLOADS: automatic` was annotated "fail instead of silently
+  reaching for a different interpreter" — that describes `never`, which would
+  disable downloads and make `uv python install` unable to satisfy 3.12 at all.
+  The value was right and the comment was wrong, which is the worse of the two
+  failure modes: it would have justified a wrong "fix" later.
+
+**Removed — dead weight**
+
+- `_NAME`, an unused compiled regex in `test_dependency_consistency.py`. Ruff
+  did not catch it: `F401` covers unused *imports*, not unused module-level
+  constants. Found by walking the AST of every tracked `.py` and diffing defined
+  names against loaded ones; that scan is now clean repo-wide.
+- `tests/unit/.gitkeep`. A `.gitkeep` exists to keep an empty directory tracked,
+  and that directory now holds three real test modules. The other five
+  `tests/*/.gitkeep` files stay — those directories are still empty.
+
+**Fixed — documentation that had stopped being true**
+
+- `docs/README.md` still said "documentation only … Implementation has not
+  restarted … The repository contains only `docs/`". Two build steps have landed.
+- `docs/README.md` still claimed the PDF and `BUILD_NOTEBOOK.md` "hold the same
+  content". Measured, not asserted: the extracted text has zero occurrences of
+  "Checkpoint" and zero of `tau_mid`, carries `claude-haiku-4-5-20251001` and
+  the previous-generation Claude ids, and still says `gh repo create
+  guardmem-ai`. Step coverage is identical — the same 96 steps and appendices
+  A–G — so the Markdown is a strict superset. Recorded as a dated correction
+  rather than a silent edit, because the sentence had been wrong since it was
+  written.
+- `docs/PROJECT_TREE.md` annotated `docs/` as "the only tree that exists today",
+  and its root listing predated `.python-version`, `.gitignore`,
+  `.gitattributes`, `.secrets.baseline`, `.gitleaks.toml` and the whole
+  `requirements/` layer. The listing now matches `git ls-files` at root exactly,
+  checked programmatically rather than by eye.
+- `requirements.txt` claimed "318 packages including transitives". Re-measured
+  with `uv pip compile`: the runtime-only set resolves to **260**, and adding
+  `requirements/dev.txt` gives the 311 in `requirements.lock.txt`. The old number
+  claimed more packages for the runtime set alone than the runtime-plus-dev lock
+  contains, so it was never right.
+
+**Verified, not assumed**
+
+- Master PDF SHA-256 still `D4E49FEF…57CD` — byte-identical, untouched by any of
+  today's work.
+- All nine diagrams present, non-empty, and linked from `docs/README.md`.
+- Every relative link in every Markdown file resolves to a file that exists.
+- `ci.yml`, `.pre-commit-config.yaml`, `.secrets.baseline` and `.gitleaks.toml`
+  all parse.
+- Local: `make lint`, `make typecheck`, `make test` (10 tests), and all six hooks.
+
+**Still open**
+
+- Branch protection on `main` (S0.3) — needs GitHub Settings; no `gh` CLI here.
+- API keys blank in `.env`. Anthropic needed Day 2; OpenAI Day 3.
+- Dependabot config, which RULES §4 asks for weekly, does not exist yet. It is
+  the prerequisite for SHA-pinning the actions, and belongs with the security
+  workflow rather than here.
+
+**Tomorrow's first step**
+
+`S1.3` — the docker-compose dev stack. Docker Desktop is running locally, which
+today's debugging needed anyway.
+
+---
+
 <!--
 Template for the next entry:
 

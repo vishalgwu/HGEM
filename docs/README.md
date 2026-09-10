@@ -5,10 +5,15 @@ extracts sourced facts, checks conflicts, scores confidence and impact, and choo
 automatic storage, human review, rejection, or one additional model evaluation.
 Every durable decision must have an auditable receipt.
 
-**Status: documentation only, reset on September 9, 2026.** The previous application
-scaffold, configuration, workflows, and local assistant settings have been removed.
-Implementation has not restarted. The repository contains only `docs/`; the local
-checkout also retains `.git/` for version control.
+**Status: the build has started.** The repository was reset to a documentation
+baseline on September 9, 2026, and `BUILD_NOTEBOOK.md` steps S1.1 (uv workspace)
+and S1.2 (pre-commit, Makefile, CI) are complete. So the toolchain and the gates
+are real - `make lint`, `make typecheck`, `make test`, the pre-commit hooks and
+GitHub Actions all run today - while `guardmem_core` is still an empty package.
+The next step is S1.3, the local datastore stack.
+
+Everything in this directory remains specification. Nothing here is evidence of
+an implemented feature; see "How to use this baseline" below.
 
 ## Start here
 
@@ -137,8 +142,19 @@ git checkout 74aa059 -- .gitignore LICENSE
 ## Consistency pass
 
 A second pass read all nine documents, the five ADRs, the three runbooks and the master PDF against
-each other and reconciled what they disagreed about. The PDF and `BUILD_NOTEBOOK.md` were confirmed
-to hold the same content; the PDF stays frozen and the Markdown is where corrections go.
+each other and reconciled what they disagreed about. The PDF stays frozen and the Markdown is where
+corrections go.
+
+> **Correction (2026-09-10).** This section used to say the PDF and
+> `BUILD_NOTEBOOK.md` "hold the same content". That is false, and was already
+> false when written. The PDF is intact - its SHA-256 still matches byte for
+> byte - but its *content* predates the reconciliation below. Measured against
+> the extracted text: it contains zero occurrences of "Checkpoint" and zero of
+> `tau_mid`, carries the invalid model id `claude-haiku-4-5-20251001` and the
+> previous-generation `claude-sonnet-4-5` / `claude-opus-4-1`, and still says
+> `gh repo create guardmem-ai`. Step coverage is otherwise identical - the same
+> 96 steps S0.1 to S28.4 and the same appendices A-G - so the Markdown is a
+> strict superset. **Build from the Markdown.**
 
 Contradictions resolved:
 

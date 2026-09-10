@@ -6,7 +6,11 @@
 #
 # Python 3.12 (BUILD_NOTEBOOK.md 0.5; every pyproject in the spec pins >=3.12).
 # Every version below was resolved together on 2026-09-10 and verified to
-# co-install with no conflicts - 318 packages including transitives.
+# co-install with no conflicts. This runtime-only set resolves to 260 packages
+# including transitives; adding requirements/dev.txt on top of it gives the 311
+# in requirements.lock.txt. (An earlier revision of this header said 318, which
+# was never right - it claimed more packages for the runtime set alone than the
+# runtime-plus-dev lock contains. Re-measured with `uv pip compile`.)
 #
 # LAYERING - this mirrors the dependency direction enforced by import-linter
 # (PROJECT_TREE.md "Ownership & Dependency Rules"), so the layer a package sits

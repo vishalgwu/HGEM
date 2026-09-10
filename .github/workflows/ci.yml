@@ -35,7 +35,10 @@ env:
   # Same reason as the Makefile: keep tool output encoding identical across
   # platforms so a gate never fails for an encoding reason.
   PYTHONIOENCODING: utf-8
-  # Fail instead of silently reaching for a different interpreter.
+  # Let uv fetch the interpreter .python-version pins rather than using whatever
+  # the runner image happens to ship. `never` would be the stricter-sounding
+  # value and is wrong here - it disables downloads, so `uv python install`
+  # below could not satisfy 3.12 at all.
   UV_PYTHON_DOWNLOADS: automatic
 
 jobs:
@@ -45,11 +48,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Action majors are bumped together and deliberately: every run before
+      # this one warned that checkout@v4, cache@v4 and setup-uv@v5 target Node
+      # 20, which the runners now force onto Node 24. Full-SHA pinning is the
+      # hardened form RULES.md 4 would eventually want, but it needs the weekly
+      # Dependabot that section also calls for; majors are the honest interim.
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           # Pinned for the same reason model ids are pinned in RULES.md 3 - a
           # floating toolchain makes a green build unreproducible. Matches the
@@ -94,12 +102,12 @@ jobs:
       - name: Check out the repository
         # Full history: gitleaks is far more useful when it can see more than
         # the tip commit.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.9.8"
           enable-cache: true
@@ -112,7 +120,7 @@ jobs:
         run: uv sync --locked --dev
 
       - name: Cache pre-commit environments
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}

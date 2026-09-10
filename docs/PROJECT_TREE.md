@@ -15,13 +15,22 @@ guardmem-ai/
 ├── Makefile                             # make dev / test / eval / bench / migrate / seed
 ├── pyproject.toml                       # uv workspace root
 ├── uv.lock
+├── .python-version                      # 3.12 - keeps lock, venv and ruff target in agreement
+├── requirements.txt                     # runtime aggregate over requirements/
+├── requirements-dev.txt                 # runtime + dev toolchain
+├── requirements.lock.txt                # fully-resolved pip-installable lock
+├── requirements/                        # layered, one file per dependency layer
 ├── pnpm-workspace.yaml
 ├── turbo.json
 ├── .env.example
-├── .pre-commit-config.yaml              # ruff, ruff-format, mypy, gitleaks, detect-secrets
+├── .gitignore
+├── .pre-commit-config.yaml              # ruff, ruff-format, mypy, import-linter, gitleaks, detect-secrets
+├── .secrets.baseline                    # detect-secrets reviewed findings - POSIX paths, UTF-8 hashes
+├── .gitleaks.toml                       # allowlists .secrets.baseline only; useDefault = true
+├── .gitattributes                       # line-ending determinism; *.pdf binary protects the master notebook
 ├── .dockerignore
 │
-├── docs/                                 # the only tree that exists today
+├── docs/                                 # specification suite
 │   ├── README.md                         # index + spec ownership
 │   ├── PRD.md
 │   ├── ARCHITECTURE.md

@@ -54,7 +54,6 @@ LOCAL_PACKAGES = frozenset({"guardmem-core", "guardmem-workspace"})
 
 # `Foo_Bar` and `foo-bar` are the same distribution to pip; normalise before
 # comparing so a naming style difference is never reported as a drift.
-_NAME = re.compile(r"^([A-Za-z0-9._-]+)")
 _PIN = re.compile(r"^([A-Za-z0-9._-]+)(?:\[[^\]]*\])?==([^\s;#]+)")
 _UV_ENTRY = re.compile(r'^name = "([^"]+)"\nversion = "([^"]+)"', re.MULTILINE)
 

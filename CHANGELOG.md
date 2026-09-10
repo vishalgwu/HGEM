@@ -53,6 +53,21 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **CI actions no longer run on deprecated Node 20.** `actions/checkout@v4`,
+  `actions/cache@v4` and `astral-sh/setup-uv@v5` were being forced onto Node 24
+  on every run; bumped to `@v5`, `@v6` and `@v7`. Also corrected a comment in
+  `ci.yml` that described `UV_PYTHON_DOWNLOADS=never` while the value was
+  `automatic` - the value was right and the annotation would have justified
+  breaking it.
+- **Documentation claims re-checked against the repository.** `docs/README.md`
+  no longer says the build has not started or that the master PDF matches
+  `BUILD_NOTEBOOK.md`; `docs/PROJECT_TREE.md`'s root listing now matches
+  `git ls-files` exactly; and `requirements.txt` states the measured 260-package
+  runtime resolution instead of an unverifiable 318.
+- **Dead weight removed.** An unused regex constant in
+  `tests/unit/test_dependency_consistency.py` (ruff's F401 does not cover unused
+  module-level names) and `tests/unit/.gitkeep`, whose directory now holds three
+  real test modules.
 - **detect-secrets hashes are locale-dependent, and now cannot be.** The tool
   hashes the secret string and opens files with the interpreter's default
   encoding, so a file containing any non-ASCII byte hashes differently on Windows
@@ -115,10 +130,9 @@ repository; the log records what happened while changing it.
   states the PDF and `BUILD_NOTEBOOK.md` "hold the same content"; that sentence
   is inaccurate. **Build from the Markdown.** The PDF is protected and must not
   be edited — corrections go in `BUILD_NOTEBOOK.md`.
-- **CI actions run on deprecated Node 20.** GitHub warns that
-  `actions/checkout@v4`, `actions/cache@v4` and `astral-sh/setup-uv@v5` are being
-  forced onto Node 24. Bump the majors; deliberately not bundled into a fix
-  commit.
+- **Dependabot is not configured.** `docs/RULES.md` §4 asks for it weekly, and it
+  is the prerequisite for pinning GitHub Actions to full commit SHAs rather than
+  majors. It belongs with the security workflow, not with S1.2.
 - Branch protection on `main` is not yet enabled (`BUILD_NOTEBOOK.md` S0.3).
 
 ## Project history
