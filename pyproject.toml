@@ -96,6 +96,16 @@ ignore = ["S101"]          # assert is fine in tests
 # S (flake8-bandit) stays ON here - these run in CI and touch the repo.
 "scripts/*" = ["T20"]
 
+# Without this, ruff's isort classifies `guardmem_core` as third-party - it is
+# installed editable, so it looks like any other site-packages distribution -
+# and interleaves it alphabetically among pytest/pydantic. That is not merely
+# cosmetic: PROJECT_TREE's ownership model is about dependency DIRECTION, and
+# it should be legible at the top of every file which imports are ours and
+# which are the outside world. Surfaced by the first module to import the
+# package (tests/unit/test_settings.py at S1.4).
+[tool.ruff.lint.isort]
+known-first-party = ["guardmem_core"]
+
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how
 # gates quietly change under you.

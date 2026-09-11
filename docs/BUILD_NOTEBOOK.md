@@ -689,6 +689,47 @@ and the matrix cannot be tuned per namespace.
 Model ids are the exact published strings. Do not append a date suffix to a current Claude id;
 `claude-haiku-4-5-20251001` is not a valid model.
 
+**Six corrections to this step, found by building it.**
+
+1. **`settings = Settings()` at module scope makes importing the module a side
+   effect.** With no `.env` and no environment - which is exactly CI - the
+   required fields raise, so the module cannot be imported at all, and a test
+   that only wants the `Settings` *class* cannot run. Build it lazily instead:
+   an `@lru_cache` `get_settings()`, plus a PEP 562 module `__getattr__` that
+   resolves the name `settings`. `from guardmem_core.settings import settings`
+   then still constructs on import and still fails loudly on bad configuration -
+   which is what the DONE WHEN asks for - while
+   `from guardmem_core.settings import Settings` stays side-effect free.
+   `get_settings()` is also what RULES §2.4 means by "injected".
+2. **`env_file_encoding="utf-8"` is not optional.** The default is the
+   interpreter's locale encoding, which is cp1252 on Windows, so a `.env`
+   carrying any non-ASCII byte parses differently on Windows and Linux. The same
+   defaulting cost two CI runs to diagnose in the detect-secrets baseline at
+   S1.2; do not leave it to chance twice.
+3. **Use the DSN types, not `str`.** `PostgresDsn`, `RedisDsn` and `AnyUrl` turn
+   a typo'd connection string into a startup failure with a precise message
+   instead of a confusing one at the first connection. Verified that each
+   round-trips to the exact input string, so nothing downstream receives a
+   normalised variant.
+4. **Add `frozen=True` and `strict=True`.** Configuration is read once; a
+   threshold mutated mid-run would make the audit record of a decision
+   unreproducible. `strict` does not break env parsing - pydantic-settings
+   coerces environment strings before strict validation - so it only rejects the
+   programmatic mistake of passing a `str` where a `float` is declared.
+5. **Validate more than ranges.** `env` is a `Literal["dev","staging","prod"]`,
+   `default_k` and `max_concurrent_scores` carry bounds, the timeouts must be
+   `> 0`, and `neo4j_uri` must use a scheme the driver speaks - the dev stack
+   publishes the HTTP browser on 7474 and bolt on 7687, so pointing this at the
+   browser is an easy mistake that looks like a working URL.
+6. **Set `known-first-party` for ruff's isort.** `guardmem_core` is installed
+   editable, so ruff classifies it as third-party and interleaves it among
+   pytest and pydantic. PROJECT_TREE's ownership model is about dependency
+   direction, and that should be legible at the top of every file.
+
+Worth adding a test that `.env.example`'s active keys are exactly the declared
+fields. The two drift silently otherwise, and because of `extra="forbid"` an
+active key that is not a declared field makes `Settings()` raise on every boot.
+
 DONE WHEN: `uv run python -c "from guardmem_core.settings import settings; print(settings.tau_hi)"`
 prints `0.78`, a validator rejects thresholds supplied out of order (`tau_lo < tau_mid < tau_hi`),
 and deleting a required var from `.env` makes it fail loudly at import.

@@ -17,6 +17,19 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.4 — typed settings.** `guardmem_core.settings` with 21 fields: DSN-typed
+  store URLs, `Literal` environment, bounded numerics, and validators for
+  threshold ordering and the Neo4j URI scheme. `frozen`, `strict`,
+  `extra="forbid"`, and an explicit `env_file_encoding="utf-8"` so a `.env` does
+  not parse differently on Windows and Linux. Built lazily through an
+  `@lru_cache` `get_settings()` plus a PEP 562 module `__getattr__`, so
+  `from guardmem_core.settings import settings` still fails loudly on bad
+  configuration while importing the `Settings` class stays side-effect free -
+  without which CI, which has no `.env`, could not import the module at all.
+  `tests/unit/test_settings.py` covers it to 100%, branches included, and pins
+  `.env.example`'s active keys to the declared fields.
+- **ruff `known-first-party`** — `guardmem_core` is installed editable, so isort
+  classified it as third-party and interleaved it among pytest and pydantic.
 - **S1.3 — local datastore stack.** `infra/docker/docker-compose.dev.yml` with
   Postgres+pgvector, Redis, Neo4j and Arize Phoenix; every image pinned to an
   exact version, every service healthchecked, every published port overridable

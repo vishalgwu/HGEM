@@ -798,6 +798,88 @@ actually running.
 
 ---
 
+## 2026-09-10 — Day 1 · S1.4 (typed settings)
+
+**Cross-check first: `.env.example` needed no changes.** It already carried
+exactly the 21 keys S1.4 declares, with every later-step variable present but
+commented out and labelled with the step that activates it. The version of the
+step I was handed is the pre-reconciliation one — it has no `GM_TAU_MID` and
+carries `claude-haiku-4-5-20251001`, `claude-sonnet-4-5` and `claude-opus-4-1`,
+all three of which Day 0 already recorded as invalid or previous-generation. The
+committed template and the corrected notebook were right; I built from those.
+
+**Shipped**
+
+- `packages/guardmem-core/src/guardmem_core/settings.py` — the first real module
+  in the package. 21 fields, DSN-typed store URLs, ordered-threshold and
+  Neo4j-scheme validators, `frozen`, `strict`, `extra="forbid"`.
+- `tests/unit/test_settings.py` — 16 tests. **100% coverage of settings.py,
+  branches included**, which matters more than the number suggests: this is the
+  first code the 85% gate has actually had to measure.
+- All three DONE WHEN checks pass: prints `0.78`, rejects out-of-order
+  thresholds, and fails loudly when a required variable is absent.
+
+**What broke / what I learned**
+
+- **`settings = Settings()` at module scope would have broken CI, and not
+  obviously.** Module-scope construction makes *importing* the module a side
+  effect: with no `.env` and no environment — exactly CI — the nine required
+  fields raise, so the module cannot be imported at all, and a test that only
+  wants the `Settings` class cannot run either. The notebook's own DONE WHEN
+  nonetheless wants import-time failure on bad config, so both properties are
+  real and they pull against each other.
+
+  Resolved with an `@lru_cache` `get_settings()` plus a PEP 562 module
+  `__getattr__` resolving the name `settings`. `from ... import settings` still
+  constructs and still fails loudly; `from ... import Settings` does not.
+  Verified from a directory with no `.env` and a `GM_`-free environment.
+  `get_settings()` is also what RULES §2.4 means by "injected", which a
+  module-level global is not.
+
+- **`env_file_encoding` defaults to the locale encoding.** That is cp1252 on
+  Windows, so a `.env` with any non-ASCII byte parses differently on the two
+  platforms. Identical root cause to the detect-secrets baseline bug that cost
+  two CI runs at S1.2. Set explicitly rather than discovered twice.
+
+- **The DSN types are free validation, and I checked they are lossless before
+  relying on it.** `PostgresDsn`, `RedisDsn` and `AnyUrl` all round-trip our
+  URLs to the exact input string, so no downstream caller sees a normalised
+  variant. A typo now fails at startup with a precise message instead of at the
+  first connection, halfway through a request.
+
+- **`strict=True` does not break environment parsing**, which I assumed it would.
+  pydantic-settings coerces env strings before strict validation, so `GM_TAU_HI=0.78`
+  still yields a float; strict only rejects passing a `str` where a `float` is
+  declared from Python. Tested rather than reasoned about.
+
+- **The first real import exposed an isort misconfiguration.** `guardmem_core`
+  is installed editable, so ruff classified it as third-party and wanted it
+  interleaved among pytest and pydantic. Cosmetic in one file; corrosive across
+  a package whose whole ownership model is about dependency direction. Fixed
+  with `known-first-party`, not by accepting the reordering.
+
+- **A validator that only checks ranges would have missed the failure that
+  matters.** Every threshold individually inside [0,1] can still be *ordered*
+  wrongly, and that produces an empty band in the decision matrix — a class of
+  candidate becomes unreachable while nothing errors anywhere. Same reasoning
+  drove the Neo4j scheme check: S1.3 publishes the HTTP browser on 7474 and bolt
+  on 7687, so a wrong URI answers on the port and fails in the driver.
+
+**Still open**
+
+- API keys are still blank in `.env`. `GM_ANTHROPIC_API_KEY` is needed at S2.2,
+  which is the next step that actually calls a model.
+- The `01_setup` containers still hold the documented datastore ports.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S1.5` — domain types and the error hierarchy. `NewType` ids so passing a raw
+`str` where an `AssertionId` is expected is a type error, and the single
+exception hierarchy RULES §2.3 maps to HTTP and MCP codes exactly once.
+
+---
+
 <!--
 Template for the next entry:
 
