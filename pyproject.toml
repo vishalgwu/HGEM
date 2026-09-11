@@ -88,6 +88,13 @@ ignore = ["S101"]          # assert is fine in tests
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "T20"]
+# scripts/ holds command-line tools - the pre-commit baseline normaliser today,
+# and seed_demo_tenant / replay_trace / threshold_tuner as their steps arrive.
+# T20 bans `print` because RULES.md 6 requires structured logging in the
+# application; for a CLI, stdout IS the interface, and a hook that logged JSON
+# to a file instead would be useless to the developer reading its output.
+# S (flake8-bandit) stays ON here - these run in CI and touch the repo.
+"scripts/*" = ["T20"]
 
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how

@@ -508,65 +508,112 @@ WHERE: `infra/docker/docker-compose.dev.yml`
 TIME: 40 min
 WHY: this is the answer to "database where". Everything local, nothing in the cloud until day 26.
 
-DO:
+DO — four services, every image pinned to an exact version, every one with a
+healthcheck:
+
+| Service | Image | Ports | Holds |
+|---|---|---|---|
+| postgres | `pgvector/pgvector:0.8.6-pg16` | 5432 | assertions, audit chain, outbox, review tasks, embeddings |
+| redis | `redis:7.4-alpine` | 6379 | eval queue, rate limits, idempotency keys, review leases |
+| neo4j | `neo4j:5.26.30-community` | 7474 / 7687 | entity graph, supersession and provenance edges |
+| phoenix | `arizephoenix/phoenix:20.9.0` | 6006 / 4317 | eval + drift surface, wired up at S13.1 |
+
+Also create `infra/docker/initdb/01-extensions.sql`, mounted at
+`/docker-entrypoint-initdb.d`. The Postgres entrypoint runs it once on an empty
+data directory:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;    -- ARCHITECTURE 5: assertion.embedding
+CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- digest() for the S5.5 audit chain
+CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- lexical half of hybrid retrieval
+```
+
+Publish every port through a shell-overridable variable so a conflict does not
+force an edit to the file:
+
 ```yaml
-services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: guardmem
-      POSTGRES_PASSWORD: guardmem
-      POSTGRES_DB: guardmem
-    ports: ["5432:5432"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U guardmem"]
-      interval: 5s
-
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-    command: ["redis-server", "--appendonly", "yes"]
-
-  neo4j:
-    image: neo4j:5-community
-    environment:
-      NEO4J_AUTH: neo4j/guardmem123
-      NEO4J_PLUGINS: '["apoc"]'
-    ports: ["7474:7474", "7687:7687"]
-    volumes: ["neo4jdata:/data"]
-
-  langfuse:
-    image: langfuse/langfuse:latest
-    depends_on: [postgres]
-    environment:
-      DATABASE_URL: postgresql://guardmem:guardmem@postgres:5432/langfuse
-      NEXTAUTH_SECRET: dev-secret-change-me
-      SALT: dev-salt
-      NEXTAUTH_URL: http://localhost:3010
-    ports: ["3010:3000"]
-
-  phoenix:
-    image: arizephoenix/phoenix:latest
-    ports: ["6006:6006"]
-
-volumes: {pgdata: {}, neo4jdata: {}}
+ports: ["${POSTGRES_PORT:-5432}:5432"]
 ```
 
 ```bash
-make dev
-docker compose -f infra/docker/docker-compose.dev.yml ps   # all healthy
-psql postgresql://guardmem:guardmem@localhost:5432/guardmem -c "CREATE EXTENSION IF NOT EXISTS vector;"
-psql postgresql://guardmem:guardmem@localhost:5432/postgres -c "CREATE DATABASE langfuse;"
+make dev        # up -d --wait: blocks until every service reports healthy
+make dev-ps     # health at a glance
+make down       # stop, keep the volumes
+make dev-reset  # stop AND delete the volumes - separate target on purpose
 ```
 
-DONE WHEN: `psql ... -c "SELECT '[1,2,3]'::vector;"` returns a row, Neo4j browser loads at
-`localhost:7474`, and `redis-cli ping` returns PONG.
+**Nine corrections to this step, found by building it.** The version above
+already includes them.
 
-COMMIT: `chore(s1.3): dev docker stack with pgvector, neo4j, redis, langfuse, phoenix`
+1. **Langfuse cannot work as specified, so it is not in this file.** S1.3 gives
+   `langfuse/langfuse:latest` with four environment variables. `latest` is now
+   **v4**, and v4 requires ClickHouse, MinIO, an authenticated Redis and a
+   separate `langfuse-worker` container — confirmed against upstream's own
+   `docker-compose.yml`. The four-line block is a **v2** configuration; on v4 it
+   starts a container that crashes. Nothing reads Langfuse until S13.1, it is
+   absent from this step's DONE WHEN, and `PROJECT_TREE.md` already reserves
+   `docker-compose.observability.yml` for the observability tier. It belongs
+   there, with the stack it actually needs. Pinning `langfuse:2` instead would
+   work today but is end-of-life and stores dev traces in a data model the v3+
+   API does not carry forward.
+2. **`latest` and bare majors are not reproducible.** `RULES.md` §3 pins model
+   ids so replay is honest; a datastore that silently changes major version
+   between two `make dev` runs breaks reproducibility the same way. Every image
+   is pinned to an exact version, bumped deliberately.
+3. **Redis gets no volume in the original, which throws away `--appendonly yes`.**
+   That flag writes the AOF to `/data`; with no volume mounted there, the
+   durability it buys disappears the moment the container is recreated.
+4. **Only Postgres had a healthcheck, but the DONE WHEN says "all healthy".**
+   `docker compose ps` cannot report health for a service that declares none.
+   All four have one now, and `make dev` runs `up -d --wait` so an unhealthy
+   service fails the command instead of being discovered later by something
+   confusing.
+5. **The Phoenix image is distroless — `CMD-SHELL` cannot work on it.** Every
+   shell-form probe fails with `exec: "/bin/sh": stat /bin/sh: no such file or
+   directory` and the container is marked unhealthy while the application serves
+   HTTP 200 perfectly well. Use the exec form: `["CMD", "python", "-c", "..."]`.
+6. **The manual `psql` steps are replaced by the initdb script.** `CREATE
+   EXTENSION IF NOT EXISTS vector` as a step you run afterwards is a step that
+   gets forgotten on the next fresh clone, and its symptom — `type "vector" does
+   not exist` — is the first row of this notebook's own troubleshooting table.
+   The `CREATE DATABASE langfuse` line goes away with Langfuse.
+7. **`pg_isready` needs `-d`.** Without a database argument it can report ready
+   before the init scripts have finished, so `--wait` returns and the very next
+   `psql` command races the extension that was supposed to exist.
+8. **Port-override variables must NOT use the `GM_` prefix.** `GM_` is the
+   settings namespace, and S1.4's `Settings` is `extra="forbid"` — any key in
+   `.env` that is not a declared field raises at import. A compose-only
+   `GM_POSTGRES_PORT` in `.env` stops the application booting. Use unprefixed
+   names read from the shell, and keep them out of `.env` entirely.
+9. **Neo4j needs a long `start_period`.** It downloads and installs the apoc
+   plugin on first boot; 60s of grace avoids a false unhealthy. Verify the
+   plugin actually loaded with `RETURN apoc.version()` rather than assuming
+   `NEO4J_PLUGINS` took effect.
 
-TROUBLESHOOTING: port 5432 already in use means you have a local Postgres. Either stop it
-(`brew services stop postgresql`) or change the mapping to `5433:5432` and update `.env`.
+DONE WHEN: `psql ... -c "SELECT '[1,2,3]'::vector;"` returns a row, the Neo4j
+browser loads at `localhost:7474`, and `redis-cli ping` returns PONG. Confirm
+`make dev` exits 0 — with `--wait` that is itself the "all healthy" check.
+
+Worth proving once, because a datastore stack that loses data on restart is
+worse than no stack: write a row to each store, `make down`, `make dev`, and
+read it back.
+
+COMMIT: `chore(s1.3): dev docker stack with pgvector, neo4j, redis, phoenix`
+
+TROUBLESHOOTING: "port 5432 already in use" does not only mean a local Postgres.
+On a machine that has run any other compose stack it is usually **another
+container**, and a `restart: unless-stopped` policy brings it back every time
+Docker Desktop starts. `docker ps` first, and
+`docker inspect <name> --format '{{index .Config.Labels "com.docker.compose.project"}}'`
+tells you which project owns it before you stop anything. The original advice
+here, `brew services stop postgresql`, is macOS-only. Either free the port or
+run this stack beside it:
+
+```bash
+POSTGRES_PORT=5433 REDIS_PORT=6380 NEO4J_HTTP_PORT=7475 NEO4J_BOLT_PORT=7688 make dev
+```
+
+and update `GM_DATABASE_URL`, `GM_REDIS_URL` and `GM_NEO4J_URI` in `.env` to match.
 
 ---
 

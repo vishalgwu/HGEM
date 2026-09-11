@@ -191,9 +191,11 @@ guardmem-ai/
 │
 ├── infra/
 │   ├── docker/
-│   │   ├── docker-compose.dev.yml       # postgres+pgvector, neo4j, redis, langfuse, phoenix
+│   │   ├── docker-compose.dev.yml       # postgres+pgvector, redis, neo4j, phoenix
+│   │   ├── initdb/                      # Postgres first-boot SQL: vector, pgcrypto, pg_trgm
 │   │   ├── docker-compose.test.yml
 │   │   └── docker-compose.observability.yml   # otel-collector, prometheus, grafana, tempo
+│   │                                    # + langfuse, which needs clickhouse/minio from v3 on
 │   ├── terraform/
 │   │   ├── modules/{cloud_run,cloud_sql,memorystore,secret_manager,artifact_registry}/
 │   │   └── envs/{dev,staging,prod}/
@@ -233,6 +235,7 @@ guardmem-ai/
 │   └── conftest.py
 │
 ├── scripts/
+│   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths
 │   ├── seed_demo_tenant.py
 │   ├── replay_trace.py                  # deterministic re-run of any audited decision
 │   └── threshold_tuner.py               # fit τ/ρ from labelled reviewer decisions

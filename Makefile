@@ -43,7 +43,10 @@ help:
 	@echo   audit - pip-audit over the installed dependency set
 	@echo   clean - delete tool caches and coverage output
 	@echo   dev - start the local datastore stack, from step S1.3
-	@echo   down - stop the local datastore stack, from step S1.3
+	@echo   down - stop the local datastore stack, keeps volumes, from step S1.3
+	@echo   dev-reset - stop the stack AND delete its volumes, from step S1.3
+	@echo   dev-ps - show datastore container health, from step S1.3
+	@echo   dev-logs - tail the datastore logs, from step S1.3
 	@echo   migrate - alembic upgrade head, from step S3.1
 	@echo   seed - load the demo tenant, from step S3.6
 	@echo   eval - run the eval suites, from step S22.1
@@ -87,18 +90,40 @@ clean:
 	@echo removed tool caches
 
 # --- infrastructure --------------------------------------------------------
-# These reference files created by later steps. They are declared now because
-# S1.2 specifies them and because the target list is the documented interface;
-# each one fails with its own tool naming the missing file, which is a clearer
-# error than a Makefile guard would produce.
+# migrate/seed/eval reference files created by later steps. They are declared
+# now because S1.2 specifies them and because the target list is the documented
+# interface; each fails with its own tool naming the missing file, which is a
+# clearer error than a Makefile guard would produce.
 
 COMPOSE := infra/docker/docker-compose.dev.yml
 
+# `--wait` blocks until every service reports healthy, rather than until the
+# containers have merely been created. S1.3's next instruction is to run psql
+# against Postgres, and without this that command races the database's first
+# boot - which on a fresh volume includes initdb and the extension scripts.
+# It also means a service that comes up unhealthy fails `make dev` instead of
+# being discovered later by something confusing.
 dev:                        ## S1.3
-	docker compose -f $(COMPOSE) up -d
+	docker compose -f $(COMPOSE) up -d --wait
 
+# Keeps the named volumes. Use `make dev-reset` to discard the data too.
 down:                       ## S1.3
 	docker compose -f $(COMPOSE) down
+
+# Deliberately separate from `down`, and deliberately not the default: `down -v`
+# destroys the Postgres volume, and with it every assertion and audit row in the
+# local stack. Having it as its own named target means nobody reaches for the
+# flag on a whim.
+dev-reset:                  ## S1.3
+	docker compose -f $(COMPOSE) down --volumes
+
+# The stack is five ports and four services; when something will not connect,
+# this is the first thing to look at.
+dev-ps:                     ## S1.3
+	docker compose -f $(COMPOSE) ps
+
+dev-logs:                   ## S1.3
+	docker compose -f $(COMPOSE) logs --tail=100
 
 migrate:                    ## S3.1
 	$(UV) alembic upgrade head

@@ -17,6 +17,29 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.3 — local datastore stack.** `infra/docker/docker-compose.dev.yml` with
+  Postgres+pgvector, Redis, Neo4j and Arize Phoenix; every image pinned to an
+  exact version, every service healthchecked, every published port overridable
+  from the shell so a conflict needs no edit to the file.
+  `infra/docker/initdb/01-extensions.sql` creates `vector`, `pgcrypto` and
+  `pg_trgm` on first boot, replacing the manual `psql` steps. `make dev` waits
+  for health; `make dev-reset`, `make dev-ps` and `make dev-logs` added.
+  **Langfuse is deliberately absent** - `latest` is v4, which requires
+  ClickHouse, MinIO, an authenticated Redis and a worker container, and the
+  notebook's four-line config is v2-shaped. It arrives at S13.1 with the stack
+  it needs.
+- **`scripts/normalise_secrets_baseline.py`** — runs after `detect-secrets` in
+  pre-commit and rewrites baseline result paths to POSIX separators. The earlier
+  one-off fix was not durable: the hook rewrites those paths with the local
+  separator every time it updates the baseline, which happens whenever a line
+  number shifts in a baselined file. Idempotent, exits 1 only when it changed
+  something, and rewrites the path strings alone so the `exclude` regexes are
+  untouched.
+- **`tests/unit/test_compose_stack.py`** — images must be pinned to at least
+  `MAJOR.MINOR` (a bare `pg16` or `7-alpine` moves just like `latest`), every
+  service must declare a healthcheck (`up --wait` treats a missing one as
+  satisfied, so it passes the gate unchecked), and no two services may publish
+  the same host port.
 - **S1.2 — gates.** `.pre-commit-config.yaml` (ruff-check, ruff-format,
   gitleaks, detect-secrets, and mypy + import-linter as `local` hooks running the
   project toolchain); a `Makefile` whose `help` is the default goal and whose

@@ -1,0 +1,182 @@
+# GuardMem AI - local datastore stack.  BUILD_NOTEBOOK.md S1.3
+#
+# "This is the answer to 'database where'. Everything local, nothing in the
+# cloud until day 26."
+#
+#   make dev     start and wait until every service reports healthy
+#   make down    stop, keeping the volumes
+#
+# Ports match BUILD_NOTEBOOK.md 0.4 and the connection strings already committed
+# in .env.example, so the two cannot drift:
+#
+#   5432  Postgres + pgvector    GM_DATABASE_URL
+#   6379  Redis                  GM_REDIS_URL
+#   7474  Neo4j browser          -
+#   7687  Neo4j bolt             GM_NEO4J_URI
+#   6006  Arize Phoenix UI       -
+#   4317  Phoenix OTLP gRPC      GM_OTEL_ENDPOINT (S13.1)
+#
+# PORT CONFLICTS: every published port is overridable from the shell, so a local
+# Postgres on 5432 does not force an edit to this file:
+#
+#     POSTGRES_PORT=5433 make dev        # then update GM_DATABASE_URL in .env
+#
+# These names deliberately carry NO `GM_` prefix. `GM_` is the settings
+# namespace, and S1.4's Settings object is `extra="forbid"` - it raises on any
+# key in .env that is not a declared field. Putting a compose-only variable in
+# .env with that prefix would stop the application booting, which is the trap
+# the Day 0 log recorded. Compose reads these from the shell environment; they
+# do not belong in .env at all.
+#
+# IMAGES ARE PINNED TO EXACT VERSIONS, not `latest`. RULES.md 3 pins model ids
+# so that replay is honest; a datastore that silently changes major version
+# between two `make dev` runs breaks reproducibility the same way. Bump these
+# deliberately, in a commit that says why.
+#
+# NOT HERE: Langfuse. S1.3 lists it, but `langfuse/langfuse:latest` is now v4,
+# and v4 requires ClickHouse, MinIO, an authenticated Redis and a separate
+# worker container - the four-line configuration in the notebook is a v2 config
+# and cannot work on it. Nothing reads Langfuse until S13.1, it is absent from
+# the S1.3 DONE WHEN, and PROJECT_TREE.md already reserves
+# `docker-compose.observability.yml` for the observability tier. It arrives
+# there, with the stack it actually needs. See BUILD_NOTEBOOK.md S1.3.
+
+name: guardmem-dev
+
+services:
+  # --- Postgres + pgvector -------------------------------------------------
+  # Source of truth. ARCHITECTURE.md 5: assertions, the hash-chained audit log,
+  # the outbox, review tasks, the usage ledger, and the embeddings themselves.
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg16
+    container_name: guardmem-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: guardmem
+      POSTGRES_PASSWORD: guardmem
+      POSTGRES_DB: guardmem
+      # Without this the entrypoint initialises the cluster with the host's
+      # locale, and index ordering then differs between machines.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs once, on an empty data directory. Creates the vector extension so
+      # the S1.3 DONE WHEN passes without a manual psql step.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -d matters: without it pg_isready checks the `guardmem` ROLE against a
+      # database of the same name only by luck, and reports ready before the
+      # init scripts have run.
+      test: ["CMD-SHELL", "pg_isready -U guardmem -d guardmem"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      # The first boot runs initdb plus the extension scripts. Health failures
+      # during that window are expected, not a fault.
+      start_period: 30s
+
+  # --- Redis ---------------------------------------------------------------
+  # Eval queue (arq streams), rate limits, idempotency keys, review leases and
+  # the semantic response cache - BUILD_NOTEBOOK.md 0.4.
+  redis:
+    image: redis:7.4-alpine
+    container_name: guardmem-redis
+    restart: unless-stopped
+    # Redis 7, not 8, on purpose: arq 0.28.0 constrains the redis PYTHON client
+    # to <6, and the dev server is kept on the generation that client is
+    # exercised against. Revisit together with that pin.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      # `--appendonly yes` writes the AOF to /data. S1.3 as written declares no
+      # volume, so the durability that flag buys is thrown away the moment the
+      # container is recreated.
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  # --- Neo4j ---------------------------------------------------------------
+  # Relational entity state: (:Entity)-[:ASSERTS]->(...), supersession edges and
+  # provenance edges (ARCHITECTURE.md 5). The pipeline talks to it through the
+  # GraphStore protocol, so S3.4 can start on NetworkX and swap this in at S7.1
+  # via GM_GRAPH_BACKEND.
+  neo4j:
+    image: neo4j:5.26.30-community
+    container_name: guardmem-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/guardmem123
+      NEO4J_PLUGINS: '["apoc"]'
+      # Community edition is single-database; naming it explicitly keeps the
+      # bolt URI in .env.example unambiguous.
+      NEO4J_dbms_default__database: neo4j
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4jdata:/data
+      - neo4jlogs:/logs
+    healthcheck:
+      # cypher-shell ships in the image; an HTTP probe would need curl or wget,
+      # which it does not carry. This also proves auth works, not just that a
+      # port is open.
+      test:
+        ["CMD-SHELL", "cypher-shell -u neo4j -p guardmem123 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      # Neo4j downloads and installs the apoc plugin on first boot.
+      start_period: 60s
+
+  # --- Arize Phoenix -------------------------------------------------------
+  # Eval and drift surface (ARCHITECTURE.md 2.5). Nothing exports to it until
+  # S13.1; it is here because the stack is easier to bring up once than twice,
+  # and because it is a single dependency-free container - unlike Langfuse, see
+  # the header.
+  phoenix:
+    image: arizephoenix/phoenix:20.9.0
+    container_name: guardmem-phoenix
+    restart: unless-stopped
+    environment:
+      # Persist traces to the mounted volume instead of the container's
+      # ephemeral filesystem.
+      PHOENIX_WORKING_DIR: /mnt/data
+    ports:
+      - "${PHOENIX_PORT:-6006}:6006"
+      # OTLP gRPC receiver - GM_OTEL_ENDPOINT points here at S13.1.
+      - "${PHOENIX_OTLP_PORT:-4317}:4317"
+    volumes:
+      - phoenixdata:/mnt/data
+    healthcheck:
+      # `CMD`, not `CMD-SHELL`. This image is distroless - it has no /bin/sh at
+      # all, so every CMD-SHELL probe fails with
+      #     OCI runtime exec failed: exec: "/bin/sh": stat /bin/sh:
+      #     no such file or directory
+      # and the container is marked unhealthy while the application is serving
+      # perfectly well. The exec form runs the binary directly, and `python` is
+      # on PATH inside the image.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://localhost:6006')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  neo4jdata: {}
+  neo4jlogs: {}
+  phoenixdata: {}

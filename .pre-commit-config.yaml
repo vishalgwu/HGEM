@@ -87,6 +87,21 @@ repos:
         # positives, and they contain no credentials by construction.
         exclude: ^(requirements\.lock\.txt|uv\.lock|\.secrets\.baseline)$
 
+      # Runs immediately after, because detect-secrets writes result paths with
+      # the LOCAL separator every time it updates the baseline - and it updates
+      # it whenever a line number shifts in a baselined file. Left alone, an
+      # ordinary edit on Windows reintroduces `docs\BUILD_NOTEBOOK.md`, which
+      # Linux CI never matches, and tests/unit/test_secrets_baseline.py fails.
+      # Repairing that by hand on every commit is a step that eventually gets
+      # skipped, on the one file where a careless change allowlists a real
+      # secret.
+      - id: normalise-secrets-baseline
+        name: Normalise .secrets.baseline paths
+        entry: uv run python -X utf8 scripts/normalise_secrets_baseline.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # --- type + architecture gates (project toolchain, not an isolated env) ---
   - repo: local
     hooks:

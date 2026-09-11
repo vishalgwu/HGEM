@@ -677,6 +677,127 @@ today's debugging needed anyway.
 
 ---
 
+## 2026-09-10 — Day 1 · S1.3 (dev datastore stack)
+
+**Shipped**
+
+- `infra/docker/docker-compose.dev.yml` — postgres+pgvector, redis, neo4j,
+  phoenix. Every image pinned to an exact version, every service with a
+  healthcheck, every published port overridable from the shell.
+- `infra/docker/initdb/01-extensions.sql` — runs once on an empty data
+  directory and creates `vector`, `pgcrypto` and `pg_trgm`, so the DONE WHEN
+  passes straight after `make dev` with no manual `psql`.
+- Makefile: `dev` now uses `up -d --wait`, plus `dev-reset`, `dev-ps` and
+  `dev-logs`. `dev-reset` is a separate named target because `down --volumes`
+  destroys every assertion and audit row in the local stack, and that should
+  never be a flag somebody adds on a whim.
+- `tests/unit/test_compose_stack.py` — four tests making the compose rules
+  enforceable: images pinned to `MAJOR.MINOR` or better, every service declares
+  a healthcheck, no host-port collisions, and a guard so the suite cannot pass
+  vacuously if the glob stops matching. Negative-tested both main rules.
+
+**S1.3 DONE WHEN — all three pass**
+
+    SELECT '[1,2,3]'::vector   ->  [1,2,3]   (1 row)
+    GET localhost:7474         ->  HTTP 200, and bolt auth works
+    redis-cli ping             ->  PONG
+
+`make dev` exits 0, which with `--wait` *is* the "all healthy" check. Extensions
+present: vector 0.8.6, pg_trgm 1.6, pgcrypto 1.3. apoc 5.26.30 confirmed loaded
+with `RETURN apoc.version()` rather than assuming `NEO4J_PLUGINS` took effect.
+
+Also proved persistence, because a datastore stack that loses data on restart is
+worse than none: wrote a row to each of the three stores, `make down`,
+`make dev`, read all three back intact. Probe data removed afterwards — all
+three stores verified empty.
+
+**What broke / what I learned**
+
+- **Langfuse as specified cannot work, and that is a real fork, so I asked.**
+  `langfuse/langfuse:latest` is now **v4**, and v4 needs ClickHouse, MinIO, an
+  authenticated Redis and a separate worker container — confirmed against
+  upstream's own `docker-compose.yml`, not from memory. The four-line block in
+  S1.3 is a **v2** configuration; on v4 it starts a container that crashes.
+  Decision taken: defer to S13.1, where `docker-compose.observability.yml`
+  already exists in the blueprint and where something finally reads it. Nothing
+  in S1.3's DONE WHEN touches Langfuse. The alternative, pinning `langfuse:2`,
+  works today but is end-of-life and stores dev traces in a data model v3+ does
+  not carry forward.
+
+- **The port conflict was not the one the notebook predicts.** S1.3's
+  troubleshooting assumes "a local Postgres" and offers `brew services stop
+  postgresql`, which is macOS-only. What actually held 5432, 6379, 7474 and 7687
+  was **three containers from a different repository** —
+  `com.docker.compose.project=01_setup`, created 2026-05-09, mounting
+  `C:\college\Github\Research\Human-Gated-External-Memory-HGEM\...`. They
+  have `restart: unless-stopped`, so starting Docker Desktop for this work
+  brought them back. Not mine to stop: they carry their own data volume. Verified
+  this stack on override ports instead, which also exercised the override path.
+  Worth noting their Postgres is `postgres:15` — **no pgvector** — so pointing
+  `GM_DATABASE_URL` at it would produce exactly the `type "vector" does not
+  exist` error at the top of the notebook's troubleshooting table.
+
+- **The Phoenix image is distroless, so `CMD-SHELL` can never work on it.**
+  Every probe failed with `exec: "/bin/sh": stat /bin/sh: no such file or
+  directory` while the application was serving HTTP 200 quite happily, and
+  `make dev` correctly refused to report success. The exec form —
+  `["CMD", "python", "-c", ...]` — runs the binary directly and passes. Good
+  argument for `--wait`: the failure surfaced immediately instead of at the
+  first `psql`.
+
+- **`--appendonly yes` with no volume buys nothing.** S1.3 sets the flag on
+  Redis and declares no `/data` volume, so the AOF it writes is discarded the
+  moment the container is recreated. Same class of mistake as a healthcheck on
+  only one of five services while the acceptance check reads "all healthy".
+
+- **A missing healthcheck is worse than a failing one under `--wait`.** Compose
+  treats a service with no healthcheck as satisfied as soon as it starts, so it
+  passes the gate without ever being checked — and `--wait` returns while it is
+  still booting. That is why the new test asserts every service declares one.
+
+- **The `.secrets.baseline` path fix from earlier today was not durable, and I
+  only found out because this step touched a baselined file.** Yesterday's fix
+  corrected the committed file; it did nothing about the fact that
+  `detect-secrets` **rewrites** those paths with the local separator every time
+  it updates the baseline - which it does whenever a line number shifts. Adding
+  S1.3 grew `BUILD_NOTEBOOK.md`, the baselined finding moved from line 543 to
+  629, and the hook helpfully rewrote all the paths back to Windows form.
+  `tests/unit/test_secrets_baseline.py` caught it, in real conditions rather
+  than as a synthetic negative test, which is the clearest argument for that
+  test existing.
+
+  Repairing it by hand on every commit is the kind of step that gets skipped
+  under pressure, on the one file where a careless change allowlists a real
+  secret. So `scripts/normalise_secrets_baseline.py` now runs straight after
+  `detect-secrets` in pre-commit and POSIX-ifies the paths automatically -
+  idempotent, exits 1 only when it changed something, and touches the result
+  path strings alone so the `exclude` regexes survive. It fixed all three paths
+  unprompted on the next run.
+
+  Two smaller things fell out of writing it: `scripts/*` needed a `T20`
+  per-file-ignore, because a pre-commit hook's stdout *is* its interface while
+  RULES §6 rightly bans `print` in the application; and a genuine new finding
+  had to be reviewed rather than waved through - `POSTGRES_PASSWORD: guardmem`
+  in the compose file, the same dev credential already baselined from
+  `.env.example`. All five baselined findings were re-read; none is real.
+
+**Still open**
+
+- The `01_setup` containers still hold the documented ports. To use 5432 etc.,
+  stop that stack (`docker stop hgem_postgres hgem_redis hgem_neo4j`) — it
+  belongs to the `Research\Human-Gated-External-Memory-HGEM` checkout, so that
+  is a decision for whoever owns that work, not this repo.
+- Branch protection on `main` (S0.3); API keys blank in `.env`.
+- Langfuse arrives at S13.1 with clickhouse and minio alongside it.
+
+**Tomorrow's first step**
+
+`S1.4` — the typed settings object. `.env.example` already carries exactly the
+21 fields it declares, and the datastore URLs in it now match a stack that is
+actually running.
+
+---
+
 <!--
 Template for the next entry:
 
