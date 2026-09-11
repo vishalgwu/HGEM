@@ -668,7 +668,7 @@ and two of them is not a real expense.
 - A `git push` hung once and exited quietly without transferring anything;
   `git ls-remote` showed the branch still on the previous commit. Retrying
   worked immediately. Worth knowing that a silent push here is not proof of a
-  push — check the remote ref.
+  push — check the remote ref. **Root cause found at S1.4 — see that entry. It is not the network, and “just retry” is the wrong lesson.**
 
 **Tomorrow's first step**
 
@@ -864,6 +864,25 @@ committed template and the corrected notebook were right; I built from those.
   candidate becomes unreachable while nothing errors anywhere. Same reasoning
   drove the Neo4j scheme check: S1.3 publishes the HTTP browser on 7474 and bolt
   on 7687, so a wrong URI answers on the port and fails in the driver.
+
+- **The push stalls are the local credential helper, not GitHub.** Three pushes
+  hung; the first two cleared on retry, the third did not, so I stopped guessing
+  and traced it. `GIT_TRACE=1` puts the gap in one place:
+
+      21:03:00.668  resolved executable dir ...
+      21:03:18.904  start_command: git credential-manager store
+
+  `git-credential-manager get` sat for ~18 seconds before the transfer began.
+  That is why reads always looked fine — `git ls-remote` returned in 0.8s and
+  `api.github.com` in 0.29s, and neither goes through that path. Where GCM
+  exceeded my command timeout the push presented as a hang, and the retry
+  succeeding was just GCM being warm.
+
+  The honest conclusion is the opposite of the one I was forming: GitHub was
+  never flaky, and "retry until it sticks" would have been the wrong habit.
+  `GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=60` makes a genuinely
+  stalled transfer abort instead of hang. Verifying the remote ref after every
+  push stays the rule regardless.
 
 **Still open**
 
