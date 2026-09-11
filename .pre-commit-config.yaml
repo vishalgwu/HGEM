@@ -106,14 +106,19 @@ repos:
   - repo: local
     hooks:
       - id: mypy
-        name: mypy --strict (guardmem-core)
-        entry: uv run mypy packages/guardmem-core/src
+        name: mypy --strict (guardmem-core + tests)
+        # Same arguments as `make typecheck`, deliberately. S1.7 widened that
+        # target to `tests` - Protocol is structural, so the conformance of
+        # tests/fixtures/fakes.py is only checkable by mypy - and a hook that
+        # kept checking the narrower set would pass locally and fail in CI,
+        # which is the drift deviation 2 in this file's header exists to stop.
+        entry: uv run mypy packages/guardmem-core/src tests
         language: system
         pass_filenames: false
         require_serial: true
         # Also trigger on pyproject.toml: the strictness settings live there, so
         # a config change can break typing without any .py file changing.
-        files: ^(packages/guardmem-core/src/.*\.py|pyproject\.toml)$
+        files: ^(packages/guardmem-core/src/.*\.py|tests/.*\.py|pyproject\.toml)$
 
       - id: lint-imports
         name: import-linter contracts (RULES.md 2.4)
