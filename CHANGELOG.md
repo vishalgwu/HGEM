@@ -17,6 +17,34 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.7 — the three infrastructure protocols.** `llm/base.py` (`Tier`,
+  `LLMResponse`, `LLMClient`), `memory/vector/base.py` (`VectorStore`) and
+  `memory/graph/base.py` (`GraphStore`). Structural typing per `RULES.md` §2.1,
+  so no provider or driver SDK is ever a dependency of the decision engine.
+  Neither `Tier` nor `LLMResponse` is defined by the step; the first is
+  `ARCHITECTURE.md` §2.8's ladder, the second carries everything `RULES.md` §3
+  requires be recorded of a call — except `prompt_version`, which the client
+  cannot know, since it is handed a rendered string and the caller chose the
+  file. Deliberately **not** `@runtime_checkable`: that compares method names
+  and ignores signatures, arity and async-ness, so it reads like a guarantee
+  while checking almost nothing.
+- **`tests/fixtures/fakes.py`** — `FakeLLM`, `FakeVectorStore`,
+  `FakeGraphStore`, how every unit test runs without Docker for the next four
+  days. Fakes rather than mocks, because three of the contracts are
+  behavioural: `search` hides tombstoned and invisible rows (invariant I6),
+  `supersede` retires rather than deletes, and `upsert` is idempotent by id for
+  the outbox replay S3.3 requires. `tests/unit/test_fakes.py` holds them to all
+  three — the step asks only that they typecheck, but a fake that permits what
+  pgvector forbids makes the whole week-1 suite a measurement of the wrong
+  system, silently and with every test green.
+- **`tests/fixtures/strategies.py`** — the hypothesis strategies moved out of
+  the property module, which was at the 400-line cap with three quarters of it
+  being data generation. Ids are now `NewType`-typed rather than bare `str`.
+- **The vector store owns write-side embedding**, recorded on the protocol
+  because the two signatures otherwise disagree: `upsert` takes assertions,
+  `search` takes a vector, and `StoredAssertion` carries no embedding field.
+  `BUILD_NOTEBOOK.md` §0.4 names `pgvector_store.py` as the owner module for
+  embeddings and `GM_EMBED_MODEL` arrives at S3.2, which is that store.
 - **S1.6 — the Pydantic schema layer.** `guardmem_core.schemas`, seven modules
   and 16 models: `base` (`GMModel` plus the shared `ObjectValue` alias),
   `candidate`, `entity`, `verdict`, `policy`, `receipt`, `review`. Every model
@@ -141,6 +169,25 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **`make typecheck` could not see the test suite, and 19 errors were hiding
+  there.** The target ran `mypy` over `packages/guardmem-core/src` alone, which
+  made S1.7's DONE WHEN — "fakes satisfy the protocols under `mypy --strict`" —
+  impossible to verify, since `Protocol` is structural and nothing at runtime
+  notices a signature mismatch. Extended to `tests`. Fourteen of the errors were
+  a raw `str` passed where a `CandidateId` or `TenantId` was declared: exactly
+  the mistake `RULES.md` §2.1 introduced those types to prevent, inside the
+  suite whose job is to prove the layer holds.
+- **The "every schema is covered" guards depended on import order.**
+  `__subclasses__()` only sees classes that have been imported, so
+  `all_schema_models()` was answering "every model some test happened to pull
+  in". S1.7 proved it: `LLMResponse` is a `GMModel` in `guardmem_core.llm.base`,
+  nothing imported that module, and all four guards passed while not covering
+  it. `conftest` now walks and imports the whole package first — which is only
+  safe because S1.4 made settings construction lazy.
+- **Protocol bodies would have broken the coverage gate.** A `...` body is a
+  statement that never executes, because nothing calls a Protocol. Added a
+  narrowly scoped `exclude_also` rather than letting the number drift or the
+  floor drop.
 - **Both READMEs claimed the build was three steps behind where it is.** The
   root `README.md` still opened "Status: pre-implementation … there is no
   runtime code yet", and both it and `docs/README.md` named S1.3 as the next

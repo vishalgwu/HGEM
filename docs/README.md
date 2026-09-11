@@ -6,12 +6,13 @@ automatic storage, human review, rejection, or one additional model evaluation.
 Every durable decision must have an auditable receipt.
 
 **Status: the build has started.** The repository was reset to a documentation
-baseline on September 9, 2026, and `BUILD_NOTEBOOK.md` steps S1.1 through S1.6
-are complete. The toolchain and the gates are real - `make lint`, `make
+baseline on September 9, 2026, and `BUILD_NOTEBOOK.md` Day 1 is complete
+(S1.1 - S1.7). The toolchain and the gates are real - `make lint`, `make
 typecheck`, `make test`, the pre-commit hooks and GitHub Actions all run today -
 and so is the typed foundation of `guardmem_core`: settings, domain ids, the
-error hierarchy and the Pydantic schema layer. No pipeline stage exists yet.
-The next step is S1.7, the store and LLM protocols.
+error hierarchy, the Pydantic schema layer, and the store and LLM protocols with
+in-memory fakes. No pipeline stage exists yet. The next step is S2.1, the
+Layer-1 noise filter.
 
 Everything in this directory remains specification. Nothing here is evidence of
 an implemented feature; see "How to use this baseline" below.

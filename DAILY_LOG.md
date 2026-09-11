@@ -1176,6 +1176,119 @@ comes from.
 
 ---
 
+## 2026-09-11 — Day 1 · S1.7 (store and LLM protocols) · END OF DAY 1
+
+**Shipped**
+
+- `llm/base.py` — `Tier`, `LLMResponse`, `LLMClient`.
+- `memory/vector/base.py` — `VectorStore`. `memory/graph/base.py` —
+  `GraphStore`.
+- `tests/fixtures/fakes.py` — `FakeLLM`, `FakeVectorStore`, `FakeGraphStore`,
+  plus `tests/fixtures/strategies.py`, the hypothesis strategies moved out of
+  the property module.
+- 20 new tests — 108 total, **100% coverage across nineteen modules**, branches
+  included. Day 1 is done: S1.1 through S1.7.
+
+**What broke / what I learned**
+
+- **The DONE WHEN could not be satisfied, and the reason is the interesting
+  part.** "Fakes satisfy the protocols under `mypy --strict`" — except
+  `make typecheck` ran mypy over `packages/guardmem-core/src` only, so
+  `tests/fixtures/fakes.py` was never checked, and `Protocol` is *structural*,
+  so nothing at runtime would have noticed a wrong signature either. The step's
+  own acceptance criterion was unverifiable with the toolchain as it stood.
+
+  Extending the target to `tests` turned up 19 errors immediately, and fourteen
+  were the same one: a raw `str` passed where a `CandidateId` or a `TenantId`
+  was declared. That is precisely what S1.5 built those types to stop — and it
+  was happening inside the suite whose entire job is to prove the schema layer
+  holds. The protection had been real in the package and absent everywhere else
+  for two steps, which is a close cousin of the missing `py.typed` at S1.5.
+
+- **My own drift guard was unsound, and S1.7 is what exposed it.** S1.6 added
+  three tests that claim to cover "every schema" by walking
+  `GMModel.__subclasses__()`. `LLMResponse` is a `GMModel` living in
+  `llm/base.py`; no test imported that module; `__subclasses__()` therefore
+  could not see it, and all four guards passed green while covering sixteen of
+  seventeen models. A guard that silently answers a smaller question than it
+  claims is worse than no guard.
+
+  `conftest` now imports the whole package before walking. Worth noting *why*
+  that is safe: S1.4 deliberately made `Settings` construction lazy so importing
+  the module has no side effect. Had that been `settings = Settings()` at module
+  scope, importing the package tree at collection time would fail on any machine
+  without a populated `.env`, CI first among them. A decision taken three steps
+  ago for one reason paid for itself here for another.
+
+- **Two protocol signatures disagreed and nothing in the notebook resolved it.**
+  `upsert` takes `Sequence[StoredAssertion]`, `search` takes a precomputed
+  `embedding`, and after S1.6 `StoredAssertion` has no embedding field — so
+  where does the write-side vector come from? I had left this open yesterday.
+  The answer is in §0.4's data table: the owner module for embeddings is
+  `memory/vector/pgvector_store.py`, and `GM_EMBED_MODEL` is introduced at S3.2,
+  which *is* that store. So the store embeds on write, and `search` takes a
+  vector because the read path fuses dense with BM25 and a graph expansion and
+  holds one query embedding across all three. Recomputing it inside this store
+  would embed the same query up to three times per recall. Written onto the
+  protocol, because a contract that leaves this unstated cannot be implemented
+  correctly by accident.
+
+- **`@runtime_checkable` is a trap and I nearly reached for it.** It would make
+  `isinstance(store, VectorStore)` work — by comparing method *names* only. Not
+  signatures, not arity, not whether they are async. A gate that passes for any
+  object with a `search` attribute is worse than no gate, because it reads like
+  a guarantee. The conformance check is three typed bindings at the bottom of
+  `fakes.py` and `mypy --strict`, which checks all of it.
+
+- **Protocol bodies are uncovered statements.** `...` never executes, because
+  nothing calls a Protocol — so the coverage number would have started drifting
+  down for a reason that has nothing to do with tested code. Excluded a bare
+  ellipsis, narrowly, rather than lowering a floor or learning to ignore a
+  number.
+
+- **I tested the fakes, which the step does not ask for.** Three of their
+  behaviours are contracts rather than conveniences: `search` hides tombstoned
+  and invisible rows (I6), `supersede` retires rather than deletes, and `upsert`
+  is idempotent by id because S3.3's relay replays. Every unit test for the next
+  four days runs on these, so a fake that permits what pgvector forbids makes
+  the entire week-1 suite a measurement of the wrong system — and it would do so
+  with every test green, which is the expensive kind of wrong.
+
+**END OF DAY 1 CHECK**
+
+- `make lint`, `make typecheck`, `make test` — all green. 108 tests, 100%
+  coverage, branches included.
+- Schemas and protocols importable; 26 names exported from `guardmem_core.schemas`.
+- Docker stack up and **healthy on all four services**, but see below.
+
+**Still open**
+
+- **The port conflict finally bit, and it cost the default stack.** `make dev`
+  failed on `Bind for 0.0.0.0:7474 failed` — the `hgem_postgres`, `hgem_redis`
+  and `hgem_neo4j` containers from the older `Human-Gated-External-Memory-HGEM`
+  checkout hold all four documented ports, and they have been up nine hours.
+  Worse, compose *recreated* our three containers before failing, so the stack
+  was left part-down rather than untouched. Brought up healthy on 5433 / 6380 /
+  7475 / 7688 via the overrides the compose file was written for, which proves
+  the stack itself is fine. **It is running on those ports now, and `.env` still
+  says 5432 / 6379 / 7687** — harmless today because nothing connects until
+  S3.1, and a trap on the day something does. Either stop the old containers and
+  re-run `make dev`, or update `.env`. Not mine to decide: those containers
+  belong to another checkout.
+- Coverage still 100% against `fail_under = 85`; the raise to 90 is S7.2.
+- `GM_ANTHROPIC_API_KEY` blank; S2.2 is the first step that needs it.
+- Branch protection on `main` (S0.3). `main` is now the trunk and the two merged
+  branches are deleted, so this is the moment it matters.
+
+**Tomorrow's first step**
+
+`S2.1` — the noise filter, and `MEMORY_ENGINE.md` §1.1 is emphatic that
+everything dropped is *counted* and sampled into the funnel: "you must be able
+to see what the filter is eating." Rules for the cheap 70%, FAST-tier classifier
+for the rest. `ExtractionResult.dropped_noise` already exists to receive it.
+
+---
+
 <!--
 Template for the next entry:
 

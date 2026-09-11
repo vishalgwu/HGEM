@@ -103,11 +103,11 @@ guardmem-ai/
 │   │       ├── memory/
 │   │       │   ├── router.py            # StoreRouter — vector vs graph vs both
 │   │       │   ├── vector/
-│   │       │   │   ├── base.py          # VectorStore Protocol
+│   │       │   │   ├── base.py          # VectorStore Protocol (S1.7); store owns write-side embedding
 │   │       │   │   ├── pgvector_store.py
 │   │       │   │   └── qdrant_store.py
 │   │       │   ├── graph/
-│   │       │   │   ├── base.py          # GraphStore Protocol
+│   │       │   │   ├── base.py          # GraphStore Protocol (S1.7)
 │   │       │   │   ├── neo4j_store.py
 │   │       │   │   └── networkx_store.py   # dev / single-tenant fallback
 │   │       │   ├── retrieval.py         # hybrid BM25 + dense + graph-expand
@@ -115,8 +115,8 @@ guardmem-ai/
 │   │       │       ├── decay.py         # recency × usage × salience scoring
 │   │       │       ├── gc.py            # tombstoning, TTL tiers, thread-rot sweep
 │   │       │       └── summarizer.py    # rollup of cold assertions → episodic digest
-│   │       ├── llm/
-│   │       │   ├── base.py              # LLMClient Protocol (async, streaming)
+│   │       ├── llm/                     # S1.7 protocol; providers + router at S9.x
+│   │       │   ├── base.py              # Tier, LLMResponse, LLMClient Protocol
 │   │       │   ├── providers/           # anthropic.py openai.py bedrock.py vertex.py ollama.py
 │   │       │   ├── router.py            # tier routing: FAST | BALANCED | FRONTIER
 │   │       │   ├── fallback.py          # circuit breaker + hedged requests
@@ -228,14 +228,16 @@ guardmem-ai/
 │   ├── locust/{write_path.py,read_path.py}
 │   └── profiles/{p95_targets.yaml}
 │
-├── tests/
+├── tests/                                # in scope for `make typecheck` from S1.7
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
 │   ├── integration/                     # testcontainers: pg, neo4j, redis
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
-│   ├── fixtures/
-│   └── conftest.py
+│   ├── fixtures/                        # a package, so mypy resolves one module name
+│   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7)
+│   │   └── strategies.py                # hypothesis strategies, one per schema
+│   └── conftest.py                      # REPO_ROOT + all_schema_models()
 │
 ├── scripts/
 │   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths

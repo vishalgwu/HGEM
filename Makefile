@@ -68,8 +68,15 @@ lint:
 imports:
 	$(UV) lint-imports
 
+# `tests` is in scope from S1.7, and it has to be. That step's DONE WHEN is
+# "fakes exist and satisfy the protocols under mypy --strict" - Protocol is
+# structural, so nothing at runtime notices a signature mismatch, and a target
+# that only saw CORE_SRC could not verify the claim at all. It paid for itself
+# immediately: the first run found fourteen places where the test suite passed a
+# raw `str` into a field declared `CandidateId` or `TenantId`, which is the
+# exact mistake RULES.md 2.1 introduced those types to prevent.
 typecheck:
-	$(UV) mypy $(CORE_SRC)
+	$(UV) mypy $(CORE_SRC) tests
 
 # Bare `--cov`, not `--cov=guardmem_core`. The package to measure is already
 # declared once as `source_pkgs` in pyproject.toml, and naming it again on the

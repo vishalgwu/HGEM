@@ -52,6 +52,7 @@ from guardmem_core.schemas import (
     SourceTier,
     StoredAssertion,
 )
+from guardmem_core.types import TenantId, TraceId
 
 _WHEN = datetime(2026, 3, 12, 14, 31, 2, tzinfo=UTC)
 _LATER = _WHEN + timedelta(days=30)
@@ -112,9 +113,17 @@ def test_every_schema_is_exported_from_the_package() -> None:
     `guardmem_core.schemas` is the one import site for this layer, so a schema
     left out of `__all__` is one that downstream code reaches for through a
     submodule path instead - and the layer quietly grows two ways in.
+
+    Scoped to models *defined under* `guardmem_core.schemas`, because from S1.7
+    a `GMModel` may legitimately live elsewhere: `LLMResponse` belongs with the
+    protocol that returns it, in `llm/base.py`. The rule is "no schema module
+    hides a model", not "every model lives in schemas".
     """
     unexported = {
-        model.__name__ for model in all_schema_models() if model.__name__ not in schemas.__all__
+        model.__name__
+        for model in all_schema_models()
+        if model.__module__.startswith("guardmem_core.schemas")
+        and model.__name__ not in schemas.__all__
     }
 
     assert not unexported, (
@@ -154,7 +163,7 @@ def test_an_enum_value_is_rejected_from_python_and_accepted_from_json() -> None:
     nothing in this layer could be deserialised.
     """
     with pytest.raises(ValidationError):
-        Provenance(**{**_PROVENANCE.model_dump(), "source_tier": "verified_user"})  # type: ignore[arg-type]
+        Provenance(**{**_PROVENANCE.model_dump(), "source_tier": "verified_user"})
 
     from_json = Provenance.model_validate_json(_PROVENANCE.model_dump_json())
 
@@ -218,8 +227,8 @@ def test_an_audit_payload_can_hold_a_value_that_does_not_round_trip() -> None:
     but recorded, because S5.5 is where it has to be handled.
     """
     event = AuditEvent(
-        tenant_id="t_acme",
-        trace_id="tr_9f2a3c",
+        tenant_id=TenantId("t_acme"),
+        trace_id=TraceId("tr_9f2a3c"),
         kind="DECISION",
         payload={"decided_at": _WHEN},
         prev_digest="0" * 64,
@@ -250,7 +259,7 @@ def test_a_span_that_points_at_nothing_is_rejected(span: tuple[int, int], expect
     the far side of scoring, long after the span linker that produced it.
     """
     with pytest.raises(ValidationError, match=expected):
-        Provenance(**{**_PROVENANCE.model_dump(), "source_span": span})  # type: ignore[arg-type]
+        Provenance(**{**_PROVENANCE.model_dump(), "source_span": span})
 
 
 @pytest.mark.parametrize(

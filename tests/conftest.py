@@ -23,8 +23,11 @@ that.
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from pathlib import Path
 
+import guardmem_core
 from guardmem_core.schemas import GMModel
 
 # The file that marks the workspace root. Chosen because it is the thing that
@@ -53,13 +56,34 @@ def _find_repo_root() -> Path:
 REPO_ROOT = _find_repo_root()
 
 
+def _import_every_guardmem_module() -> None:
+    """Import all of `guardmem_core`, so the subclass walk below can be complete.
+
+    `__subclasses__()` only sees classes that have actually been imported, which
+    made the original version of `all_schema_models()` quietly dependent on what
+    each test module happened to pull in. S1.7 proved it: `LLMResponse` is a
+    `GMModel` living in `guardmem_core.llm.base`, no test imported that module,
+    and every "every model is covered" guard passed while not covering it.
+
+    Importing the package tree first makes the answer independent of import
+    order. It is safe to do at collection time only because S1.4 made settings
+    construction lazy - a module-scope `Settings()` would make this line fail on
+    any machine without a populated `.env`, CI included.
+    """
+    for module in pkgutil.walk_packages(
+        guardmem_core.__path__, prefix=f"{guardmem_core.__name__}."
+    ):
+        importlib.import_module(module.name)
+
+
 def all_schema_models() -> set[type[GMModel]]:
-    """Every concrete schema, found recursively from the shared base.
+    """Every concrete schema in the package, wherever it is defined.
 
     Shared by the property suite, which checks that each one has a generative
-    strategy, and by the unit suite, which checks that each one is exported from
-    `guardmem_core.schemas`. Both are drift guards, and having them walk the
-    same function means a schema cannot be invisible to one and not the other.
+    strategy, and by the unit suite, which checks that each one defined under
+    `guardmem_core.schemas` is exported from it. Both are drift guards, and
+    walking the same function means a schema cannot be invisible to one and not
+    the other.
 
     The walk is recursive rather than a single `__subclasses__()` call: a model
     that subclasses another model - a refinement of `StoredAssertion`, say -
@@ -70,6 +94,7 @@ def all_schema_models() -> set[type[GMModel]]:
         Every `GMModel` subclass, excluding `GMModel` itself, which declares no
         fields and is configuration rather than a schema.
     """
+    _import_every_guardmem_module()
 
     def walk(cls: type[GMModel]) -> list[type[GMModel]]:
         return [cls, *(found for sub in cls.__subclasses__() for found in walk(sub))]

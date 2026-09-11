@@ -185,7 +185,7 @@ def test_module_attribute_access_is_limited_to_settings() -> None:
     import guardmem_core.settings as module
 
     with pytest.raises(AttributeError, match="has no attribute 'nope'"):
-        _ = module.nope  # type: ignore[attr-defined]
+        _ = module.nope
 
 
 def test_env_example_declares_exactly_the_settings_fields() -> None:

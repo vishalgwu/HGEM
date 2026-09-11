@@ -114,9 +114,11 @@ ignore = ["S101"]          # assert is fine in tests
 # which are the outside world. Surfaced by the first module to import the
 # package (tests/unit/test_settings.py at S1.4).
 [tool.ruff.lint.isort]
-# `conftest` is our own shared test module, not a distribution. Without it here
-# isort groups it with yaml/pytest, which reads as though it came from PyPI.
-known-first-party = ["guardmem_core", "conftest"]
+# `conftest` and `fixtures` are our own shared test modules, not distributions.
+# Without them here isort groups them with yaml/pytest, which reads as though
+# they came from PyPI - and `fixtures` in particular is a plausible package name
+# on the index, so the misfiling is easy to miss.
+known-first-party = ["guardmem_core", "conftest", "fixtures"]
 
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how
@@ -164,6 +166,14 @@ source_pkgs = ["guardmem_core"]
 [tool.coverage.report]
 fail_under = 85
 show_missing = true
+# Protocol method bodies are `...` and are never executed - nothing calls a
+# Protocol, that is the point of structural typing. Without this they report as
+# uncovered from S1.7 on, which would either push the gate below its floor or,
+# worse, teach everyone to read a number that is not about the code. Their
+# conformance is verified by `mypy --strict` over `tests/`, which is a stronger
+# check than coverage could give. Scoped to a bare `...` on its own line, so it
+# cannot silently excuse a real body.
+exclude_also = ["^\\s*\\.\\.\\.$"]
 
 # ---------------------------------------------------------------------------
 # import-linter - dependency direction

@@ -956,7 +956,59 @@ class GraphStore(Protocol):
 Also write `FakeLLM`, `FakeVectorStore`, `FakeGraphStore` in `tests/fixtures/fakes.py` **now**.
 They are how every unit test for the next four days runs without Docker.
 
-DONE WHEN: fakes exist and satisfy the protocols under `mypy --strict`.
+**Seven corrections to this step, found by building it.**
+
+1. **`Tier` and `LLMResponse` are used by the snippet and defined nowhere.**
+   Both belong in `llm/base.py`. `Tier` is `ARCHITECTURE.md` §2.8's three-rung
+   ladder - and it is a routing input, never a model id, so that `RULES.md` §3's
+   pinned ids stay in settings. `LLMResponse` carries what §3 requires be
+   recorded of every call: model, temperature, seed, token counts, cache hit,
+   latency, cost estimate.
+2. **`prompt_version` cannot live on `LLMResponse`, and §3 asks for it.** The
+   client is handed a rendered `prompt` string; it has no way to know which
+   versioned file produced it. The caller selected that file and the caller
+   records it - `MemoryCandidate.prompt_version` and
+   `ConfidenceReport.weights_version` already exist for this. The §3 list is
+   satisfied jointly, and neither half can invent the other's data.
+3. **The DONE WHEN is unverifiable as the Makefile stands.** `make typecheck`
+   runs `mypy` over `$(CORE_SRC)` only, so `tests/fixtures/fakes.py` is never
+   checked - and `Protocol` is structural, so nothing at runtime notices a
+   signature mismatch either. Extend the target to `tests`. That is not
+   bookkeeping: the first run found 19 errors, fourteen of them raw `str` passed
+   where a `NewType` id was declared, inside the very suite that exists to prove
+   the schema layer holds.
+4. **`mypy` needs `tests/fixtures/__init__.py`.** Without it the directory is a
+   namespace package, and mypy resolves `strategies.py` as both `strategies` and
+   `fixtures.strategies` and refuses to check either. pytest imports them the
+   same way regardless.
+5. **Protocol bodies break the coverage gate.** A `...` body is a statement that
+   is never executed, because nothing calls a Protocol. Add
+   `exclude_also = ["^\\s*\\.\\.\\.$"]` to `[tool.coverage.report]`, scoped to a
+   bare ellipsis on its own line so it cannot excuse a real body.
+6. **Do not reach for `@runtime_checkable`.** It makes `isinstance()` work by
+   comparing method *names* only - not signatures, not arity, not whether they
+   are async. An `isinstance` gate that passes for any object with a `complete`
+   attribute is worse than none, because it reads like a guarantee. `mypy
+   --strict` over a typed binding (`_vectors: VectorStore = FakeVectorStore()`)
+   checks all of it.
+7. **State who computes embeddings, because the two store signatures disagree.**
+   `upsert` takes assertions and `search` takes a vector, and `StoredAssertion`
+   has no embedding field - so the contract is incomplete until this is written
+   down. §0.4's data table names `memory/vector/pgvector_store.py` as the owner
+   module for embeddings and `GM_EMBED_MODEL` arrives at S3.2, which is this
+   store: the store embeds on write. `search` takes a precomputed vector because
+   the read path fuses dense with BM25 and a graph expansion and holds one query
+   embedding across all three.
+
+Worth doing beyond the step: test the fakes. S1.7 asks only that they exist and
+typecheck, but three of their guarantees are behavioural - `search` hides
+tombstoned and invisible rows (I6), `supersede` retires rather than deletes, and
+`upsert` is idempotent by id for the outbox replay - and a fake that quietly
+permits what pgvector forbids makes the whole week-1 unit suite a measurement of
+the wrong system, with every test green.
+
+DONE WHEN: fakes exist and satisfy the protocols under `mypy --strict` - which
+means `make typecheck` has to be able to see them.
 
 COMMIT: `feat(s1.7): store and llm protocols with in-memory fakes`
 
