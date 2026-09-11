@@ -1056,6 +1056,126 @@ disagrees with the config, test the behaviour rather than trusting either.
 
 ---
 
+## 2026-09-11 — Day 1 · S1.6 (the schema layer)
+
+**Shipped**
+
+- `guardmem_core.schemas` — seven modules, 16 models. `base` (`GMModel` +
+  `ObjectValue`), `candidate`, `entity`, `verdict`, `policy`, `receipt`,
+  `review`, with `__init__` re-exporting the layer as one import site.
+- `ReviewTaskId` and `ReviewerId` in `types.py`.
+- 35 new tests — 88 total, **100% coverage across all twelve modules**, branches
+  included.
+
+**What broke / what I learned**
+
+- **Half this step is not in the spec of record, and I nearly wrote it from
+  imagination.** S1.6 says "copy the schemas from `MEMORY_ENGINE.md` §0
+  exactly", but §0 has nothing for `entity.py`, `policy.py` or `review.py` —
+  because §0 specifies the *pipeline*, and those three are what the pipeline
+  writes and what reviews it. Their fields exist, just elsewhere:
+  `ARCHITECTURE.md` §5 gives the `assertion` table in SQL and the entity graph
+  in Cypher, `MCP_INTEGRATION.md` §2.7 gives `review.decide`'s wire contract,
+  and `DESIGN_SYSTEM.md` §3.2 shows what a queue row has to render. Reading the
+  downstream steps first — S3.1, S4.3, S5.4, S12.2, S18.1-3, S19.1-2 — is what
+  turned six guesses into six derivations.
+
+- **The WATCH OUT is the hardest instruction in the step.** Four classes that
+  `PROJECT_TREE.md` names are not here: `Rule` and `PolicyPack`, because §2.3's
+  "Rego-compatible" does not say whether a rule is a Python predicate, a
+  compiled expression or a handle on a Rego module, and S12.2 decides that
+  against a working engine; `Predicate`, which is ontology content (S3.5); and
+  `Thresholds`, which S5.4 passes into `decide()`. Every one of them was
+  tempting to sketch, and a sketch is exactly the refactor this step exists to
+  avoid. What went in instead was `ObligationKind` — the three obligations
+  `ARCHITECTURE.md` §2.3 actually names — wired so it does work *today*:
+  `RiskVerdict.obligations` keeps the spec's `list[str]` and validates against
+  it, so an unknown obligation raises. Without that it is silently inert, since
+  S5.4 composes the obligations it recognises and ignores the rest.
+
+- **Two spec clauses disagreed about the same field, twice, and the resolutions
+  went opposite ways.** `MEMORY_ENGINE.md` §0 writes `candidate_id: str` while
+  `RULES.md` §2.1 demands a `NewType` — resolved toward RULES, because
+  `NewType` erases at runtime so the wire format and the column are identical
+  either way and the looser reading would make all of S1.5 decorative. But
+  `obligations: list[str]` versus `ARCHITECTURE.md` §2.3's structured
+  `Obligation` resolved toward MEMORY_ENGINE, because that one is a real type
+  change to the spec of record and RULES §8 says it takes an ADR, not a quiet
+  edit. The difference is whether the disagreement is about spelling or about
+  substance.
+
+- **`strict=True` is not as strict as it reads, and the exception is in the
+  most load-bearing field.** pydantic still accepts an `int` where a `float` is
+  declared and converts it, so `object=500` on a candidate stores `500.0`. That
+  is consistent with §0 typing the value as `float`, and it round-trips stably
+  — but a model configured specifically to forbid silent conversions performing
+  one deserves a test rather than a surprise. Same for `frozen=True`: it makes a
+  model hashable only while every field is hashable, so `Provenance` can go in
+  a set and `ExtractionResult` cannot.
+
+- **The round trip only works because strict mode relaxes for JSON.** In Python
+  a `datetime` field rejects a string, a `tuple` field rejects a list, and an
+  enum field rejects its own value — in JSON all three are accepted, because
+  JSON has no type that could carry them otherwise. I probed that before
+  writing a line, and it is the difference between this layer being
+  serialisable and not.
+
+- **Two test files cannot share a basename here, and the failure is not
+  local.** `tests/` has no `__init__.py`, so pytest imports modules under their
+  bare names; adding `tests/unit/test_schemas.py` alongside the
+  `tests/property/test_schemas.py` the step names aborted collection for the
+  *entire* run with "import file mismatch". Renamed the unit one.
+
+- **Parametrising a property test across sixteen models costs 200 seconds.**
+  hypothesis spends roughly 0.45 s setting a test up regardless of how many
+  examples follow, so three properties × sixteen models paid it 48 times — 22 s
+  of fixed cost before an example is drawn. Measured at 100/250/500 examples to
+  confirm the shape (57 s / 110 s / 198 s), then restructured to draw from
+  `st.one_of` over all sixteen strategies: same three properties, same 500
+  examples, 13.5 s. The thing that gets traded away
+  is the guarantee that every model was exercised, so the run records the types
+  it produced and asserts none was missed. A gate should not rest on "almost
+  certainly sampled".
+
+- **An `AuditEvent.payload` can hold a value that does not survive its own
+  serialisation.** The field is `dict[str, object]` as the step specifies; a
+  `datetime` nested inside validates, dumps to a string and returns a string.
+  Harmless in most fields, not in this one — S5.5 digests canonical JSON of the
+  payload, so a value that changes across a round trip breaks invariant I5 for
+  every later link in the chain. Not forbidden here (a validator would cost a
+  serialisation on every construction), but pinned by a test and written into
+  the docstring so S5.5 inherits the problem knowingly.
+
+**Also fixed, found while checking claims**
+
+- Both READMEs said the next step was S1.3 and the root one still opened
+  "Status: pre-implementation … there is no runtime code yet". Three steps
+  stale. Now S1.1–S1.6, with the honest boundary: the typed foundation exists,
+  no pipeline stage does.
+- `PROJECT_TREE.md`'s `schemas/` listing named classes this step deliberately
+  did not build. Relabelled with the step that lands each.
+
+**Still open**
+
+- `make test` is now ~26 s, up from 3.8 s; the property suite is 13.5 s of that
+  at 500 examples, and coverage instrumentation most of the rest. Acceptable for
+  the gate RULES §5 asks for, but it is the first time the suite has had a
+  runtime worth watching.
+- Coverage still 100% against `fail_under = 85`; the raise to 90 is S7.2.
+- API keys blank in `.env`; `GM_ANTHROPIC_API_KEY` is needed at S2.2.
+- Branch protection on `main` (S0.3), and the working branch is now twelve
+  commits of four different steps under a name that says S1.2.
+
+**Tomorrow's first step**
+
+`S1.7` — the `LLMClient`, `VectorStore` and `GraphStore` protocols, plus the
+in-memory fakes in `tests/fixtures/fakes.py` that every unit test for the next
+four days runs on. One decision is already waiting there: `StoredAssertion`
+carries no `embedding`, so `VectorStore.upsert` has to say where the vector
+comes from.
+
+---
+
 <!--
 Template for the next entry:
 

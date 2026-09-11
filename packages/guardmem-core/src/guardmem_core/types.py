@@ -16,9 +16,12 @@ are. Constructing one from a plain string is explicit and intentional::
     assertion_id = AssertionId(row["id"])
 
 That call site is the boundary where an untyped string becomes a typed id, and
-it is meant to be visible. Identifiers for concepts that do not exist yet -
-review tasks, policy versions - arrive with the step that introduces them
-rather than being declared here in advance.
+it is meant to be visible. Identifiers for concepts that do not exist yet
+arrive with the step that introduces them rather than being declared here in
+advance - which is why `ReviewTaskId` and `ReviewerId` were added at S1.6, the
+step that introduced `schemas/review.py`. A policy *version* is still a plain
+`str`, because `MEMORY_ENGINE.md` §0 types `DecisionRecord.policy_version` that
+way and the spec of record decides.
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ __all__ = [
     "CandidateId",
     "EntityId",
     "Namespace",
+    "ReviewTaskId",
+    "ReviewerId",
     "TenantId",
     "TraceId",
 ]
@@ -59,3 +64,15 @@ EntityId = NewType("EntityId", str)
 # "session:xyz", or the "quarantine:<tenant>" namespace that failed guardrail
 # content lands in (ARCHITECTURE.md 2).
 Namespace = NewType("Namespace", str)
+
+# One human review task in the HITL queue - MCP_INTEGRATION.md 2.7 takes it as
+# `task_id`, and MCP_INTEGRATION.md 2.2 returns it to the agent as
+# `review_task_id`.
+ReviewTaskId = NewType("ReviewTaskId", str)
+
+# The human who decided a review task, e.g. "rn:sarah.r"
+# (MCP_INTEGRATION.md 2.1). Distinct from TaskId for the usual reason: both are
+# opaque strings, both appear together on every ReviewDecision, and BUILD
+# NOTEBOOK S18.3 makes reviewer identity a security property - it comes from the
+# token, never from the request body.
+ReviewerId = NewType("ReviewerId", str)

@@ -63,14 +63,16 @@ guardmem-ai/
 │   │       ├── settings.py              # pydantic-settings, 12-factor
 │   │       ├── types.py                 # NewType ids: TraceId, CandidateId, EntityId
 │   │       ├── errors.py                # GuardMemError hierarchy → HTTP/MCP mapping
-│   │       ├── schemas/
+│   │       ├── schemas/                 # S1.6; __init__.py re-exports the layer
+│   │       │   ├── base.py              # GMModel (extra=forbid/frozen/strict) + ObjectValue
 │   │       │   ├── candidate.py         # MemoryCandidate, ExtractionResult
-│   │       │   ├── entity.py            # Entity, Predicate, Assertion (bitemporal)
-│   │       │   ├── verdict.py           # RiskVerdict, ConfidenceReport, Decision
-│   │       │   ├── policy.py            # PolicyPack, Rule, Obligation
-│   │       │   ├── receipt.py           # WriteReceipt, AuditEvent, Provenance
+│   │       │   ├── entity.py            # Cardinality, Entity, StoredAssertion, Edge
+│   │       │   ├── verdict.py           # ImpactLevel, Conflict*, ConfidenceReport,
+│   │       │   │                        #   RiskVerdict, Decision, DecisionRecord
+│   │       │   ├── policy.py            # ObligationKind, Obligation; Rule + PolicyPack at S12.2
+│   │       │   ├── receipt.py           # SourceTier, Provenance, WriteReceipt, AuditEvent
 │   │       │   ├── review.py            # ReviewTask, ReviewDecision, Diff
-│   │       │   └── ontology.py          # Ontology, PredicateSpec - loader + validation
+│   │       │   └── ontology.py          # Ontology, PredicateSpec - loader + validation (S3.5)
 │   │       ├── prompts/                 # RULES 3: versioned prompts, never inline f-strings
 │   │       │   ├── extract_memories/v1.md
 │   │       │   ├── adjudicate_conflict/v1.md

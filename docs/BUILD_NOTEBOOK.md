@@ -855,10 +855,71 @@ PROMPT:
 > base with extra=forbid, frozen=True, strict=True. Use the NewType ids from types.py. Then write
 > hypothesis round-trip tests in tests/property/test_schemas.py."
 
+**Seven corrections to this step, found by building it.**
+
+1. **"Copy §0 exactly" and "use the NewType ids" contradict each other, and the
+   NewTypes win.** `MEMORY_ENGINE.md` §0 writes `candidate_id: str`; `RULES.md`
+   §2.1 requires that a raw `str` where an `AssertionId` belongs "must be a type
+   error", and this step's own PROMPT says to use `types.py`. The conflict is
+   only in spelling - `NewType` erases to `str`, so the JSON and the database
+   column are identical either way - so the stricter reading costs nothing and
+   the looser one would make S1.5 decorative.
+2. **Three of the six modules have no schema in §0 at all.** `entity.py`,
+   `policy.py` and `review.py` are not in the spec of record, because §0
+   specifies the *pipeline* and these are what the pipeline writes and what
+   reviews it. Their sources are `ARCHITECTURE.md` §5 (the `assertion` table in
+   SQL and the entity graph in Cypher), `ARCHITECTURE.md` §2.3 and §2.7,
+   `MCP_INTEGRATION.md` §2.7 for the `review.decide` wire contract, and
+   `DESIGN_SYSTEM.md` §3.2-§3.4 and §4 for what the queue and the diff pane
+   need. Derive them from those clauses, not from imagination.
+3. **Four named classes are deliberately deferred, and the WATCH OUT is why.**
+   `Rule` and `PolicyPack` (`PROJECT_TREE.md` puts them in `policy.py`) have no
+   specified fields anywhere: §2.3 says packs are "Rego-compatible", which does
+   not say whether a `Rule` is a Python predicate, a compiled expression or a
+   handle on a Rego module. That is settled at S12.2 against a working engine.
+   Likewise `Predicate` -> S3.5 with the ontology loader, `Thresholds` -> S5.4
+   where `decide()` takes it, and `MemoryProposal` -> the gateway. What *is*
+   specified today and does belong in `policy.py` is `ObligationKind`, the three
+   obligations §2.3 names.
+4. **`RiskVerdict.obligations` is `list[str]` in the spec and a structured
+   `Obligation` in `ARCHITECTURE.md` §2.3.** Keep the spec's type - RULES §8 -
+   and validate the strings against `ObligationKind` so they are a vocabulary
+   rather than free text. An unrecognised obligation is otherwise silently
+   inert: S5.4 composes what it knows and ignores the rest, so a typo leaves the
+   auto-write path open with nothing in the record to show for it.
+5. **A bare `dict` does not typecheck.** §0 writes `object: str | float | bool |
+   dict`; `mypy --strict` enables `disallow_any_generics`. Use
+   `dict[str, object]`, and declare the whole union once as a shared alias -
+   a candidate and the assertion it becomes must accept exactly the same values.
+   Note what the union does *not* contain: a JSON array. A multi-valued fact is
+   several assertions under a `MANY` predicate, which is what makes each one
+   separately sourced, scored and retractable.
+6. **`tests/property/test_schemas.py` collides with a unit test of the same
+   name.** `tests/` has no `__init__.py`, so pytest imports every module under
+   its bare basename and two `test_schemas.py` files fail collection for the
+   whole run with "import file mismatch". The property file keeps the name this
+   step gives it; name the example-based one something else
+   (`test_schema_models.py`).
+7. **Do not parametrise the property test across the models.** hypothesis costs
+   ~0.45 s to set up a test regardless of the example count, so three properties
+   across sixteen models pays that 48 times - measured at 198 s for the file at
+   500 examples. Drawing from `st.one_of` over all sixteen strategies runs the
+   same three properties over the same 500 examples in 13 s. Assert afterwards that every model was actually
+   produced, or the coverage silently becomes a claim about probability.
+
+Two pydantic behaviours worth pinning in a test rather than rediscovering:
+`strict=True` still accepts an `int` where a `float` is declared and converts it
+(so `object=500` stores `500.0`), and `frozen=True` makes a model hashable only
+while every field is - `hash()` raises on any model holding a `list` or `dict`.
+
 DONE WHEN:
 - `make typecheck` clean
 - property test: every model round-trips through `model_dump_json` -> `model_validate_json`
 - a test asserting `MemoryCandidate(**{...,"bogus":1})` raises ValidationError
+
+Worth adding alongside: `extra="forbid"` and `frozen=True` asserted over *every*
+model rather than one, a registry test that fails when a schema has no
+generative strategy, and a case per validator branch.
 
 COMMIT: `feat(s1.6): pydantic schema layer`
 

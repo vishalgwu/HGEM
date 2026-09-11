@@ -17,6 +17,43 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.6 — the Pydantic schema layer.** `guardmem_core.schemas`, seven modules
+  and 16 models: `base` (`GMModel` plus the shared `ObjectValue` alias),
+  `candidate`, `entity`, `verdict`, `policy`, `receipt`, `review`. Every model
+  is `extra="forbid"`, `frozen=True`, `strict=True` and `validate_default=True`,
+  built on the `NewType` ids from S1.5 rather than the spec's bare `str` —
+  `MEMORY_ENGINE.md` §0 and `RULES.md` §2.1 disagree only in spelling, and the
+  stricter reading is free because `NewType` erases at runtime. Validators
+  where a malformed value would otherwise fail silently downstream: a source
+  span must be a real half-open interval (a zero-width one satisfies a `NOT
+  NULL` constraint while quoting nothing), a validity interval may not run
+  backwards (an inverted one intersects nothing, so the temporal-overlap check
+  in §2.2c never fires), and an obligation must be a known `ObligationKind` (an
+  unrecognised one is inert at S5.4, leaving the auto-write path open with
+  nothing in the record to show for it).
+- **`ReviewTaskId` and `ReviewerId`** — added to `types.py` by the step that
+  introduced review tasks, as its docstring said they would be.
+- **`tests/property/test_schemas.py`** — 500 generated examples asserting that
+  every model round-trips through `model_dump_json` → `model_validate_json`,
+  rejects an unknown field, and refuses assignment. Deliberately not
+  parametrised across the models: hypothesis costs ~0.45 s per test to set up
+  regardless of example count, which measured at 198 s for the file, against
+  13 s when drawing from a union of all sixteen strategies. The run records
+  which types it produced and fails if any was missed, so the coverage stays a
+  guarantee rather than a claim about probability. A registry test fails when a
+  schema is added without a strategy.
+- **`tests/unit/test_schema_models.py`** — the example-based half: every
+  validator branch, and the pydantic behaviours surprising enough to pin.
+  `strict=True` still widens an `int` to a `float`, so `object=500` stores
+  `500.0`; `frozen=True` makes a model hashable only while every field is;
+  and an `AuditEvent.payload` holding a `datetime` validates, serialises to a
+  string and comes back a string — which would break invariant I5 for every
+  later link in the chain, so S5.5 has to handle it. The name is not
+  `test_schemas.py` because `tests/` has no `__init__.py`: two test modules
+  with one basename fail collection for the whole run.
+- **`conftest.all_schema_models()`** — the recursive walk from `GMModel`,
+  shared by the suite that checks every schema has a strategy and the one that
+  checks every schema is exported.
 - **`tests/conftest.py`** — `REPO_ROOT` defined once instead of copy-pasted into
   five test modules, and resolved by walking up for the `pyproject.toml` marker
   rather than by a `parents[2]` index that silently points outside the
@@ -104,6 +141,16 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **Both READMEs claimed the build was three steps behind where it is.** The
+  root `README.md` still opened "Status: pre-implementation … there is no
+  runtime code yet", and both it and `docs/README.md` named S1.3 as the next
+  step after S1.4 and S1.5 had shipped. Now stated as S1.1–S1.6 complete, with
+  the boundary spelled out: the typed foundation exists and no pipeline stage
+  does.
+- **`PROJECT_TREE.md`'s `schemas/` listing did not match what the layer holds.**
+  It named `Predicate` in `entity.py` (it is ontology content and arrives at
+  S3.5), `PolicyPack`/`Rule` in `policy.py` (S12.2), and no `base.py` at all.
+  Corrected, with the deferrals labelled by the step that lands them.
 - **CI actions no longer run on deprecated Node 20.** `actions/checkout@v4`,
   `actions/cache@v4` and `astral-sh/setup-uv@v5` were being forced onto Node 24
   on every run; bumped to `@v5`, `@v6` and `@v7`. Also corrected a comment in

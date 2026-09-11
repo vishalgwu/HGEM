@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from guardmem_core.schemas import GMModel
+
 # The file that marks the workspace root. Chosen because it is the thing that
 # defines the root - uv, ruff, mypy, pytest and coverage all resolve against it.
 _ROOT_MARKER = "pyproject.toml"
@@ -49,3 +51,27 @@ def _find_repo_root() -> Path:
 
 
 REPO_ROOT = _find_repo_root()
+
+
+def all_schema_models() -> set[type[GMModel]]:
+    """Every concrete schema, found recursively from the shared base.
+
+    Shared by the property suite, which checks that each one has a generative
+    strategy, and by the unit suite, which checks that each one is exported from
+    `guardmem_core.schemas`. Both are drift guards, and having them walk the
+    same function means a schema cannot be invisible to one and not the other.
+
+    The walk is recursive rather than a single `__subclasses__()` call: a model
+    that subclasses another model - a refinement of `StoredAssertion`, say -
+    would not be a direct child of `GMModel`, and a test that looked exhaustive
+    would silently stop covering it.
+
+    Returns:
+        Every `GMModel` subclass, excluding `GMModel` itself, which declares no
+        fields and is configuration rather than a schema.
+    """
+
+    def walk(cls: type[GMModel]) -> list[type[GMModel]]:
+        return [cls, *(found for sub in cls.__subclasses__() for found in walk(sub))]
+
+    return set(walk(GMModel)) - {GMModel}

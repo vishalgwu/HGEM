@@ -4,10 +4,12 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: pre-implementation.** This repository currently contains the design
-> suite, the pinned dependency set, and the environment template. There is no
-> runtime code yet. Every performance and quality figure below is a **target**,
-> not a measurement — see [Status](#status) before quoting any number.
+> **Status: week 1, day 1.** The design suite, the toolchain and the gates are
+> in place, and `guardmem_core` now carries its typed foundation — settings,
+> domain ids, the error hierarchy and the Pydantic schema layer. **No pipeline
+> stage exists yet**: nothing extracts, validates, scores or decides. Every
+> performance and quality figure below is a **target**, not a measurement — see
+> [Status](#status) before quoting any number.
 
 ---
 
@@ -149,10 +151,12 @@ arrives at build step S1.3 as `infra/docker/docker-compose.dev.yml`.
 ## Status
 
 The engine is not implemented yet. The repository was reset to a documentation
-baseline on 2026-09-09; `BUILD_NOTEBOOK.md` steps S1.1 (uv workspace) and S1.2
-(pre-commit, Makefile, CI) are done, so the toolchain and the gates are real
-while `guardmem_core` is still an empty package. The next step is S1.3, the
-local datastore stack.
+baseline on 2026-09-09; `BUILD_NOTEBOOK.md` steps S1.1 through S1.6 are done, so
+the toolchain, the gates, the local datastore stack and the typed foundation of
+`guardmem_core` — settings, domain ids, the error hierarchy and the Pydantic
+schema layer — are real. No pipeline stage exists yet: nothing extracts,
+validates, scores or decides. The next step is S1.7, the store and LLM
+protocols.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and
