@@ -1,0 +1,51 @@
+"""Shared test configuration and paths.
+
+Five test modules had grown their own copy of::
+
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+
+which is duplication, but the reason to remove it is the `parents[2]`. That
+index silently encodes "this file lives exactly two directories below the
+root". A module moved from `tests/unit/` to `tests/` keeps working *and starts
+pointing at the parent of the repository*, where a `.secrets.baseline` or a
+`pyproject.toml` may well exist and be the wrong one. Nothing fails; the test
+just quietly checks somebody else's file.
+
+Resolving by marker instead makes the answer independent of where the caller
+sits, and asserting the marker exists turns a wrong answer into a loud one.
+
+Importing this from a test module works because pytest puts the directory
+containing `conftest.py` on `sys.path`. That is the one piece of pytest
+machinery being relied on here, and it is what makes `tests/conftest.py` the
+conventional home for shared test code - `PROJECT_TREE.md` lists it for exactly
+that.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+# The file that marks the workspace root. Chosen because it is the thing that
+# defines the root - uv, ruff, mypy, pytest and coverage all resolve against it.
+_ROOT_MARKER = "pyproject.toml"
+
+
+def _find_repo_root() -> Path:
+    """Walk upwards until the workspace root is found.
+
+    Returns:
+        The directory containing the root `pyproject.toml`.
+
+    Raises:
+        RuntimeError: if no ancestor contains it, which means the test tree has
+            been moved somewhere the rest of the tooling would not work either.
+    """
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / _ROOT_MARKER).is_file():
+            return candidate
+    raise RuntimeError(
+        f"no {_ROOT_MARKER} found above {__file__}; the test tree is not inside the workspace"
+    )
+
+
+REPO_ROOT = _find_repo_root()

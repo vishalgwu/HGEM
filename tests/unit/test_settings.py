@@ -13,15 +13,14 @@ record and the code follows it, not the other way round.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
+from conftest import REPO_ROOT
 from guardmem_core.settings import Settings, get_settings
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 
 # The fields with no default. Supplied by every test that expects success.

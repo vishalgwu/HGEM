@@ -222,15 +222,15 @@ TIME: 5 min
 
 DO:
 ```bash
-ls docs/                                   # 9 markdown docs + the master PDF
+ls docs/                                   # 10 markdown files + the master PDF
 ls docs/adr docs/runbooks docs/diagrams    # 5 ADRs, 3 runbooks, 9 diagrams
 
 touch DAILY_LOG.md
 git add DAILY_LOG.md && git commit -m "docs(s0.4): start the daily log"
 ```
 
-DONE WHEN: `docs/` holds the nine markdown documents plus the master PDF, and `DAILY_LOG.md` exists
-at the repo root. Read `docs/README.md` first - it says which document owns which decision, so you
+DONE WHEN: `docs/` holds ten markdown files plus the master PDF, and `DAILY_LOG.md` exists
+at the repo root. The ten are the nine specifications named in `docs/README.md`'s "Retained project references" table, plus `README.md` itself, which is the index rather than a specification - which is where the old count of nine came from. Read `docs/README.md` first - it says which document owns which decision, so you
 know where a change belongs before you make one.
 
 WHY THIS MATTERS: from here on, when you prompt Claude Code, you point it at these files. That is

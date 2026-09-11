@@ -17,6 +17,10 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **`tests/conftest.py`** — `REPO_ROOT` defined once instead of copy-pasted into
+  five test modules, and resolved by walking up for the `pyproject.toml` marker
+  rather than by a `parents[2]` index that silently points outside the
+  repository if a test file moves.
 - **S1.5 — domain types and the error hierarchy.** `types.py` with six `NewType`
   ids, and `errors.py` with `GuardMemError` plus the seven subclasses
   `RULES.md` §2.3 names. Each carries `code`, `http_status`, `mcp_code` and

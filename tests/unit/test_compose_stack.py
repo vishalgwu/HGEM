@@ -32,7 +32,8 @@ from typing import Any
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from conftest import REPO_ROOT
+
 COMPOSE_DIR = REPO_ROOT / "infra" / "docker"
 
 # A tag is pinned if it carries at least MAJOR.MINOR somewhere in it. That

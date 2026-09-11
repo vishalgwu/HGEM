@@ -21,6 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from conftest import REPO_ROOT
 from guardmem_core.types import (
     AssertionId,
     CandidateId,
@@ -29,8 +30,6 @@ from guardmem_core.types import (
     TenantId,
     TraceId,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 ALL_IDS = (AssertionId, CandidateId, EntityId, Namespace, TenantId, TraceId)
 

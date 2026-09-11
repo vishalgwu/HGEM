@@ -40,9 +40,9 @@ from __future__ import annotations
 
 import re
 import tomllib
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from conftest import REPO_ROOT
+
 UV_LOCK = REPO_ROOT / "uv.lock"
 PIP_LOCK = REPO_ROOT / "requirements.lock.txt"
 PYPROJECT = REPO_ROOT / "pyproject.toml"

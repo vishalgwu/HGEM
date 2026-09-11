@@ -977,6 +977,85 @@ strict and `extra="forbid"`, on the NewType ids landed here.
 
 ---
 
+## 2026-09-11 — Day 1 · audit pass through S1.5
+
+A screen of everything built so far, before S1.6. Most of it held up; three
+things did not.
+
+**Fixed — reuse**
+
+- **`REPO_ROOT` had been copy-pasted into five test modules**, each as
+  `Path(__file__).resolve().parents[2]`. The duplication is the small problem.
+  The `parents[2]` is the real one: it encodes "this file sits exactly two
+  directories below the root", so a module moved from `tests/unit/` to `tests/`
+  keeps working *and starts pointing at the parent of the repository* — where a
+  `pyproject.toml` and a `.secrets.baseline` may well exist and be the wrong
+  ones. Nothing would fail; the tests would quietly check somebody else's files.
+
+  Now defined once in `tests/conftest.py`, resolved by walking up for the
+  `pyproject.toml` marker rather than by counting directories, and raising if it
+  is not found. `PROJECT_TREE.md` already listed `tests/conftest.py` as the home
+  for shared test code, so this is the documented location rather than a new
+  invention. Added `conftest` to ruff's `known-first-party` so the import does
+  not read as though it came from PyPI.
+
+**Fixed — dead code I wrote**
+
+- The `repo_root` **fixture** I added alongside that constant, "for tests that
+  prefer injection", is requested by nothing. That is precisely the speculative
+  code this project keeps telling itself not to write, and I wrote it in the
+  same commit as the comment explaining why not to. Removed, and the now-unused
+  `pytest` import with it.
+
+**Fixed — a document count that was wrong**
+
+- `BUILD_NOTEBOOK.md` S0.4 said `docs/` holds "nine markdown documents". It
+  holds ten. The nine is not arbitrary — it is the count of *specifications* in
+  `docs/README.md`'s reference table, excluding `README.md` itself, which is the
+  index. The step now says ten and explains which ten, so the number cannot
+  drift back into ambiguity.
+
+**Checked and found clean**
+
+- No dead module-level names anywhere else, across every tracked `.py` plus
+  `conftest.py` (AST walk, defined-vs-loaded).
+- No `TODO`/`FIXME`/`XXX`/`HACK` anywhere in code or config.
+- Every relative Markdown link in the repository resolves.
+- Master PDF still `D4E49FEF…57CD`.
+- `PROJECT_TREE.md`'s listing covers every tracked root path.
+- RULES §2.4 size limits: no module over 400 lines, no function over 50, and
+  `C901` reports nothing over complexity 10.
+- The developer `.env` still loads through the real `Settings` — checked by
+  constructing it, not by reading the file.
+
+**A false alarm worth writing down**
+
+`git check-ignore dist` reported NOT IGNORED for `dist`, `build`, `htmlcov` and
+`*.egg-info`, which looked like a real gap. It is not: those patterns end in a
+slash, so they match directories only, and `check-ignore` cannot classify a path
+that does not exist yet. Creating the directories and reading `git status`
+showed all four correctly ignored. The lesson is the general one — when a check
+disagrees with the config, test the behaviour rather than trusting either.
+
+**Deliberately left for later**
+
+- **Coverage is 100% against a `fail_under = 85`.** RULES §5 sets the release
+  gate at 90 and schedules the raise "before the Phase 1 exit gate is signed
+  off", which is Day 7. Raising it now would cost nothing today, but the gate
+  change belongs where the document says it belongs, and moving gates early is
+  its own kind of drift. Due at S7.2.
+- Langfuse and its ClickHouse/MinIO stack arrive at S13.1.
+- `GM_ANTHROPIC_API_KEY` is still blank; S2.2 is the first step that needs it.
+- The `01_setup` containers from the `Research\Human-Gated-External-Memory-HGEM`
+  checkout still hold the documented datastore ports.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S1.6` — the schema layer.
+
+---
+
 <!--
 Template for the next entry:
 

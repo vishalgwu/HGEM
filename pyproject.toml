@@ -114,7 +114,9 @@ ignore = ["S101"]          # assert is fine in tests
 # which are the outside world. Surfaced by the first module to import the
 # package (tests/unit/test_settings.py at S1.4).
 [tool.ruff.lint.isort]
-known-first-party = ["guardmem_core"]
+# `conftest` is our own shared test module, not a distribution. Without it here
+# isort groups it with yaml/pytest, which reads as though it came from PyPI.
+known-first-party = ["guardmem_core", "conftest"]
 
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how
