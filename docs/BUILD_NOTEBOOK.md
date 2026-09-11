@@ -766,7 +766,53 @@ class GuardMemError(Exception):
         self.trace_id, self.ctx = trace_id, ctx
 ```
 
-DONE WHEN: a unit test asserts every subclass has a unique `code` and a valid `http_status`.
+**Five corrections to this step, found by building it.**
+
+1. **`mcp_code` is missing, and RULES §2.3 asks for it by name.** That section
+   says each error maps to "an HTTP status **and an MCP error code** exactly
+   once, in one table" - but the snippet declares only `code`, `http_status`
+   and `retryable`. Leaving the MCP half as a Markdown table in
+   `MCP_INTEGRATION.md` §6 means `services/mcp_server` has to re-derive it, and
+   RULES ends up with the two tables it explicitly does not want. Put
+   `mcp_code: ClassVar[int]` on the base and the values on the subclasses.
+   Note they are deliberately **not** unique: `GM_PROVIDER` and `GM_STORE` both
+   map to `-32603`, because the agent's correct response is identical. `code`
+   is what distinguishes them for operators and the audit log.
+2. **`packages/guardmem-core/src/guardmem_core/py.typed` does not exist, and
+   without it this entire step is decorative.** PEP 561: a package without that
+   marker is treated as untyped by every downstream type checker. So
+   `AssertionId` stops being distinguishable from `str` the moment anything
+   *outside* the package imports it - the gateway, the MCP server, the SDK, the
+   eval harness - which is the only place the protection was ever needed.
+   `make typecheck` does not catch this, because it checks the package's own
+   source directly, where the annotations are visible regardless. Add the empty
+   file; hatchling ships it in the wheel automatically, which is worth
+   confirming with `uv build --wheel` once.
+3. **`candidate_id` deserves to be an explicit keyword argument.** RULES §2.3
+   requires that "every raise inside the pipeline attaches `trace_id` and
+   `candidate_id`". Leaving the second one to land in `**ctx` makes it a
+   convention enforced by spelling, and a misspelled key in a kwargs bag is not
+   a rule anybody is actually following.
+4. **`N818` fires on all seven subclasses.** ruff's naming rule wants every
+   exception to end in `Error`; RULES §2.3 names them `ValidationRejected`,
+   `PolicyDenied` and so on, and this step says to copy that hierarchy
+   verbatim. RULES §8 settles it - when the code and the spec of record
+   disagree, the code is what is wrong - so scope the rule off for
+   `errors.py` with that reasoning written down, rather than renaming the
+   classes out of step with the document that owns them.
+5. **The DONE WHEN cannot be satisfied by a runtime test alone.** `NewType`
+   erases completely: at runtime `AssertionId("x")` *is* `"x"`, so assertions
+   about equality, `isinstance` or behaviour pass whether or not the
+   annotations do anything. Verifying RULES §2.1's actual claim - that passing
+   a raw `str` where an `AssertionId` is expected **must be a type error** -
+   means running `mypy` over a snippet in a subprocess and asserting on its
+   verdict. That test is also what surfaced correction 2; nothing else would
+   have.
+
+DONE WHEN: a unit test asserts every subclass has a unique `code` and a valid
+`http_status`. Worth adding alongside: that the `mcp_code` values are legal
+JSON-RPC codes, that only transient failures are `retryable`, that the whole
+hierarchy is catchable as `GuardMemError`, and the mypy checks from correction 5.
 
 COMMIT: `feat(s1.5): domain types and error hierarchy`
 

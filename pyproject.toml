@@ -95,6 +95,16 @@ ignore = ["S101"]          # assert is fine in tests
 # to a file instead would be useless to the developer reading its output.
 # S (flake8-bandit) stays ON here - these run in CI and touch the repo.
 "scripts/*" = ["T20"]
+# N818 wants every exception class to end in `Error`. These seven do not, and
+# that is not an oversight: RULES.md 2.3 names them, the notebook says to copy
+# that hierarchy verbatim, and `code`/`http_status`/`mcp_code` are a published
+# contract that the class names sit alongside. Renaming them to satisfy a
+# naming convention would put the code and the spec of record out of step, and
+# RULES.md 8 is explicit that when those disagree the code is what is wrong.
+# The names also read better for what they are - `PolicyDenied` is an outcome,
+# not a malfunction. The base class is still `GuardMemError`, so the suffix
+# convention holds where it carries meaning.
+"packages/guardmem-core/src/guardmem_core/errors.py" = ["N818"]
 
 # Without this, ruff's isort classifies `guardmem_core` as third-party - it is
 # installed editable, so it looks like any other site-packages distribution -

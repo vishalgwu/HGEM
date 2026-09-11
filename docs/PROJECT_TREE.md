@@ -59,6 +59,7 @@ guardmem-ai/
 │   │   ├── pyproject.toml
 │   │   └── src/guardmem_core/
 │   │       ├── __init__.py
+│   │       ├── py.typed                 # PEP 561 - without it consumers see this package as untyped
 │   │       ├── settings.py              # pydantic-settings, 12-factor
 │   │       ├── types.py                 # NewType ids: TraceId, CandidateId, EntityId
 │   │       ├── errors.py                # GuardMemError hierarchy → HTTP/MCP mapping

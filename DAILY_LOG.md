@@ -899,6 +899,84 @@ exception hierarchy RULES §2.3 maps to HTTP and MCP codes exactly once.
 
 ---
 
+## 2026-09-11 — Day 1 · S1.5 (domain types and error hierarchy)
+
+**Shipped**
+
+- `types.py` — six `NewType` ids: TenantId, TraceId, CandidateId, AssertionId,
+  EntityId, Namespace.
+- `errors.py` — `GuardMemError` plus the seven subclasses RULES §2.3 names, each
+  carrying `code`, `http_status`, **`mcp_code`** and `retryable`.
+- `py.typed` — the PEP 561 marker, which did not exist and without which none of
+  the above does anything for a consumer. See below.
+- 22 new tests. 53 total, **100% coverage across all four modules**, branches
+  included.
+
+**What broke / what I learned**
+
+- **The step as written makes this whole module decorative outside the package,
+  and I nearly shipped it that way.** `guardmem-core` had no `py.typed`, so
+  under PEP 561 every downstream type checker treats it as untyped — meaning
+  `AssertionId` is indistinguishable from `str` the moment the gateway, the MCP
+  server, the SDK or the eval harness imports it. Which is the only place the
+  protection was ever for. `make typecheck` does not catch it, because it checks
+  the package's own source directly, where the annotations are visible either
+  way.
+
+  Found only because I wrote the type test as a `mypy` subprocess rather than a
+  runtime assertion, and it came back:
+
+      Skipping analyzing "guardmem_core.types": module is installed,
+      but missing library stubs or py.typed marker  [import-untyped]
+
+  Confirmed with `uv build --wheel` that hatchling ships the marker in the
+  distribution, not just the editable install — an editable install resolves
+  through a `.pth` to the source tree, so it would have looked fine locally
+  regardless.
+
+- **A runtime test of a `NewType` proves nothing.** `NewType` erases entirely:
+  at runtime `AssertionId("x")` *is* `"x"`, so equality, `isinstance` and
+  behaviour assertions all pass whether or not the annotations do anything. The
+  DONE WHEN asks for "a unit test", and the obvious unit test here is one that
+  cannot fail. RULES §2.1's real claim — that a raw `str` where an `AssertionId`
+  belongs **must be a type error** — needs mypy to be the thing reporting it.
+
+- **RULES §2.3 asks for the MCP code and the step omits it.** "Each maps to an
+  HTTP status *and an MCP error code* exactly once, in one table." Without
+  `mcp_code` on the classes, that mapping lives only as a Markdown table in
+  `MCP_INTEGRATION.md` §6 and `services/mcp_server` re-derives it at S6.2 —
+  giving RULES the two tables it explicitly does not want. Worth noting the
+  values are deliberately *not* unique: `GM_PROVIDER` and `GM_STORE` both map to
+  `-32603` because the agent's correct response is identical, so the test
+  asserts uniqueness on `code` and legality on `mcp_code`, and there is a test
+  whose whole job is to stop someone "fixing" that duplication.
+
+- **ruff's `N818` and the spec of record disagree, and the spec wins.** All seven
+  subclasses are flagged for not ending in `Error`. RULES §2.3 names them, this
+  step says copy them verbatim, and RULES §8 is explicit that when code and the
+  spec of record disagree the code is wrong. Scoped the rule off for `errors.py`
+  with the reasoning written into `pyproject.toml` rather than renaming classes
+  away from the document that owns them.
+
+- **I added a `slow` marker I did not need, and `--strict-markers` caught it.**
+  Registered it, then measured: the mypy tests run in ~1s each. Deselection
+  machinery for a one-second test is the kind of unused config I have spent this
+  session removing, so I took it back out.
+
+**Still open**
+
+- API keys blank in `.env`; `GM_ANTHROPIC_API_KEY` is needed at S2.2.
+- The `01_setup` containers still hold the documented datastore ports.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S1.6` — the schema layer, and the notebook calls it "the most important 90
+minutes of week 1". Copy `MEMORY_ENGINE.md` §0 exactly; every model frozen,
+strict and `extra="forbid"`, on the NewType ids landed here.
+
+---
+
 <!--
 Template for the next entry:
 

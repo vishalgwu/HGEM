@@ -17,6 +17,17 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S1.5 — domain types and the error hierarchy.** `types.py` with six `NewType`
+  ids, and `errors.py` with `GuardMemError` plus the seven subclasses
+  `RULES.md` §2.3 names. Each carries `code`, `http_status`, `mcp_code` and
+  `retryable` - the MCP code included because §2.3 asks for the HTTP and MCP
+  mapping "in one table", which the step's snippet omitted, leaving
+  `MCP_INTEGRATION.md` §6 as a second source for the MCP server to re-derive.
+- **`py.typed`** — the PEP 561 marker was absent, so every consumer of
+  `guardmem-core` saw the package as untyped and the `NewType` ids collapsed
+  back to `str` outside the package. `make typecheck` cannot see this, because
+  it checks the package's own source where annotations are visible regardless.
+  Confirmed present in the built wheel, not only the editable install.
 - **S1.4 — typed settings.** `guardmem_core.settings` with 21 fields: DSN-typed
   store URLs, `Literal` environment, bounded numerics, and validators for
   threshold ordering and the Neo4j URI scheme. `frozen`, `strict`,
