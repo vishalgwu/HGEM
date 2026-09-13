@@ -19,7 +19,8 @@ That call site is the boundary where an untyped string becomes a typed id, and
 it is meant to be visible. Identifiers for concepts that do not exist yet
 arrive with the step that introduces them rather than being declared here in
 advance - which is why `ReviewTaskId` and `ReviewerId` were added at S1.6, the
-step that introduced `schemas/review.py`. A policy *version* is still a plain
+step that introduced `schemas/review.py`, and `TurnId` at S2.1 with
+`schemas/turn.py`. A policy *version* is still a plain
 `str`, because `MEMORY_ENGINE.md` §0 types `DecisionRecord.policy_version` that
 way and the spec of record decides.
 """
@@ -37,6 +38,7 @@ __all__ = [
     "ReviewerId",
     "TenantId",
     "TraceId",
+    "TurnId",
 ]
 
 # The tenant that owns a row. Carried on every assertion and audit event, and
@@ -69,6 +71,12 @@ Namespace = NewType("Namespace", str)
 # `task_id`, and MCP_INTEGRATION.md 2.2 returns it to the agent as
 # `review_task_id`.
 ReviewTaskId = NewType("ReviewTaskId", str)
+
+# One message in a proposal, before anything has been extracted from it - added
+# at S2.1, the step that introduced `schemas/turn.py`. A turn is the unit the
+# noise filter keeps or drops, and a `DroppedTurn` has to name which one it ate
+# (MEMORY_ENGINE.md 1.1: "you must be able to see what the filter is eating").
+TurnId = NewType("TurnId", str)
 
 # The human who decided a review task, e.g. "rn:sarah.r"
 # (MCP_INTEGRATION.md 2.1). Distinct from TaskId for the usual reason: both are

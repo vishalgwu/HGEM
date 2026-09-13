@@ -1042,8 +1042,71 @@ async def filter_noise(turns: Sequence[Turn], llm: LLMClient) -> NoiseResult:
 ```
 Bias: **when unsure, keep.** A false drop is invisible; a false keep gets caught downstream.
 
+**Eight corrections to this step, found by building it.**
+
+1. **`Turn` and `NoiseResult` are used by that snippet and defined nowhere** —
+   not in `MEMORY_ENGINE.md` §0, not in `PROJECT_TREE.md`, not in any earlier
+   step. They land in `schemas/turn.py`, which also carries `NoiseReason`,
+   `DecidedBy` and `DroppedTurn`. §1.1's own sentence forces the last three:
+   *"Everything dropped is counted and sampled into the dashboard funnel — you
+   must be able to see what the filter is eating."* A `dropped` list of bare
+   turns cannot satisfy that, and neither can this step's own DONE WHEN, which
+   requires a reason per drop. `TurnId` joins `types.py` with them.
+2. **`filter_noise` needs the namespace, and `trace_id`.** §1.1 defines the
+   third-party class as "subject ≠ namespace subject", so the rule cannot be
+   stated without the namespace; and `RULES.md` §2.3 requires every raise inside
+   the pipeline to attach `trace_id`, which this module does when the canary
+   leaks. Both are keyword-only.
+3. **The step calls a model, so it needs the prompt loader — which the notebook
+   introduces one step later.** S2.2 calls `render("extract_memories", v=1, …)`
+   as though it already existed. `RULES.md` §3 ("prompts live in versioned
+   files… never f-string-assembled inline") binds at the first step that sends a
+   prompt, and that is this one. `prompts/loader.py` and
+   `prompts/classify_noise/v1.md` land here. Two departures from S2.2's
+   signature: `variables` is a mapping rather than `**kwargs`, because a
+   template variable named `v` or `name` otherwise collides silently with the
+   function's own parameters; and `version` is spelled in full.
+4. **Two of the five classes cannot be fully decided yet, and the rules must not
+   pretend otherwise.** §1.1 defines a restatement at cosine ≥ 0.93 and a
+   third-party claim by the absence of an ontology licence — the embedder
+   arrives at S3.2 and the ontology at S3.5. Approximating a semantic threshold
+   with a lexical one is the exact confusion §3.1 warns against, so each rule
+   fires only on the part it can decide soundly (an *exact* echo; no third-party
+   drop at all) and routes the rest to the classifier. The tier under-detects on
+   purpose.
+5. **The snippet's ambiguity pass re-examines the wrong set.**
+   `[t for t in kept if _is_ambiguous(t)]` runs over turns the rules positively
+   *kept*, and loses the `prior` context each verdict was taken against. Record
+   ambiguity while the rules run instead.
+6. **"Fail closed" has a different meaning in Layer 1, and it needs stating.**
+   `RULES.md` non-negotiable #3 resolves failures to `HITL_REVIEW` or `REJECT` —
+   neither exists here. Closed for a filter means **keeping**: a kept turn stays
+   inside governance, and dropping is the only irreversible act the module can
+   perform. So an unparseable reply, a verdict for a turn that was never sent, a
+   turn answered twice, a drop with no reason, and a turn never answered for all
+   resolve to keep. A *provider* failure is different and propagates untouched —
+   the extractor two steps later needs the same provider, and
+   `ARCHITECTURE.md` §4 already says a dead provider parks the proposal.
+7. **The DONE WHEN needs a recall floor beside the precision gate.** Precision
+   on drops is trivially 1.0 for a filter that drops nothing, so the golden test
+   asserts both. Measured on the corpus below: 17 rule drops, precision 1.000,
+   and the rules settle 30 of 40 turns without a model call — §1.1's "cheap 70%",
+   measured rather than assumed.
+8. **Three RULES §2.4 limits were breached while building this and had to be
+   paid down in the same commit**: the lexicons pushed `noise_rules.py` over the
+   400-line module cap (they are now whitespace-delimited prose split once, with
+   the SIM905 suppression reasoned in place), `filter_noise` over the 50-line
+   function cap, and `tests/fixtures/strategies.py` over 400 as well.
+
 DONE WHEN: golden test over 40 hand-labelled turns — precision on drops >= 0.95, and every dropped
 turn is recorded with a reason.
+
+Worth doing beyond the step: build the corpus as one continuous conversation
+rather than forty independent samples. Two of the five classes are only
+definable against what came before, so a shuffled bag silently stops testing
+either. Label it *before* running the rules, and include turns the rules cannot
+catch — a corpus containing only what the implementation already handles
+measures the implementation against itself.
 
 COMMIT: `feat(s2.1): layer-1 noise filter`
 
@@ -1053,6 +1116,12 @@ COMMIT: `feat(s2.1): layer-1 noise filter`
 
 WHERE: `pipeline/l1_extract/extractor.py` and `prompts/extract_memories/v1.md`
 TIME: 90 min
+
+NOTE: `render()` and the versioned-prompt loader already exist — they landed at
+S2.1, the first step that sends a prompt to a model. Its signature is
+`render(name, version, variables)`, not the `v=1` keyword form below; see S2.1
+correction 3. `prompts/extract_memories/v1.md` is a new file in the same
+directory, and its frontmatter takes the same five keys.
 
 DO — prompt file with frontmatter (RULES.md section 3):
 ```markdown

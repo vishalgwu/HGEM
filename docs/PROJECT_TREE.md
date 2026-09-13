@@ -72,8 +72,11 @@ guardmem-ai/
 │   │       │   ├── policy.py            # ObligationKind, Obligation; Rule + PolicyPack at S12.2
 │   │       │   ├── receipt.py           # SourceTier, Provenance, WriteReceipt, AuditEvent
 │   │       │   ├── review.py            # ReviewTask, ReviewDecision, Diff
+│   │       │   ├── turn.py              # S2.1; Turn, NoiseReason, DroppedTurn, NoiseResult
 │   │       │   └── ontology.py          # Ontology, PredicateSpec - loader + validation (S3.5)
 │   │       ├── prompts/                 # RULES 3: versioned prompts, never inline f-strings
+│   │       │   ├── loader.py            # S2.1; render(name, version, variables), frontmatter
+│   │       │   ├── classify_noise/v1.md # S2.1; the Layer-1 noise classifier
 │   │       │   ├── extract_memories/v1.md
 │   │       │   ├── adjudicate_conflict/v1.md
 │   │       │   └── review_brief/v1.md
@@ -83,7 +86,8 @@ guardmem-ai/
 │   │       │   ├── orchestrator.py      # MemoryPipeline.run() — the single entrypoint
 │   │       │   ├── l1_extract/
 │   │       │   │   ├── extractor.py     # structured-output extraction, K-sampling
-│   │       │   │   ├── noise_filter.py  # chit-chat / ephemeral / imperative pruning
+│   │       │   │   ├── noise_filter.py  # S2.1; rules tier + one batched FAST call
+│   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
 │   │       │   │   └── span_linker.py   # candidate → verbatim source span offsets
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # entity/predicate ontology validation
@@ -236,6 +240,7 @@ guardmem-ai/
 │   ├── security/                        # injection corpus regression
 │   ├── fixtures/                        # a package, so mypy resolves one module name
 │   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7)
+│   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
 │   │   └── strategies.py                # hypothesis strategies, one per schema
 │   └── conftest.py                      # REPO_ROOT + all_schema_models()
 │

@@ -1289,6 +1289,150 @@ for the rest. `ExtractionResult.dropped_noise` already exists to receive it.
 
 ---
 
+## 2026-09-12 — Day 2 · S2.1 (the Layer-1 noise filter)
+
+**Shipped**
+
+- `pipeline/l1_extract/noise_filter.py` and `noise_rules.py` — the five drop
+  classes of `MEMORY_ENGINE.md` §1.1. Rules settle the cheap majority; the
+  ambiguous remainder goes to a FAST classifier in one batched call.
+- `schemas/turn.py` — `Turn`, `TurnRole`, `NoiseReason`, `DecidedBy`,
+  `DroppedTurn`, `NoiseResult`; `TurnId` in `types.py`.
+- `prompts/loader.py` + `prompts/classify_noise/v1.md` — versioned prompts with
+  frontmatter, which `RULES.md` §3 requires of the first step that calls a model.
+- `tests/fixtures/noise_corpus.py` — the forty hand-labelled turns.
+- 98 new tests — 206 total, **100% coverage across 26 modules**, branches
+  included. Measured on the corpus: 17 rule drops, precision **1.000**, and 30
+  of 40 turns settled without a model call.
+
+**What broke / what I learned**
+
+- **The step's own snippet uses two types that exist nowhere.** `Turn` and
+  `NoiseResult` are not in `MEMORY_ENGINE.md` §0, not in `PROJECT_TREE.md`, not
+  in any earlier step. What settles their shape is one sentence in §1.1 —
+  *"Everything dropped is counted and sampled into the dashboard funnel: you
+  must be able to see what the filter is eating"* — which a `dropped` list of
+  bare turns cannot satisfy, and neither can this step's own DONE WHEN. So a
+  drop carries its class and the tier that decided it. Those are different bugs
+  with different fixes: an over-eager rule is a lexicon edit, an over-eager
+  classifier is a prompt change and an eval run, and a funnel that cannot tell
+  them apart sends the reader to the wrong file.
+
+- **Two of the five classes cannot be decided yet, and the honest move was to
+  say so rather than approximate.** §1.1 defines a restatement at cosine ≥ 0.93
+  and a third-party claim by the absence of an ontology licence. The embedder is
+  S3.2 and the ontology is S3.5. I nearly reached for `rapidfuzz` at ratio 93 as
+  a stand-in for the cosine — it is already a dependency, it is one line, and it
+  is exactly the lexical-for-semantic substitution §3.1 spends a paragraph
+  warning against. What went in instead: the rule fires only on an *exact* echo
+  after normalisation, which is sound because equality is cosine 1.0 and because
+  the first copy is always kept; everything between exact and unrelated goes to
+  the classifier, which is the thing that can actually judge meaning.
+  `rapidfuzz` survives as *routing* triage only — it decides whether to spend a
+  model call, never whether to drop a turn. Third-party drops nothing at the
+  rule tier at all.
+
+- **"Fail closed" does not mean what it usually means in this module.**
+  `RULES.md` non-negotiable #3 resolves every failure in the decision path to
+  `HITL_REVIEW` or `REJECT`, and Layer 1 has neither. Closed here means
+  **keeping**: a kept turn stays inside governance where the matrix can still
+  refuse it, and dropping is the only irreversible thing this code does. That
+  one observation decided five behaviours — unparseable reply, verdict for a
+  turn never sent, turn answered twice, drop with no reason, turn never answered
+  for — and all five are now tests.
+
+  The exception is a provider failure, which propagates untouched. Catching it
+  would defer an identical failure by two steps (the extractor needs the same
+  provider) while hiding which stage first saw it, and `ARCHITECTURE.md` §4
+  already says what a dead provider does: the proposal parks.
+
+- **The step calls a model, so `RULES.md` §3 arrived a step early.** The notebook
+  introduces `render()` at S2.2. But §3 forbids f-string prompts in business
+  logic, and this is the first step with a prompt — so the loader lands here. I
+  did not pull in `pyyaml` for five scalar keys; the frontmatter parser is flat
+  and **refuses** what it cannot represent exactly rather than guessing, and
+  `pyyaml` stays out of the manifest until S3.5 reads real YAML.
+
+  Two things that only showed up by running it. `GMModel` is `strict=True`, so
+  validating a frontmatter dict rejects `"1"` for an `int` and `"fast"` for a
+  `Tier` — every value in a text file is text. Routing through JSON is the escape
+  hatch `schemas/base.py` already documented at S1.6, and it pays for itself
+  twice: `extra="forbid"` then reaches the frontmatter, so a misspelled key is a
+  load error instead of a silently ignored line. And the `.md` files had to be
+  confirmed present in the built wheel — the same class of bug as the missing
+  `py.typed` at S1.5, and invisible to an editable install.
+
+- **The prompt's declared tier should be the thing that routes the call.** It was
+  a hard-coded `Tier.FAST` in my first pass, which makes the frontmatter
+  decoration. `filter_noise` now passes `prompt.spec.tier` straight through, so a
+  prompt authored for FAST cannot be put on FRONTIER by an edit at the call site
+  — and there is a test that fails if the file changes.
+
+- **My own drift guard failed again, and again it was right to.** S1.6's property
+  suite asserts that 500 examples over `ANY_SCHEMA` actually produced every
+  model. Adding seven models pushed two *existing* ones below the sampling floor,
+  because `st.one_of` weights branches by the entropy each consumes — so
+  per-model depth falls every time the layer grows. Raising the example count
+  would have bought one step of silence and returned at S2.2. The union still
+  supplies depth; a short second pass over `EVERY_SCHEMA`, a tuple of every
+  strategy so one example is one draw of each, supplies breadth. The guard is now
+  satisfied by construction and keeps the job it can still fail at: catching a
+  strategy that produces nothing.
+
+- **The corpus has to be labelled before the rules are run, and it has to contain
+  things the rules miss.** Mine holds three — two third-party claims and one
+  imperative whose verb is outside the lexicon. A corpus containing only what the
+  implementation already handles measures the implementation against itself. The
+  flip side is that precision on drops is free for a filter that drops nothing,
+  so the gate asserts a recall floor beside it.
+
+  One judgement call worth recording: two words went into the imperative lexicon
+  *because* of a corpus miss ("ignore what **I just** said"). That is the line
+  between a lexicon improvement and overfitting, and they went in because they
+  are anaphora in any imperative's object, not because one turn needed them.
+  Nothing else was tuned to the corpus.
+
+- **Bare "no" is not filler, and that took a second pass to see.** The obvious
+  ephemeral lexicon contains yes/no/right/correct. In an intake transcript "No."
+  is the answer to "any allergies?", and dropping it while keeping the question
+  destroys the answer. They are out of the lexicon entirely and reach the
+  classifier, which can see the turns around them.
+
+**Also fixed, found while checking claims**
+
+- Three `RULES.md` §2.4 limits were breached by my own changes and paid down in
+  the same commit: the lexicons pushed `noise_rules.py` past the 400-line module
+  cap, `filter_noise` past the 50-line function cap, and
+  `tests/fixtures/strategies.py` past 400 as well.
+- `CONTRIBUTING.md` still opened "Status: pre-implementation … `guardmem_core` is
+  still an empty package". Four steps stale; both READMEs had been corrected and
+  this one was missed.
+
+**Still open**
+
+- **`tests/fixtures/strategies.py` is 399 lines against a 400 cap.** It grows by
+  one block per schema, so S2.2 will breach it. It wants splitting per schema
+  module; that is a mechanical refactor and does not belong in this commit.
+- The rule tier misses three of the corpus's twenty labelled drops by design. Two
+  need the ontology (S3.5); the third ("let me know when…") is a genuinely
+  ambiguous request that also mentions a real referral.
+- Coverage still 100% against `fail_under = 85`; the raise to 90 is S7.2.
+- `GM_ANTHROPIC_API_KEY` is still blank, and **S2.2 is the step that needs it** —
+  the first one that cannot run offline.
+- The dev stack is on 5433 / 6380 / 7475 / 7688 while `.env` says the defaults.
+  Harmless until S3.1; a trap the moment anything connects.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S2.2` — K-sample structured extraction. The loader and the canary check it needs
+both exist now, so the step reduces to the prompt file, the `ExtractionBatch`
+schema, and the K/temperature ladder from `MEMORY_ENGINE.md` §1.2: sample 0 at
+temperature 0 is canonical, and the other K−1 at 0.7 exist only to estimate
+uncertainty. `ExtractionResult.dropped_noise` is filled from `len(result.dropped)`.
+
+---
+
 <!--
 Template for the next entry:
 

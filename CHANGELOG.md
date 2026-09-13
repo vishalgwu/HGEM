@@ -17,6 +17,77 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S2.1 — the Layer-1 noise filter.** `pipeline/l1_extract/noise_filter.py`
+  and `noise_rules.py`: the five drop classes of `MEMORY_ENGINE.md` §1.1, with
+  deterministic rules settling the cheap majority and the ambiguous remainder
+  going to a FAST-tier classifier in **one batched call**. Measured on the
+  golden corpus: 17 rule drops at precision 1.000, 30 of 40 turns settled with
+  no model call — §1.1's "cheap 70%", measured rather than assumed.
+- **Two of the five classes are deliberately under-detected**, because the
+  machinery to decide them does not exist yet. §1.1 defines a restatement at
+  cosine ≥ 0.93 (the embedder is S3.2) and a third-party claim by the absence of
+  an ontology licence (S3.5). Approximating a semantic threshold with a lexical
+  one is the confusion §3.1 warns about, so each rule fires only on the part it
+  can decide soundly — an exact echo; no third-party drop at all — and routes
+  the rest to the classifier. `rapidfuzz` appears only as *routing* triage, and
+  never decides a drop.
+- **`schemas/turn.py`** — `Turn`, `TurnRole`, `NoiseReason`, `DecidedBy`,
+  `DroppedTurn`, `NoiseResult`, plus `TurnId` in `types.py`. S2.1's snippet uses
+  `Turn` and `NoiseResult` without defining them anywhere in the spec suite. The
+  drop record carries a reason and the tier that decided it, because §1.1 is
+  emphatic that dropped turns are sampled into the funnel — "you must be able to
+  see what the filter is eating" — and an over-eager *rule* is a lexicon edit
+  while an over-eager *classifier* is a prompt change and an eval run.
+- **`prompts/loader.py` and `prompts/classify_noise/v1.md`** — versioned prompt
+  files with frontmatter, per `RULES.md` §3. The notebook introduces `render()`
+  at S2.2, but S2.1 is the first step that sends a prompt to a model, so the
+  rule binds here. Frontmatter is parsed as flat `key: value` and **refuses**
+  anything richer rather than guessing; `pyyaml` stays out of the package
+  manifest until S3.5, the step that reads real YAML. Validation is routed
+  through JSON so `GMModel`'s `strict=True` does not reject a file whose every
+  value is text, and so `extra="forbid"` reaches the frontmatter — a misspelled
+  key there is a load error, not an ignored line. The `.md` files were confirmed
+  present in the built wheel, the way `py.typed` was at S1.5.
+- **The prompt's declared tier is load-bearing.** `filter_noise` routes its call
+  on `spec.tier` rather than a literal, so a prompt authored for FAST cannot be
+  put on FRONTIER by an edit at the call site.
+- **Canary spotlighting on the classifier call.** Untrusted turns are delimited
+  and the prompt states they are data; a canary in the model's output raises
+  `InjectionDetected`, which `RULES.md` §3 treats as confirmed rather than
+  suspected. A fresh canary per call, asserted by test.
+- **"Fail closed" means *keep* in Layer 1**, and the module says so. An
+  unparseable reply, a verdict for a turn that was never sent, a turn answered
+  twice, a drop with no reason, and a turn never answered for all resolve to
+  keeping — a kept turn stays inside governance, and dropping is the only
+  irreversible act the filter can perform. A provider failure is the exception
+  and propagates untouched: the extractor needs the same provider two steps
+  later, and `ARCHITECTURE.md` §4 already parks the proposal on a dead one.
+- **`tests/fixtures/noise_corpus.py`** — forty hand-labelled turns as one
+  continuous clinical intake call, because a restatement is only definable
+  against what came before. Labelled before the rules were run, and containing
+  three drops the rule tier cannot catch, so the corpus measures the
+  implementation rather than reflecting it. The gate asserts precision ≥ 0.95
+  *and* a recall floor, since precision alone is free for a filter that drops
+  nothing.
+
+### Changed
+
+- **The property suite's coverage guard is now satisfied by construction.**
+  `ANY_SCHEMA` is a `st.one_of` over the registry, and `one_of` weights its
+  branches by the entropy each consumes — so per-model depth falls as the layer
+  grows. Seven new models pushed two *existing* ones below the sampling floor at
+  500 examples and the guard failed, correctly, for a reason having nothing to
+  do with either of them. Raising the example count buys time, not a fix: the
+  same failure returns at every step that adds a schema. The union keeps
+  supplying depth; a short second pass over a new `EVERY_SCHEMA` — a tuple of
+  every strategy, so one example is one draw of each — supplies breadth.
+- **Three `RULES.md` §2.4 size limits were breached while building this and paid
+  down in the same commit**: the lexicons pushed `noise_rules.py` over the
+  400-line module cap, `filter_noise` over the 50-line function cap, and
+  `tests/fixtures/strategies.py` over 400 as well.
+- `CONTRIBUTING.md` still opened "Status: pre-implementation … `guardmem_core`
+  is still an empty package", four steps stale. Corrected.
+
 - **S1.7 — the three infrastructure protocols.** `llm/base.py` (`Tier`,
   `LLMResponse`, `LLMClient`), `memory/vector/base.py` (`VectorStore`) and
   `memory/graph/base.py` (`GraphStore`). Structural typing per `RULES.md` §2.1,

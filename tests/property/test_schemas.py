@@ -14,6 +14,17 @@ properties and the guard that keeps the two in step.
 without one cannot go quietly untested - the same way `tests/unit/test_errors.py`
 walks the exception hierarchy rather than listing it.
 
+**Coverage is by construction, not by luck, and S2.1 is why.** `ANY_SCHEMA` is
+a `st.one_of` over the registry, and `one_of` weights its branches by the
+entropy each consumes - so per-model depth falls as the layer grows. Seven new
+models pushed two *existing* ones below the sampling floor at 500 examples and
+`_over_every_schema`'s own coverage guard failed, for a reason having nothing to
+do with either of them. Raising the example count buys time, not a fix: the same
+failure returns at every step that adds a schema. So the union keeps supplying
+depth, and a short second pass over `EVERY_SCHEMA` - a tuple of every strategy,
+so one example is one draw of each - supplies breadth. That leaves the guard
+doing the job it can still fail at: catching a strategy that produces nothing.
+
 `RULES.md` §5 requires 500 examples, which is what `_EXAMPLES` sets.
 `deadline=None` is deliberate: these properties are about serialisation
 identity, not latency, and a per-example wall-clock budget on a shared CI runner
@@ -28,10 +39,13 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 
 from conftest import all_schema_models
-from fixtures.strategies import ANY_SCHEMA, SCHEMA_STRATEGIES
+from fixtures.strategies import ANY_SCHEMA, EVERY_SCHEMA, SCHEMA_STRATEGIES
 from guardmem_core.schemas import GMModel
 
 _EXAMPLES = 500
+
+# Each of these exercises every model in the registry once - see `EVERY_SCHEMA`.
+_COVERAGE_EXAMPLES = 20
 
 
 def _over_every_schema(check: Callable[[GMModel], None]) -> None:
@@ -48,6 +62,9 @@ def _over_every_schema(check: Callable[[GMModel], None]) -> None:
     function fails if any schema was missed. Without that, "500 examples over a
     union" is a claim about probability, and a gate should not be one.
 
+    **At S2.1 that claim came due**, which is why there are two passes below.
+    See the module docstring.
+
     Args:
         check: The property to assert, called once per generated instance.
     """
@@ -60,6 +77,19 @@ def _over_every_schema(check: Callable[[GMModel], None]) -> None:
         check(instance)
 
     run()
+
+    @settings(
+        max_examples=_COVERAGE_EXAMPLES,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    @given(instances=EVERY_SCHEMA)
+    def cover(instances: tuple[GMModel, ...]) -> None:
+        for instance in instances:
+            exercised.add(type(instance))
+            check(instance)
+
+    cover()
 
     missed = all_schema_models() - exercised
     assert not missed, (

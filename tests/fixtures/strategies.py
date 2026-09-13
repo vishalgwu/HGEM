@@ -23,22 +23,31 @@ from datetime import UTC, datetime
 
 from hypothesis import strategies as st
 
-from guardmem_core.llm.base import LLMResponse
+from guardmem_core.llm.base import LLMResponse, Tier
+from guardmem_core.pipeline.l1_extract.noise_filter import (
+    NoiseClassification,
+    NoiseVerdict,
+)
+from guardmem_core.prompts.loader import PromptSpec, RenderedPrompt
 from guardmem_core.schemas import (
     AuditEvent,
     Cardinality,
     ConfidenceReport,
     ConflictKind,
     ConflictReport,
+    DecidedBy,
     Decision,
     DecisionRecord,
     Diff,
+    DroppedTurn,
     Edge,
     Entity,
     ExtractionResult,
     GMModel,
     ImpactLevel,
     MemoryCandidate,
+    NoiseReason,
+    NoiseResult,
     Obligation,
     ObligationKind,
     Provenance,
@@ -49,6 +58,8 @@ from guardmem_core.schemas import (
     RiskVerdict,
     SourceTier,
     StoredAssertion,
+    Turn,
+    TurnRole,
     WriteReceipt,
 )
 from guardmem_core.types import (
@@ -60,6 +71,7 @@ from guardmem_core.types import (
     ReviewTaskId,
     TenantId,
     TraceId,
+    TurnId,
 )
 
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
@@ -80,6 +92,7 @@ _REVIEWER_IDS = _ID.map(ReviewerId)
 _REVIEW_TASK_IDS = _ID.map(ReviewTaskId)
 _TENANT_IDS = _ID.map(TenantId)
 _TRACE_IDS = _ID.map(TraceId)
+_TURN_IDS = _ID.map(TurnId)
 
 # Naive and UTC-aware both, because pydantic serialises them differently ("...Z"
 # or not) and both have to come back as what they were. Sub-minute offsets are
@@ -224,7 +237,51 @@ _CONFLICT = st.builds(
     resolution_hint=st.sampled_from(["merge", "supersede", "coexist", "escalate"]),
 )
 
+# S2.1. Layer 1's input vocabulary, and the two models that carry a prompt's
+# reply and a prompt file's frontmatter. The last three live outside
+# `guardmem_core.schemas` for the reason `LLMResponse` does, noted below.
+_TURNS = st.builds(
+    Turn,
+    turn_id=_TURN_IDS,
+    role=st.sampled_from(TurnRole),
+    text=_TEXT,
+    captured_at=st.none() | _WHEN,
+)
+_DROPPED_TURNS = st.builds(
+    DroppedTurn,
+    turn=_TURNS,
+    reason=st.sampled_from(NoiseReason),
+    decided_by=st.sampled_from(DecidedBy),
+)
+_NOISE_VERDICTS = st.builds(
+    NoiseVerdict,
+    turn_id=_TURN_IDS,
+    drop=st.booleans(),
+    reason=st.none() | st.sampled_from(NoiseReason),
+)
+_PROMPT_SPECS = st.builds(
+    PromptSpec,
+    name=_ID,
+    version=st.integers(min_value=1, max_value=99),
+    tier=st.sampled_from(Tier),
+    output_schema=_ID,
+    changelog=_ID,
+)
+
 SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
+    Turn: _TURNS,
+    DroppedTurn: _DROPPED_TURNS,
+    NoiseResult: st.builds(
+        NoiseResult,
+        kept=st.lists(_TURNS, max_size=3),
+        dropped=st.lists(_DROPPED_TURNS, max_size=3),
+    ),
+    NoiseVerdict: _NOISE_VERDICTS,
+    NoiseClassification: st.builds(
+        NoiseClassification, verdicts=st.lists(_NOISE_VERDICTS, max_size=3)
+    ),
+    PromptSpec: _PROMPT_SPECS,
+    RenderedPrompt: st.builds(RenderedPrompt, spec=_PROMPT_SPECS, text=_TEXT, version_id=_ID),
     Provenance: _PROVENANCE,
     MemoryCandidate: _memory_candidates(),
     ExtractionResult: st.builds(
@@ -330,3 +387,13 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
 }
 
 ANY_SCHEMA = st.one_of(*SCHEMA_STRATEGIES.values())
+
+# One draw of this exercises every model in the registry, which is what makes
+# the property suite's coverage guard a construction rather than a hope.
+#
+# S2.1 is where that stopped being academic. `ANY_SCHEMA` weights its branches
+# by how much entropy each consumes, so per-model depth falls as the layer
+# grows: adding seven models pushed two *existing* ones below the sampling
+# floor at 500 examples and the guard failed for a reason having nothing to do
+# with either of them. The union still supplies depth; this supplies breadth.
+EVERY_SCHEMA = st.tuples(*SCHEMA_STRATEGIES.values())

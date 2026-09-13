@@ -4,12 +4,13 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: Day 1 complete.** The design suite, the toolchain and the gates are
-> in place, and `guardmem_core` carries its typed foundation — settings, domain
-> ids, the error hierarchy, the Pydantic schema layer, and the store and LLM
-> protocols the pipeline plugs into. **No pipeline stage exists yet**: nothing
-> extracts, validates, scores or decides. Every performance and quality figure
-> below is a **target**, not a measurement — see [Status](#status) before
+> **Status: Day 1 complete, and the first pipeline stage is in.** The design
+> suite, the toolchain and the gates are in place; `guardmem_core` carries its
+> typed foundation — settings, domain ids, the error hierarchy, the Pydantic
+> schema layer, the store and LLM protocols — and, as of S2.1, **Layer 1's noise
+> filter**, the first code that actually decides something. Nothing yet
+> extracts, validates, scores or decides *a fact*. Every performance and quality
+> figure below is a **target**, not a measurement — see [Status](#status) before
 > quoting any number.
 
 ---
@@ -144,20 +145,32 @@ verified to reproduce the environment exactly rather than approximately.
 `requirements/ml-local.txt` (torch, transformers) is **excluded on purpose** and
 is only needed if week-2 latency forces a local cross-encoder.
 
-The dev datastore stack (Postgres+pgvector, Neo4j, Redis, Langfuse, Phoenix)
-arrives at build step S1.3 as `infra/docker/docker-compose.dev.yml`.
+The dev datastore stack is `infra/docker/docker-compose.dev.yml`, in place since
+S1.3: Postgres+pgvector, Redis, Neo4j and Arize Phoenix, every image pinned and
+healthchecked. `make dev` brings it up and waits for health. Langfuse is
+deliberately **not** in it — from v3 it needs ClickHouse, MinIO and a worker
+container, so it arrives at S13.1 in `docker-compose.observability.yml` with the
+stack it actually requires.
 
 ---
 
 ## Status
 
 The engine is not implemented yet. The repository was reset to a documentation
-baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7), so
-the toolchain, the gates, the local datastore stack and the typed foundation of
-`guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
-layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
-in-memory fakes — are real. No pipeline stage exists yet: nothing extracts,
-validates, scores or decides. The next step is S2.1, the Layer-1 noise filter.
+baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7) and
+**S2.1 is in**, so the toolchain, the gates, the local datastore stack, the typed
+foundation of `guardmem_core` — settings, domain ids, the error hierarchy, the
+Pydantic schema layer, and the `LLMClient` / `VectorStore` / `GraphStore`
+protocols with in-memory fakes — and Layer 1's noise filter are real.
+
+The noise filter is the first component with a measured number attached, and it
+is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
+drop 17 turns at **precision 1.000** and settle 30 of 40 turns without a model
+call. That is a unit-test gate on one small corpus, not a production figure, and
+two of the five drop classes are deliberately under-detected until the embedder
+(S3.2) and the ontology (S3.5) exist. Nothing downstream of it exists yet:
+nothing extracts, validates, scores or decides. The next step is S2.2, K-sample
+structured extraction.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

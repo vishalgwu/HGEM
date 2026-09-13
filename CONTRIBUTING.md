@@ -1,12 +1,13 @@
 # Contributing to GuardMem AI
 
-> **Status: pre-implementation.** `guardmem_core` is still an empty package, but
-> the gates around it are real as of S1.2 — `make lint`, `make typecheck`,
-> `make test`, the pre-commit hooks and CI all run today. The suite-level gates
-> below (integration, contract, e2e, eval) become enforceable at the step that
-> creates them; coverage needs code to cover. They are written down now because,
-> as `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the gates are not in place on day 1,
-> you will not add them on day 15."*
+> **Status: early build.** `guardmem_core` now carries settings, domain ids, the
+> error hierarchy, the schema layer, the store and LLM protocols, and Layer 1's
+> noise filter (S1.1 – S2.1). The gates around it have been real since S1.2 —
+> `make lint`, `make typecheck`, `make test`, the pre-commit hooks and CI all
+> run today, at 100% branch coverage. The suite-level gates below (integration,
+> contract, e2e, eval) become enforceable at the step that creates them. They
+> are written down now because, as `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the
+> gates are not in place on day 1, you will not add them on day 15."*
 
 ## Before you change anything
 

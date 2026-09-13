@@ -11,6 +11,9 @@ dependency order explicit and leaves no room for an import cycle:
 
     base -> policy -> verdict -> receipt -> candidate -> entity -> review
 
+`turn` (S2.1) hangs off `base` alone rather than extending that chain: it is
+Layer 1's *input* vocabulary, and nothing it describes has been extracted yet.
+
 Which module owns what follows `PROJECT_TREE.md`. Three things it lists are
 deliberately absent, each deferred to the step that pins its shape rather than
 guessed at now: `Rule` and `PolicyPack` (S12.2, the policy engine), `Predicate`
@@ -37,6 +40,14 @@ from guardmem_core.schemas.review import (
     ReviewStatus,
     ReviewTask,
 )
+from guardmem_core.schemas.turn import (
+    DecidedBy,
+    DroppedTurn,
+    NoiseReason,
+    NoiseResult,
+    Turn,
+    TurnRole,
+)
 from guardmem_core.schemas.verdict import (
     ConfidenceReport,
     ConflictKind,
@@ -53,15 +64,19 @@ __all__ = [
     "ConfidenceReport",
     "ConflictKind",
     "ConflictReport",
+    "DecidedBy",
     "Decision",
     "DecisionRecord",
     "Diff",
+    "DroppedTurn",
     "Edge",
     "Entity",
     "ExtractionResult",
     "GMModel",
     "ImpactLevel",
     "MemoryCandidate",
+    "NoiseReason",
+    "NoiseResult",
     "ObjectValue",
     "Obligation",
     "ObligationKind",
@@ -73,5 +88,7 @@ __all__ = [
     "RiskVerdict",
     "SourceTier",
     "StoredAssertion",
+    "Turn",
+    "TurnRole",
     "WriteReceipt",
 ]
