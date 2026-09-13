@@ -114,6 +114,13 @@ def _migrate(dsn: str) -> None:
     variable rather than an argument - and it carries the `+asyncpg` driver
     marker, because that is what `GM_DATABASE_URL` is specified to hold.
 
+    **This inherits the rest of the environment, and needs to.** `Settings` has
+    nine required fields and the DSN is one; the other eight come from `.env`,
+    which every developer has and a fresh CI runner does not. CI creates one
+    from `.env.example` before this job runs. Overriding only the DSN is the
+    right shape anyway - a fixture that enumerated all nine would be a second
+    copy of the configuration surface, drifting quietly from the first.
+
     Raises:
         RuntimeError: the migration failed. The subprocess output is included,
             since a failure here is a broken migration and not a broken test.

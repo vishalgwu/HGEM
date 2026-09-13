@@ -2030,6 +2030,20 @@ or the deferred trigger rejects the assertion at COMMIT.
   last one is the one I most wanted evidence for — it is the difference between
   a retry and a resurrection.
 
+- **I pushed with every local gate green and the new CI job failed anyway —
+  again.** The debug pass three commits ago was entirely about this class of
+  mistake, and I made a fresh instance of it: the integration suite applies the
+  schema through `alembic`, `env.py` builds `Settings`, and `Settings` has nine
+  required fields. The fixture supplies one. The other eight come from `.env`,
+  which I have and a fresh runner does not — `8 validation errors for Settings`.
+
+  What is worth keeping is not the fix (`cp .env.example .env`, which is the
+  README's own setup line) but that the *shape* of the error repeated. A new
+  test job is a new environment, and a new environment is the thing that has to
+  be checked rather than assumed. I confirmed both halves locally afterwards by
+  moving `.env` aside to reproduce the failure and swapping `.env.example` in to
+  prove the fix — which took two minutes and should have come before the push.
+
 - **`ryuk` would not pull on this machine** (registry EOF, twice), so the local
   runs used `TESTCONTAINERS_RYUK_DISABLED=true`. Safe here because the fixture
   stops the container in a `finally`; CI pulls it normally. Worth knowing the

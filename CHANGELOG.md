@@ -104,6 +104,12 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **The new `integration` CI job could not build `Settings`.** The suite applies
+  the schema through `alembic`, whose `env.py` reads the URL from `Settings` —
+  which has nine required fields. The fixture overrides one; the other eight
+  come from `.env`, which a fresh runner does not have. CI now creates one from
+  `.env.example`, the same line the README's Local setup gives.
+
 - **A `CHECK` on the provenance span passed when it should have failed.**
   `int4range(5, 5)` is an *empty* range; `lower()` and `upper()` return NULL on
   one; and a `CHECK` that evaluates to NULL **passes**. A zero-width span —

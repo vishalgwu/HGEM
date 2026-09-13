@@ -138,6 +138,19 @@ jobs:
       - name: Install the workspace
         run: uv sync --locked --dev
 
+      - name: Create .env from the example
+        # The migration is applied by `alembic upgrade head`, and `env.py` reads
+        # its URL from `Settings` - which has nine required fields, of which the
+        # DSN is one. The fixture overrides `GM_DATABASE_URL` for the container
+        # it just started; the other eight still have to come from somewhere,
+        # and on a developer's machine they come from `.env`.
+        #
+        # This is the README's own "Local setup" line, run verbatim, which makes
+        # it a check on that instruction as well as a prerequisite for this job.
+        # The `gates` job needs no such step: unit tests build `Settings`
+        # explicitly rather than reading the environment.
+        run: cp .env.example .env
+
       - name: Pre-pull the database image
         # Outside the test timeout, and separately visible in the log. A 620 MB
         # pull that fails inside a fixture reads as a mysterious timeout;

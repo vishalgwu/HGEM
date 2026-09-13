@@ -712,7 +712,7 @@ and the matrix cannot be tuned per namespace.
 Model ids are the exact published strings. Do not append a date suffix to a current Claude id;
 `claude-haiku-4-5-20251001` is not a valid model.
 
-**Six corrections to this step, found by building it.**
+**Seven corrections to this step, found by building it.**
 
 1. **`settings = Settings()` at module scope makes importing the module a side
    effect.** With no `.env` and no environment - which is exactly CI - the
@@ -1493,6 +1493,17 @@ Never `DELETE`. Ever.
    `RULES.md` §4 forbids string-built SQL, and a dict key interpolated as a
    column name is how that rule gets broken by accident. The keys are a closed
    vocabulary mapped onto columns; anything else raises.
+7. **The integration suite needs a `.env`, and CI does not have one.** Found by
+   pushing: every gate was green locally and the new `integration` job failed.
+   The suite applies the schema with `alembic upgrade head`, `env.py` reads its
+   URL from `Settings`, and `Settings` has **nine** required fields. The fixture
+   overrides `GM_DATABASE_URL` for the container it started; the other eight
+   come from `.env`, which every developer has and a fresh runner does not - so
+   the failure was `8 validation errors for Settings`. CI now runs
+   `cp .env.example .env`, which is the README's own Local setup line and
+   therefore a check on that instruction too. The fixture deliberately does not
+   enumerate all nine itself: that would be a second copy of the configuration
+   surface, drifting quietly from the first.
 
 DONE WHEN: integration test (testcontainers Postgres) — write, search, supersede; the superseded
 row is absent from search results and present in a point-in-time query with `as_of`.
