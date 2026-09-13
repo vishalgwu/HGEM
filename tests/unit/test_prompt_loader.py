@@ -170,6 +170,26 @@ class TestFrontmatter:
         with pytest.raises(ValueError, match="empty"):
             render("demo", 1, {})
 
+    @pytest.mark.parametrize(
+        "name",
+        ["../../../../etc/passwd", "demo/../demo", "/abs/path", "Demo", "", "demo-1"],
+    )
+    def test_a_name_that_is_not_one_path_segment_is_refused(
+        self, prompt_dir: Path, name: str
+    ) -> None:
+        # `_PROMPT_ROOT / name` resolves `../../..` perfectly happily, and
+        # before this guard the only thing stopping a traversal was that no
+        # `v1.md` happened to sit at the far end - a property of the filesystem,
+        # not of the code. `name` is a module constant at every call site today,
+        # so this is defence in depth; `render` is public, and public functions
+        # in a library get called with values their author never imagined.
+        with pytest.raises(ValueError, match="single lowercase path segment"):
+            render(name, 1, {})
+
+    def test_a_version_below_one_is_refused(self, prompt_dir: Path) -> None:
+        with pytest.raises(ValueError, match="version must be 1 or greater"):
+            render("demo", 0, {})
+
     def test_a_missing_file_names_where_prompts_live(self, prompt_dir: Path) -> None:
         with pytest.raises(FileNotFoundError, match="prompts"):
             render("absent", 1, {})

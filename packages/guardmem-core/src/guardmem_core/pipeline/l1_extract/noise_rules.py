@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Final
 
 from rapidfuzz import fuzz
 
 from guardmem_core.schemas.turn import NoiseReason, Turn
 
-__all__ = ["is_ambiguous", "normalise", "rule_verdict"]
+__all__ = ["TurnHistory", "is_ambiguous", "normalise", "rule_verdict"]
 
 # The four lexicons below are written as whitespace-delimited prose and split
 # once at import. Every one carries a SIM905 suppression, and the reason is the same
@@ -149,13 +150,44 @@ def normalise(text: str) -> str:
     return _NON_WORD.sub(" ", _APOSTROPHES.sub("", text.lower())).strip()
 
 
-def _tokens(text: str) -> list[str]:
-    """Normalised word tokens of `text`, in order."""
-    normalised = normalise(text)
-    return normalised.split() if normalised else []
+@dataclass(slots=True)
+class TurnHistory:
+    """What has already been said in this trace, normalised once.
+
+    Both backward-looking rules need the normalised form of every earlier turn:
+    restatement compares for equality, and `is_ambiguous` scans for a lexical
+    near-duplicate. Taking `Sequence[Turn]` and normalising inside those checks
+    re-derived the same strings on every turn, which made the whole filter
+    quadratic *in work that had already been done* - measured at 5,350
+    `normalise` calls for a 100-turn conversation where linear is about 200, and
+    159 ms for 400 turns against 2.8 ms for 50. This product's premise is
+    long-running conversations, so that curve mattered.
+
+    Normalising on `add` makes it linear, and keeping a `set` alongside the list
+    makes the exact-match half O(1) rather than a scan. The near-duplicate half
+    is inherently a comparison against every earlier turn and stays linear per
+    turn; what it no longer does is recompute the strings it compares against.
+    """
+
+    _texts: list[str] = field(default_factory=list)
+    _seen: set[str] = field(default_factory=set)
+
+    def add(self, turn: Turn) -> None:
+        """Record a turn. Every turn, kept or dropped - both are "already said"."""
+        normalised = normalise(turn.text)
+        self._texts.append(normalised)
+        self._seen.add(normalised)
+
+    def contains(self, normalised: str) -> bool:
+        """Has this exact normalised text been said before?"""
+        return normalised in self._seen
+
+    def texts(self) -> Sequence[str]:
+        """Every earlier turn's normalised text, in order."""
+        return self._texts
 
 
-def _is_restatement(turn: Turn, prior: Sequence[Turn]) -> bool:
+def _is_restatement(normalised: str, history: TurnHistory) -> bool:
     """Is this turn an exact repeat of something already said in this trace?
 
     §1.1 scopes the class to "the agent's own prior output echoed back" and
@@ -173,8 +205,7 @@ def _is_restatement(turn: Turn, prior: Sequence[Turn]) -> bool:
     The near-duplicate half of the rule needs the embedder from S3.2. Until
     then `is_ambiguous` routes those to the classifier.
     """
-    normalised = normalise(turn.text)
-    return bool(normalised) and any(normalise(earlier.text) == normalised for earlier in prior)
+    return bool(normalised) and history.contains(normalised)
 
 
 def _is_ephemeral(tokens: Sequence[str]) -> bool:
@@ -221,13 +252,13 @@ def _is_hypothetical(tokens: Sequence[str], normalised: str) -> bool:
     return "if" in tokens and any(token in _COUNTERFACTUAL for token in tokens)
 
 
-def rule_verdict(turn: Turn, prior: Sequence[Turn]) -> NoiseReason | None:
+def rule_verdict(turn: Turn, history: TurnHistory) -> NoiseReason | None:
     """Decide a turn deterministically, or decline to.
 
     Args:
         turn: The turn under consideration.
-        prior: Every turn already seen in this trace, in order. Only the
-            restatement check reads it.
+        history: Every turn already seen in this trace. Only the restatement
+            check reads it.
 
     Returns:
         The class to drop the turn under, or `None` when no rule is confident -
@@ -244,36 +275,35 @@ def rule_verdict(turn: Turn, prior: Sequence[Turn]) -> NoiseReason | None:
     `NoiseReason.THIRD_PARTY` is never returned here. Deciding it needs the
     ontology (S3.5); until then it is a classifier judgement.
     """
-    tokens = _tokens(turn.text)
+    normalised = normalise(turn.text)
+    tokens = normalised.split()
     if _is_ephemeral(tokens):
         return NoiseReason.EPHEMERAL
-    if _is_restatement(turn, prior):
+    if _is_restatement(normalised, history):
         return NoiseReason.RESTATEMENT
     if _is_imperative(tokens):
         return NoiseReason.IMPERATIVE
-    if _is_hypothetical(tokens, normalise(turn.text)):
+    if _is_hypothetical(tokens, normalised):
         return NoiseReason.HYPOTHETICAL
     return None
 
 
-def _near_duplicate(turn: Turn, prior: Sequence[Turn]) -> bool:
+def _near_duplicate(normalised: str, history: TurnHistory) -> bool:
     """Is the turn lexically close to something already said, without matching it?
 
-    Assumes a non-empty turn, which its only caller guarantees: `is_ambiguous`
-    returns early on one. The guard that used to be here could not run, and an
-    unreachable guard is worse than none - it reads as protection while the
-    real protection lives somewhere else. Note what it was protecting against,
-    since a second caller would need it: `fuzz.ratio("", "")` is 100, so two
-    empty turns would read as near-duplicates of each other.
+    Assumes a non-empty normalised form, which its only caller guarantees:
+    `is_ambiguous` returns early on one. The guard that used to be here could
+    not run, and an unreachable guard is worse than none - it reads as
+    protection while the real protection lives somewhere else. Note what it was
+    protecting against, since a second caller would need it: `fuzz.ratio("", "")`
+    is 100, so two empty turns would read as near-duplicates of each other.
     """
-    normalised = normalise(turn.text)
     return any(
-        fuzz.ratio(normalised, normalise(earlier.text)) >= _NEAR_DUPLICATE_RATIO
-        for earlier in prior
+        fuzz.ratio(normalised, earlier) >= _NEAR_DUPLICATE_RATIO for earlier in history.texts()
     )
 
 
-def is_ambiguous(turn: Turn, prior: Sequence[Turn]) -> bool:
+def is_ambiguous(turn: Turn, history: TurnHistory) -> bool:
     """Is this turn worth spending a FAST-tier classifier call on?
 
     Only asked of turns `rule_verdict` declined. A turn with no noise signal at
@@ -289,12 +319,13 @@ def is_ambiguous(turn: Turn, prior: Sequence[Turn]) -> bool:
 
     Args:
         turn: The turn `rule_verdict` returned `None` for.
-        prior: Every turn already seen in this trace, in order.
+        history: Every turn already seen in this trace.
 
     Returns:
         Whether to include the turn in the batch sent to the classifier.
     """
-    tokens = _tokens(turn.text)
+    normalised = normalise(turn.text)
+    tokens = normalised.split()
     if not tokens:
         return False
     return (
@@ -302,5 +333,5 @@ def is_ambiguous(turn: Turn, prior: Sequence[Turn]) -> bool:
         or "if" in tokens
         or _heads_an_agent_verb(tokens)
         or len(tokens) <= _SHORT_TURN_TOKENS
-        or _near_duplicate(turn, prior)
+        or _near_duplicate(normalised, history)
     )

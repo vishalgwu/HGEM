@@ -63,6 +63,15 @@ _PLACEHOLDER: Final = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
 _FRONTMATTER_LINE: Final = re.compile(r"^([a-z_][a-z0-9_]*):[ \t]*(.*)$")
 
 
+# A prompt name is one lowercase path segment and nothing else. `name` is a
+# module constant at every call site today, so this is defence in depth rather
+# than a live hole - but `render` is a public function of a library package, and
+# `_PROMPT_ROOT / name` happily resolves `../../..`. Today that escapes the
+# package and fails only because no `v1.md` happens to sit at the traversed
+# path, which is a property of the filesystem rather than of this code.
+_PROMPT_NAME: Final = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
 class PromptSpec(GMModel):
     """The frontmatter of one prompt file.
 
@@ -219,11 +228,20 @@ def _load(name: str, version: int) -> tuple[PromptSpec, str]:
             install this means a typo; on a wheel it means the `.md` files were
             not packaged, which is worth checking with `uv build --wheel` the
             way S1.5 checked `py.typed`.
-        ValueError: if the frontmatter is malformed, or if `name`/`version`
+        ValueError: if `name` is not a single path segment, if `version` is
+            below 1, if the frontmatter is malformed, or if `name`/`version`
             inside it disagree with the path it was loaded from.
         pydantic.ValidationError: if a frontmatter field is missing or has the
             wrong type - an unknown `tier`, most usefully.
     """
+    if not _PROMPT_NAME.match(name):
+        raise ValueError(
+            f"prompt name {name!r} is not a single lowercase path segment; "
+            "a name is a directory under prompts/, never a path"
+        )
+    if version < 1:
+        raise ValueError(f"prompt version must be 1 or greater, got {version}")
+
     source = _PROMPT_ROOT / name / f"v{version}.md"
     if not source.is_file():
         raise FileNotFoundError(

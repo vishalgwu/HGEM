@@ -21,7 +21,9 @@ from __future__ import annotations
 import pytest
 
 from fixtures.noise_corpus import GOLDEN_TURNS
+from guardmem_core.pipeline.l1_extract import noise_rules
 from guardmem_core.pipeline.l1_extract.noise_rules import (
+    TurnHistory,
     is_ambiguous,
     normalise,
     rule_verdict,
@@ -41,6 +43,14 @@ _RULE_RECALL_FLOOR = 15
 
 def _turn(text: str, *, role: TurnRole = TurnRole.USER, turn_id: str = "t1") -> Turn:
     return Turn(turn_id=TurnId(turn_id), role=role, text=text)
+
+
+def _history(*turns: Turn) -> TurnHistory:
+    """A history of what was said before the turn under test."""
+    history = TurnHistory()
+    for turn in turns:
+        history.add(turn)
+    return history
 
 
 class TestNormalise:
@@ -72,7 +82,7 @@ class TestEphemeral:
         ],
     )
     def test_pure_filler_drops(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is NoiseReason.EPHEMERAL
+        assert rule_verdict(_turn(text), TurnHistory()) is NoiseReason.EPHEMERAL
 
     @pytest.mark.parametrize(
         "text",
@@ -90,12 +100,12 @@ class TestEphemeral:
         ],
     )
     def test_near_misses_are_kept(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is None
+        assert rule_verdict(_turn(text), TurnHistory()) is None
 
     def test_an_empty_turn_is_not_a_drop(self) -> None:
         # Nothing to extract, but nothing to file under a class either, and
         # `DroppedTurn` requires a reason. Keeping costs nothing downstream.
-        assert rule_verdict(_turn("   "), []) is None
+        assert rule_verdict(_turn("   "), TurnHistory()) is None
 
 
 class TestImperative:
@@ -110,7 +120,7 @@ class TestImperative:
         ],
     )
     def test_agent_directed_with_no_content_drops(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is NoiseReason.IMPERATIVE
+        assert rule_verdict(_turn(text), TurnHistory()) is NoiseReason.IMPERATIVE
 
     @pytest.mark.parametrize(
         "text",
@@ -124,7 +134,7 @@ class TestImperative:
         ],
     )
     def test_an_imperative_carrying_a_fact_is_kept(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is None
+        assert rule_verdict(_turn(text), TurnHistory()) is None
 
 
 class TestHypothetical:
@@ -139,7 +149,7 @@ class TestHypothetical:
         ],
     )
     def test_speculation_drops(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is NoiseReason.HYPOTHETICAL
+        assert rule_verdict(_turn(text), TurnHistory()) is NoiseReason.HYPOTHETICAL
 
     @pytest.mark.parametrize(
         "text",
@@ -154,7 +164,7 @@ class TestHypothetical:
         ],
     )
     def test_indicative_statements_are_kept(self, text: str) -> None:
-        assert rule_verdict(_turn(text), []) is None
+        assert rule_verdict(_turn(text), TurnHistory()) is None
 
 
 class TestRestatement:
@@ -165,27 +175,27 @@ class TestRestatement:
             turn_id="t1",
         )
         echo = _turn(said.text, turn_id="t2")
-        assert rule_verdict(echo, [said]) is NoiseReason.RESTATEMENT
+        assert rule_verdict(echo, _history(said)) is NoiseReason.RESTATEMENT
 
     def test_the_match_ignores_case_and_punctuation(self) -> None:
         said = _turn("Your pharmacy is CVS #4021.", turn_id="t1")
         echo = _turn("your pharmacy is cvs 4021", turn_id="t2")
-        assert rule_verdict(echo, [said]) is NoiseReason.RESTATEMENT
+        assert rule_verdict(echo, _history(said)) is NoiseReason.RESTATEMENT
 
     def test_the_first_occurrence_is_always_kept(self) -> None:
         said = _turn("My blood type is O negative.", turn_id="t1")
-        assert rule_verdict(said, []) is None
+        assert rule_verdict(said, TurnHistory()) is None
 
     def test_a_shorter_paraphrase_is_not_an_exact_echo(self) -> None:
         # The cosine ≥ 0.93 half of §1.1's rule needs the embedder from S3.2.
         # Until then this is the classifier's call, not the rules'.
         said = _turn("I'm allergic to penicillin - it gives me hives.", turn_id="t1")
         shorter = _turn("I'm allergic to penicillin.", turn_id="t2")
-        assert rule_verdict(shorter, [said]) is None
+        assert rule_verdict(shorter, _history(said)) is None
 
     def test_an_empty_turn_does_not_match_another_empty_turn(self) -> None:
         blank = _turn("...", turn_id="t1")
-        assert rule_verdict(_turn("!!", turn_id="t2"), [blank]) is None
+        assert rule_verdict(_turn("!!", turn_id="t2"), _history(blank)) is None
 
 
 class TestThirdParty:
@@ -197,13 +207,16 @@ class TestThirdParty:
         # Whether a claim about somebody else matters to this namespace is an
         # ontology question, and the ontology arrives at S3.5. Until then the
         # rules may only route it.
-        assert rule_verdict(_turn(text), []) is None
-        assert is_ambiguous(_turn(text), []) is True
+        assert rule_verdict(_turn(text), TurnHistory()) is None
+        assert is_ambiguous(_turn(text), TurnHistory()) is True
 
     def test_a_relation_in_a_fact_about_the_subject_also_routes(self) -> None:
         # Family history is exactly the case the ontology has to settle, so it
         # must reach the classifier rather than being kept silently.
-        assert is_ambiguous(_turn("My mother had breast cancer in her fifties."), []) is True
+        assert (
+            is_ambiguous(_turn("My mother had breast cancer in her fifties."), TurnHistory())
+            is True
+        )
 
 
 class TestAmbiguity:
@@ -216,12 +229,13 @@ class TestAmbiguity:
         ],
     )
     def test_a_noise_signal_the_rules_declined_buys_a_model_call(self, text: str) -> None:
-        assert is_ambiguous(_turn(text), []) is True
+        assert is_ambiguous(_turn(text), TurnHistory()) is True
 
     def test_a_plain_substantive_turn_costs_nothing(self) -> None:
         assert (
             is_ambiguous(
-                _turn("I take metformin, 500 milligrams, twice a day, with breakfast."), []
+                _turn("I take metformin, 500 milligrams, twice a day, with breakfast."),
+                TurnHistory(),
             )
             is False
         )
@@ -233,11 +247,65 @@ class TestAmbiguity:
         # embedder lands at S3.2.
         said = _turn("Your preferred pharmacy is the CVS on Elm Street.", turn_id="t1")
         near = _turn("Your preferred pharmacy is a CVS on Elm Street.", turn_id="t2")
-        assert rule_verdict(near, [said]) is None
-        assert is_ambiguous(near, [said]) is True
+        history = _history(said)
+        assert rule_verdict(near, history) is None
+        assert is_ambiguous(near, history) is True
 
     def test_an_empty_turn_is_not_worth_a_call(self) -> None:
-        assert is_ambiguous(_turn("   "), []) is False
+        assert is_ambiguous(_turn("   "), TurnHistory()) is False
+
+
+class TestCost:
+    """The filter must stay linear in the length of the conversation.
+
+    It was not. Both backward-looking rules took `Sequence[Turn]` and
+    normalised every earlier turn inside the check, so the same strings were
+    re-derived on every turn: 5,350 `normalise` calls for 100 turns where linear
+    is about 200, and 159 ms for 400 turns against 2.8 ms for 50. `TurnHistory`
+    normalises once on `add`.
+
+    Asserted by counting calls rather than by timing. A wall-clock assertion on
+    a shared CI runner measures the runner, and `RULES.md` §5 bans `sleep` in
+    tests for the same reason - timing is not a property of the code.
+    """
+
+    @staticmethod
+    def _normalise_calls(count: int, monkeypatch: pytest.MonkeyPatch) -> int:
+        calls = 0
+        real = noise_rules.normalise
+
+        def counting(text: str) -> str:
+            nonlocal calls
+            calls += 1
+            return real(text)
+
+        monkeypatch.setattr(noise_rules, "normalise", counting)
+        history = noise_rules.TurnHistory()
+        for index in range(count):
+            turn = _turn(f"I take medication number {index} twice a day.", turn_id=f"t{index}")
+            if noise_rules.rule_verdict(turn, history) is None:
+                noise_rules.is_ambiguous(turn, history)
+            history.add(turn)
+        return calls
+
+    def test_normalisation_is_linear_in_the_number_of_turns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Three per turn at most: one on `add`, one in `rule_verdict`, one in
+        # `is_ambiguous`. The bound is deliberately loose - what it forbids is
+        # the shape, not a particular constant.
+        assert self._normalise_calls(200, monkeypatch) <= 4 * 200
+
+    def test_doubling_the_conversation_does_not_quadruple_the_work(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        small = self._normalise_calls(100, monkeypatch)
+        large = self._normalise_calls(200, monkeypatch)
+
+        assert large < small * 3, (
+            f"{small} calls at 100 turns, {large} at 200 - that is superlinear, "
+            "which is how the quadratic normalisation got in the first time"
+        )
 
 
 class TestGoldenCorpus:
@@ -253,17 +321,17 @@ class TestGoldenCorpus:
         assert all(item.note.strip() for item in GOLDEN_TURNS)
 
     def test_drop_precision_on_the_golden_corpus(self) -> None:
-        prior: list[Turn] = []
+        history = TurnHistory()
         correct = 0
         wrong: list[tuple[str, str]] = []
         for item in GOLDEN_TURNS:
-            verdict = rule_verdict(item.turn, prior)
+            verdict = rule_verdict(item.turn, history)
             if verdict is not None:
                 if verdict is item.expected:
                     correct += 1
                 else:
                     wrong.append((item.turn.turn_id, f"{verdict} != {item.expected}"))
-            prior.append(item.turn)
+            history.add(item.turn)
 
         dropped = correct + len(wrong)
         assert dropped >= _RULE_RECALL_FLOOR, (
@@ -277,10 +345,10 @@ class TestGoldenCorpus:
         # §1.1 budgets "rules for the cheap 70%". This is that number, measured
         # rather than asserted in prose: anything the rules decide, plus
         # anything they keep without wanting a second opinion.
-        prior: list[Turn] = []
+        history = TurnHistory()
         settled = 0
         for item in GOLDEN_TURNS:
-            if rule_verdict(item.turn, prior) is not None or not is_ambiguous(item.turn, prior):
+            if rule_verdict(item.turn, history) is not None or not is_ambiguous(item.turn, history):
                 settled += 1
-            prior.append(item.turn)
+            history.add(item.turn)
         assert settled / len(GOLDEN_TURNS) >= 0.70

@@ -48,13 +48,28 @@ dev = [
   # "- redis==5.3.1 / + redis==8.1.0". Add the extras at the step that first
   # runs a testcontainer, and pin redis in the same commit.
   "testcontainers==4.13.3",
+  "pytest-xdist==3.8.0",
   # lint / type / architecture
   "ruff==0.16.6",
   "mypy==2.3.1",
   "import-linter==2.15",
+  # Stub-only distribution, and the reason this list must MIRROR
+  # requirements/dev.txt rather than approximate it. It was pinned there and
+  # not here, so it was absent from uv.lock and therefore from CI - where
+  # `mypy --strict` then failed on `tests/unit/test_compose_stack.py`'s
+  # `import yaml` from S1.7 onward, the step that widened `make typecheck` to
+  # cover `tests`. Locally it passed, because requirements.lock.txt installs it.
+  "types-pyyaml==6.0.12.20260906",
   # gates (S1.2) - RULES.md 4 puts secret scanning in pre-commit AND CI
   "pre-commit==4.6.2",
   "detect-secrets==1.5.0",
+  "pip-audit==2.10.1",
+  # Suites whose steps have not arrived, mirrored anyway. A tool that is in
+  # requirements/dev.txt and not in the lock is a tool CI does not have, and the
+  # only way to know which of those matters is to have been bitten by one.
+  "schemathesis==4.26.1",
+  "jsonschema==4.26.0",
+  "mutmut==3.7.0",
 ]
 
 # ---------------------------------------------------------------------------

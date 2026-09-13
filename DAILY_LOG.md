@@ -1701,6 +1701,145 @@ per entry, which the table shape has to account for.
 
 ---
 
+## 2026-09-13 — Debug pass: red CI, a quadratic filter, and two guards that were not guarding
+
+Not a build step. A review of everything through S2.3, prompted by CI having
+been red since S2.1 while every local run was green.
+
+**Shipped**
+
+- CI diagnosed and fixed: six dev dependencies mirrored into `pyproject.toml`'s
+  dev group, `uv.lock` regenerated.
+- `test_dependency_consistency.py` rewritten — symmetric mirror check, PEP 508
+  marker evaluation, TOML parsing instead of regex.
+- `TurnHistory` — the noise filter is no longer quadratic. **159 ms → 4.4 ms at
+  400 turns.**
+- `render()` path-traversal guard; `_tokens` and `TurnHistory.__len__` deleted.
+- 409 tests, 100% branch coverage, all four gates verified **in a
+  CI-equivalent environment** rather than only in mine.
+
+**What broke / what I learned**
+
+- **CI was red for six commits and I did not look.** Every one of those commits
+  ended with me reporting "all gates green" — and they were, locally. The badge
+  was in the README the whole time. That is the lesson worth keeping: *"the gates
+  pass on my machine" and "the gates pass" are different claims*, and I had been
+  making the second while checking the first.
+
+- **The cause was the environment, not the code, and the two installs were never
+  the same.** CI runs `uv sync --locked --dev`, which resolves **`uv.lock`
+  only** — 96 packages. A developer runs `uv pip install -r
+  requirements.lock.txt` — 313. `types-pyyaml` was pinned in
+  `requirements/dev.txt` and not in the dev group, so it existed in the second
+  set and not the first. `mypy --strict` needs it for
+  `test_compose_stack.py`'s `import yaml`, and S1.7 is the step that widened
+  `make typecheck` to cover `tests/`. That is the exact commit CI went red on.
+
+  Five more had drifted identically. `pyproject.toml` already said the dev group
+  "carries EXACT pins mirroring requirements/dev.txt"; the word was *mirroring*
+  and the reality was a subset.
+
+- **The guard for this existed and checked the wrong direction.** It asserted
+  that dev-group entries appear in `requirements/dev.txt` — the direction where
+  the consequence is a missing citation. The direction that breaks CI is a
+  package the developer has and CI does not. One `assert` was missing, and the
+  test's name said "matches" while it meant "is contained in".
+
+- **Then fixing it produced a false positive, which is how guards die.** With
+  the six added, the `uv.lock ⊆ requirements.lock.txt` check failed on
+  `pyyaml-ft`. That is not drift: `uv.lock` is a **universal** lock and carries
+  entries for every interpreter its markers cover, so `libcst` requires
+  `pyyaml-ft` under `python_full_version == '3.13.*'` — which a 3.12 project can
+  never install. `requirements.lock.txt` is resolved for one interpreter and
+  rightly omits it. The temptation was to allowlist the package name. What the
+  guard needed was to evaluate the markers, which it now does, against the
+  interpreter `.python-version` names rather than the one running the test.
+
+  While in there I replaced the regex that matched `name = "..."` followed by
+  `version = "..."` with `tomllib`. `uv.lock` is TOML. The regex was true of the
+  file rather than of the format.
+
+- **I verified the fix by reproducing CI instead of reasoning about it.**
+  `UV_PROJECT_ENVIRONMENT=<scratch> uv sync --locked --dev` builds CI's exact
+  96-package environment without touching the 313-package one I work in. Then,
+  to be sure the diagnosis was the cause and not a coincidence, I uninstalled
+  the stubs from that scratch venv and confirmed the *exact* CI error came back:
+  `Library stubs not installed for "yaml"`, `test_compose_stack.py:33`. I had
+  nearly skipped that step, and the first attempt at it was wrong — `uv pip
+  uninstall` did not target the scratch venv and mypy's incremental cache hid
+  the result, so it "passed" and briefly convinced me the diagnosis was wrong.
+
+- **The noise filter was quadratic and nobody would have noticed until it
+  mattered.** Profiling Layer 1 at realistic sizes: 50 turns 2.8 ms, 400 turns
+  159 ms. Eight times the input, fifty-seven times the time. The cause was not
+  the fuzzy comparison, which is inherently per-pair — it was that both
+  backward-looking rules took `Sequence[Turn]` and re-derived `normalise()` for
+  every earlier turn on every turn. **5,350 calls for 100 turns where linear is
+  200.**
+
+  `TurnHistory` normalises once on `add`, and keeps a `set` beside the list so
+  the exact-match half is O(1) rather than a scan. 400 turns: 4.4 ms. 1,000
+  turns: 10.8 ms. This product's entire premise is conversations that run for
+  months; a curve like that is not a micro-optimisation, it is the difference
+  between the filter being cheap and the filter being the reason the eval path
+  misses its SLA.
+
+  The regression test counts `normalise` calls rather than timing anything. A
+  wall-clock assertion on a shared CI runner measures the runner, which is the
+  same reason `RULES.md` §5 bans `sleep` in tests.
+
+- **Coverage found the dead code the refactor created**, which is the argument
+  for a 100% floor stated better than I could state it: `_tokens` had no callers
+  left because both had been given the normalised string directly, and
+  `TurnHistory.__len__` was API I wrote because objects usually have one.
+
+- **`render()` would follow `../../..` out of the package.** Nothing exploits it
+  today — `name` is a module constant at both call sites — but it is a public
+  function of a library, and the only thing preventing a traversal was that no
+  `v1.md` sat at the far end. That is a property of the filesystem, not of the
+  code.
+
+**Deliberately not fixed**
+
+- **The untrusted-content delimiter can be escaped.** `content` goes between
+  `<untrusted_content>` tags and nothing stops the content from closing them.
+  The canary catches an echo, not an escape. The obvious fix — sanitise
+  `content` — is *wrong*: every `source_span` indexes into exactly that string
+  and `source_hash` is its digest, so rewriting it silently invalidates the
+  provenance of every candidate produced from it. The real answer is the
+  pre-flight detector at **S11.1**, which `ARCHITECTURE.md` §2 puts before any
+  model sees the text and which quarantines rather than rewrites. Recorded in
+  the extractor's docstring so S11.1 inherits it knowingly.
+- **CI runs only on `ubuntu-latest`** while all development happens on Windows.
+  Every Windows-specific hazard the repo has hit — `PYTHONIOENCODING`, cp1252
+  in `.env`, cmd.exe in the Makefile, separators in `.secrets.baseline` — is
+  currently caught by a human, not by a runner. A matrix would close that, at
+  double the CI minutes. Worth a decision, not worth making unasked.
+
+**Still open**
+
+- **The dev stack is on 5433 / 6380 / 7475 / 7688 while `.env` says the
+  defaults, and S3.1 is the step that connects.** Docker Desktop was not running
+  during this pass, so the S1.3 stack could not be re-verified. This is the one
+  thing that must be settled before the next step, and it is not mine to settle:
+  the containers holding the default ports belong to another checkout.
+- Temporal extraction still absent by decision (S4.3); the two Layer-1 seams
+  still held by convention until S5.6's orchestrator.
+- Coverage 100% against `fail_under = 85`; raise to 90 at S7.2.
+- `GM_ANTHROPIC_API_KEY` blank — nothing needs it until a live run.
+- Branch protection on `main` (S0.3).
+
+**Next step**
+
+`S3.1` — the initial Alembic migration. Settle the port question first, then
+`tenant`, `entity`, `assertion`, `audit_event`, `outbox`, `review_task`,
+`policy_version`, with the bitemporal columns, the RLS policy and the `REVOKE
+DELETE` that `RULES.md` non-negotiable #2 rests on. Note that `Provenance` now
+carries `alignment` (ADR-0007) and is a *list* on `StoredAssertion`, so the
+table shape has to account for both.
+
+---
+
 <!--
 Template for the next entry:
 

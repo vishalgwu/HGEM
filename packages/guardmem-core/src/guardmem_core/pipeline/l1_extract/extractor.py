@@ -31,25 +31,28 @@ neither is reachable by construction rather than by validation. That is what
 `ExtractionContext` is *for*: it is not a parameter bag, it is the set of fields
 a model may not supply.
 
+**A known gap, recorded rather than half-fixed.** `content` is interpolated
+between `<untrusted_content>` delimiters, and nothing here stops the content
+itself from containing the closing delimiter and continuing with text the model
+may read as instructions. The canary catches an *echo*, not an escape. The fix
+is not to sanitise `content`: every `source_span` indexes into exactly this
+string and `source_hash` is its digest, so altering it would silently
+invalidate the provenance of every candidate. The real answer is the pre-flight
+injection detector at **S11.1**, which `ARCHITECTURE.md` §2 places before any
+model sees the text - and which quarantines rather than rewrites.
+
 No clock is read and no randomness is drawn except the canary. `captured_at`
 lives on the context for that reason: `scripts/replay_trace.py` (S5.6) re-runs
 this path against a recorded audit record, and a `datetime.now()` inside it
 would make replay disagree with itself.
 
-Two more things the caller owns, and why they are arguments rather than lookups:
-
-`content`
-    The source document, *and its offsets*. `source_hash` is sha256 of exactly
-    this text and every `source_span` indexes into it, so a caller that joins
-    denoised turns must pass the joined result and nothing else. Note what that
-    means after S2.1: spans are into the *denoised* document, not the original
-    transcript, and the recorded hash says so.
-`ontology_yaml`
-    The tenant ontology, already rendered. **Not an `Ontology` object** - S3.5
-    owns that shape and its loader, and the only thing extraction needs is the
-    text to put in the prompt. Predicates are not validated here either: an
-    unknown predicate is S4.1's schema gate sending the candidate to quarantine
-    (§2.1), and doing it twice would put the ontology in two places.
+Two more things the caller owns. **`content`** is the source document *and its
+offsets*: a caller that joins denoised turns must pass the joined result and
+nothing else, because after S2.1 the spans are into the *denoised* document
+rather than the transcript, and the recorded hash says so. **`ontology_yaml`**
+is the ontology already rendered, not an `Ontology` object - S3.5 owns that
+shape, and predicates are not validated here either, since an unknown predicate
+is S4.1's schema gate sending the candidate to quarantine (§2.1).
 """
 
 from __future__ import annotations

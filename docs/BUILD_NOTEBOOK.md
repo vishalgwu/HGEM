@@ -495,8 +495,31 @@ environment is created fresh on every run so there is nothing to destroy, and
 `--locked` additionally fails the build when `uv.lock` is stale against
 `pyproject.toml`, so a dependency edit that was never re-locked cannot merge.
 
+**A ninth correction, found six commits later.** CI installs with
+`uv sync --locked --dev`, which resolves **`uv.lock` only**. A developer
+installs with `uv pip install -r requirements.lock.txt`. Those are two different
+package sets, and nothing in this step makes them agree - so a dependency
+present in one and absent from the other produces a CI failure that cannot be
+reproduced locally, and a local pass that means nothing.
+
+It happened with `types-pyyaml`: pinned in `requirements/dev.txt`, absent from
+`pyproject.toml`'s dev group, therefore absent from `uv.lock` and from CI. It
+was invisible until S1.7 widened `make typecheck` to cover `tests/`, at which
+point `mypy --strict` began failing on `tests/unit/test_compose_stack.py`'s
+`import yaml` - and six commits were pushed red before anyone looked at the
+badge. Five further packages had drifted the same way.
+
+Two things follow, and both are in the tree now rather than in this paragraph:
+`tests/unit/test_dependency_consistency.py` checks the mirror in **both**
+directions, and the same file evaluates PEP 508 markers before comparing the two
+locks, because `uv.lock` is universal and carries entries for interpreters this
+project never runs. **When CI fails and the local run passes, suspect the
+environment before the code** - and reproduce CI with
+`UV_PROJECT_ENVIRONMENT=<scratch> uv sync --locked --dev` rather than guessing.
+
 DONE WHEN: `make lint && make typecheck && make test` all pass, and the CI badge
-goes green on a pushed branch.
+goes green on a pushed branch. **Check the badge.** A red CI that nobody reads
+is worse than no CI, and that is exactly what happened here.
 
 COMMIT: `chore(s1.2): pre-commit, makefile, ci`
 

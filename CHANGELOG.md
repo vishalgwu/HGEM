@@ -15,6 +15,77 @@ repository; the log records what happened while changing it.
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI had been red for six commits, and every local run was green.** `mypy
+  --strict` failed in CI on `tests/unit/test_compose_stack.py`'s `import yaml`
+  with "Library stubs not installed". The cause was not the code: `types-pyyaml`
+  was pinned in `requirements/dev.txt` and **not** in `pyproject.toml`'s dev
+  group, so it reached a developer's machine (which installs from
+  `requirements.lock.txt`) and never reached `uv.lock` (which is what CI
+  installs from). It went unnoticed until S1.7 widened `make typecheck` to cover
+  `tests/`, and from then on every push was red.
+
+  Five more packages had drifted the same way — `pip-audit`, `pytest-xdist`,
+  `schemathesis`, `jsonschema`, `mutmut`. All six are now in the dev group, and
+  `uv.lock` is regenerated. `pyproject.toml` already stated the intent in as
+  many words: the dev group "carries EXACT pins mirroring requirements/dev.txt".
+
+- **The guard that should have caught it checked only the harmless direction.**
+  `test_dev_group_matches_requirements_dev` asserted that dev-group entries
+  appear in `requirements/dev.txt`. The direction that breaks CI is the reverse:
+  a package the developer has and CI does not. It is now symmetric, and renamed
+  `test_dev_group_mirrors_requirements_dev`, because mirroring is symmetric.
+
+- **The `uv.lock` ⊆ `requirements.lock.txt` guard reported a false positive, and
+  a false positive is how a guard gets relaxed.** `uv.lock` is a *universal*
+  lock carrying entries for every interpreter its resolution markers cover, so
+  `libcst` lists `pyyaml-ft` under `python_full_version == '3.13.*'` — which this
+  project, pinned to 3.12, can never install. The guard now evaluates PEP 508
+  markers against the interpreter `.python-version` names, and walks reachability
+  from the root rather than taking every `[[package]]` block. It also parses
+  `uv.lock` as TOML instead of matching `name = "..."` immediately followed by
+  `version = "..."` with a regex — true of the file today, not a property the
+  format guarantees.
+
+- **The noise filter was quadratic, in work it had already done.** Both
+  backward-looking rules took `Sequence[Turn]` and normalised every earlier turn
+  inside the check, so the same strings were re-derived on every turn: **5,350
+  `normalise` calls for a 100-turn conversation** where linear is about 200, and
+  **159 ms for 400 turns against 2.8 ms for 50**. `TurnHistory` normalises once
+  on `add` and keeps a `set` alongside the list, making the exact-match half O(1)
+  instead of a scan. Measured after: **4.4 ms at 400 turns (36× faster)**, and
+  10.8 ms at 1,000 — near-linear where it had been quadratic. In a product whose
+  premise is long-running conversations, that curve was the bug.
+
+  Guarded by counting `normalise` calls rather than by timing, because a
+  wall-clock assertion on a shared runner measures the runner.
+
+- **`render()` would resolve a path outside the prompt root.**
+  `_PROMPT_ROOT / name` happily accepts `../../../../etc/passwd`; the only thing
+  stopping a traversal was that no `v1.md` happened to sit at the far end, which
+  is a property of the filesystem rather than of the code. `name` is a module
+  constant at every call site today, so this was defence in depth rather than a
+  live hole — but `render` is a public function of a library package. A prompt
+  name is now validated as one lowercase path segment, and a version below 1 is
+  refused.
+
+### Removed
+
+- `_tokens` and `TurnHistory.__len__`, both dead after the history refactor —
+  surfaced by coverage rather than by reading. Nothing called either.
+
+### Changed
+
+- The extractor now records a **known gap** rather than half-fixing it:
+  `content` is interpolated between `<untrusted_content>` delimiters and nothing
+  stops the content from containing the closing delimiter. The canary catches an
+  echo, not an escape. Sanitising `content` is *not* the fix — every
+  `source_span` indexes into exactly that string and `source_hash` is its digest,
+  so rewriting it would silently invalidate the provenance of every candidate.
+  The answer is the pre-flight injection detector at S11.1, which quarantines
+  rather than rewrites.
+
 ### Added
 
 - **S2.3 — the span linker's fuzzy fallback, and invariant I1's property

@@ -8,27 +8,47 @@ The repo deliberately keeps two dependency descriptions, because they do
 different jobs:
 
 - ``pyproject.toml`` + ``uv.lock`` - authoritative for the workspace packages,
-  and what ``uv run`` / ``uv sync`` install from.
+  and what ``uv sync`` installs. **This is what CI installs from.**
 - ``requirements/*.txt`` + ``requirements.lock.txt`` - the human inventory,
   where every entry cites the build step or spec clause that requires it, and
-  the plain pip-installable lock the README's cold start uses.
+  the plain pip-installable lock the README's cold start uses. **This is what a
+  developer's machine installs from.**
 
 Keeping both is a real choice with a real failure mode: they drift, and nothing
-errors when they do. It happened. ``testcontainers`` was pinned to 4.13.3 in
-``requirements/dev.txt`` while ``uv.lock`` resolved 4.15.0 from a ``>=4.8``
-floor, so the installed version depended on whether ``uv run`` or
-``uv pip install -r requirements.lock.txt`` ran last. The same mechanism nearly
-swapped ``redis`` 5.3.1 for 8.1.0 and silently undid the ``arq`` pin behind it.
+errors when they do - the two environments simply stop being the same one, and
+the difference only shows up as a CI failure nobody can reproduce locally.
 
-So the invariant these tests enforce is:
+It has happened twice.
 
-    uv.lock is a version-consistent SUBSET of requirements.lock.txt
+``testcontainers`` was pinned to 4.13.3 in ``requirements/dev.txt`` while
+``uv.lock`` resolved 4.15.0 from a ``>=4.8`` floor, so the installed version
+depended on which command ran last.
 
-Subset, not equality - ``requirements.lock.txt`` intentionally carries the full
-runtime set (fastapi, presidio, phoenix and the rest) that the workspace itself
-does not declare as a dependency. What is forbidden is disagreement on a shared
-package, or a package appearing in ``uv.lock`` that the pip lock has never
-heard of.
+Then ``types-pyyaml`` was pinned in ``requirements/dev.txt`` and **not** in
+``pyproject.toml``'s dev group, so it reached a developer's machine and never
+reached ``uv.lock``. It went unnoticed until S1.7 widened ``make typecheck`` to
+cover ``tests/``, at which point ``mypy --strict`` began failing in CI on
+``tests/unit/test_compose_stack.py``'s ``import yaml`` - and passing locally,
+where the stubs were installed. Six commits were pushed red.
+
+The guard that should have caught it only checked one direction: dev-group
+entries missing from ``requirements/dev.txt``. That is the harmless direction.
+The harmful one is a package the developer has and CI does not, and it is now
+checked too - see :func:`test_dev_group_mirrors_requirements_dev`.
+
+Two invariants, then:
+
+    1. the dev group and requirements/dev.txt pin the same set, exactly
+    2. uv.lock is a version-consistent subset of requirements.lock.txt,
+       *for the interpreter this project pins*
+
+The qualification on (2) is not a loophole. ``uv.lock`` is a **universal** lock:
+it carries entries for every interpreter its resolution markers cover, so
+``libcst`` lists ``pyyaml-ft`` under ``python_full_version == '3.13.*'`` even
+though this project pins 3.12 and can never install it. ``requirements.lock.txt``
+is resolved for one interpreter and rightly omits it. Comparing the two without
+evaluating markers reports that as drift, which is how a guard earns a reputation
+for crying wolf and then gets relaxed.
 
 When one of these fails, fix the pin - do not relax the test. The commands are
 ``uv lock`` after editing ``pyproject.toml``, and
@@ -40,6 +60,9 @@ from __future__ import annotations
 
 import re
 import tomllib
+from typing import Any, Final
+
+from packaging.markers import Marker
 
 from conftest import REPO_ROOT
 
@@ -47,15 +70,15 @@ UV_LOCK = REPO_ROOT / "uv.lock"
 PIP_LOCK = REPO_ROOT / "requirements.lock.txt"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 DEV_REQUIREMENTS = REPO_ROOT / "requirements" / "dev.txt"
+PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
 
 # Workspace members are built from source in this repo, so they never appear in
 # a lock of third-party packages. Comparing them would always fail.
-LOCAL_PACKAGES = frozenset({"guardmem-core", "guardmem-workspace"})
+LOCAL_PACKAGES: Final = frozenset({"guardmem-core", "guardmem-workspace"})
 
 # `Foo_Bar` and `foo-bar` are the same distribution to pip; normalise before
 # comparing so a naming style difference is never reported as a drift.
 _PIN = re.compile(r"^([A-Za-z0-9._-]+)(?:\[[^\]]*\])?==([^\s;#]+)")
-_UV_ENTRY = re.compile(r'^name = "([^"]+)"\nversion = "([^"]+)"', re.MULTILINE)
 
 
 def _normalise(name: str) -> str:
@@ -75,13 +98,79 @@ def _parse_pinned(text: str) -> dict[str, str]:
     return pins
 
 
-def _uv_lock_versions() -> dict[str, str]:
-    """Return ``{normalised name: version}`` for every package in uv.lock."""
-    text = UV_LOCK.read_text(encoding="utf-8")
+def _marker_environment() -> dict[str, str]:
+    """A PEP 508 environment for the interpreter `.python-version` pins.
+
+    Read from the file rather than from `sys.version_info`, so the guard
+    describes the project's target rather than whatever happens to be running
+    it. A developer on 3.13 must still get the same verdict as CI.
+    """
+    pinned = PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
+    major_minor = ".".join(pinned.split(".")[:2])
     return {
-        _normalise(name): version
-        for name, version in _UV_ENTRY.findall(text)
-        if _normalise(name) not in LOCAL_PACKAGES
+        "python_version": major_minor,
+        # `.0` is a placeholder patch: every marker in a lock file discriminates
+        # on minor version at most, and `python_full_version` needs three parts
+        # to compare correctly against a `== '3.13.*'` style specifier.
+        "python_full_version": f"{major_minor}.0",
+        "implementation_name": "cpython",
+        "platform_python_implementation": "CPython",
+        "sys_platform": "linux",
+        "platform_system": "Linux",
+        "os_name": "posix",
+        "platform_machine": "x86_64",
+        "extra": "",
+    }
+
+
+def _applies(marker: str | None, environment: dict[str, str]) -> bool:
+    """Does a dependency edge apply to the pinned interpreter?"""
+    if marker is None:
+        return True
+    return bool(Marker(marker).evaluate(environment))
+
+
+def _uv_lock_versions() -> dict[str, str]:
+    """Every uv.lock package installable on the pinned interpreter.
+
+    Parsed as TOML, because `uv.lock` is TOML. The previous version of this
+    function matched `name = "..."` immediately followed by `version = "..."`
+    with a regex, which is true of the file today and is not a property the
+    format guarantees.
+
+    Reachability is walked from the root package's own dependencies, following
+    only edges whose marker the pinned interpreter satisfies. That is what
+    excludes `pyyaml-ft`, which `libcst` requires solely on 3.13.
+    """
+    data: dict[str, Any] = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
+    packages = {_normalise(entry["name"]): entry for entry in data["package"]}
+    environment = _marker_environment()
+
+    def edges(entry: dict[str, Any]) -> list[str]:
+        found: list[str] = []
+        groups: list[dict[str, Any]] = list(entry.get("dependencies", []))
+        for extra in entry.get("optional-dependencies", {}).values():
+            groups.extend(extra)
+        for group in entry.get("dev-dependencies", {}).values():
+            groups.extend(group)
+        for dependency in groups:
+            if _applies(dependency.get("marker"), environment):
+                found.append(_normalise(dependency["name"]))
+        return found
+
+    reachable: set[str] = set()
+    frontier = [name for name in LOCAL_PACKAGES if name in packages]
+    while frontier:
+        name = frontier.pop()
+        if name in reachable or name not in packages:
+            continue
+        reachable.add(name)
+        frontier.extend(edges(packages[name]))
+
+    return {
+        name: packages[name]["version"]
+        for name in reachable - LOCAL_PACKAGES
+        if "version" in packages[name]
     }
 
 
@@ -115,7 +204,7 @@ def test_uv_lock_agrees_with_requirements_lock() -> None:
 
 
 def test_uv_lock_introduces_no_package_the_pip_lock_lacks() -> None:
-    """uv.lock must stay a subset of requirements.lock.txt.
+    """uv.lock must stay a subset of requirements.lock.txt on the pinned Python.
 
     A package here but not there is one that `uv sync` would install and the
     README's install path would not, which is how the two environments diverge
@@ -151,11 +240,17 @@ def test_dev_group_is_pinned_exactly() -> None:
     )
 
 
-def test_dev_group_matches_requirements_dev() -> None:
-    """The dev group and requirements/dev.txt must pin the same versions.
+def test_dev_group_mirrors_requirements_dev() -> None:
+    """The dev group and requirements/dev.txt must pin the same set, both ways.
 
-    These are two hand-maintained lists of the same toolchain. Bumping one and
-    not the other is the drift; this is the check that makes it loud.
+    Two hand-maintained lists of one toolchain, and the direction that matters
+    is the one this test used to omit. A package in `requirements/dev.txt` and
+    not in the dev group is a package the developer has and **CI does not** -
+    which is how `types-pyyaml` left six commits red while every local run was
+    green. The reverse is merely undocumented.
+
+    `pyproject.toml` states the intent in as many words: the dev group "carries
+    EXACT pins mirroring requirements/dev.txt". Mirroring is symmetric.
     """
     declared = _dev_group_pins()
     documented = _parse_pinned(DEV_REQUIREMENTS.read_text(encoding="utf-8"))
@@ -165,7 +260,8 @@ def test_dev_group_matches_requirements_dev() -> None:
         for name, version in declared.items()
         if name in documented and documented[name] != version
     }
-    undocumented = sorted(set(declared) - set(documented))
+    missing_from_lock = sorted(set(documented) - set(declared))
+    missing_from_requirements = sorted(set(declared) - set(documented))
 
     assert not conflicts, (
         "pyproject.toml dev group and requirements/dev.txt disagree on:\n"
@@ -174,9 +270,32 @@ def test_dev_group_matches_requirements_dev() -> None:
             for name, (pin, req) in sorted(conflicts.items())
         )
     )
-    assert not undocumented, (
+    assert not missing_from_lock, (
+        "requirements/dev.txt pins packages the dev group does not:\n"
+        + "\n".join(f"  {name}=={documented[name]}" for name in missing_from_lock)
+        + "\nThese reach a developer's machine and never reach uv.lock, so CI "
+        "does not have them. Add them to [dependency-groups] dev and re-run "
+        "`uv lock`."
+    )
+    assert not missing_from_requirements, (
         "dev group entries missing from requirements/dev.txt:\n"
-        + "\n".join(f"  {name}" for name in undocumented)
+        + "\n".join(f"  {name}" for name in missing_from_requirements)
         + "\nrequirements/dev.txt is where each package cites the step that "
         "requires it; a tool with no citation there is a tool nobody can justify."
     )
+
+
+def test_the_marker_environment_matches_the_pinned_interpreter() -> None:
+    """Pin the filter that keeps the subset check honest.
+
+    If `_marker_environment` ever stopped reflecting `.python-version`, the
+    subset test would quietly start comparing the wrong resolution - passing
+    for packages that cannot install and failing for ones that can.
+    """
+    environment = _marker_environment()
+    pinned = PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
+
+    assert environment["python_version"] == ".".join(pinned.split(".")[:2])
+    assert _applies("python_full_version != '3.13.*'", environment) is True
+    assert _applies("python_full_version == '3.13.*'", environment) is False
+    assert _applies(None, environment) is True

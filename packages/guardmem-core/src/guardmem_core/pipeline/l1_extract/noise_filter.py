@@ -57,7 +57,11 @@ from pydantic import ValidationError
 
 from guardmem_core.errors import InjectionDetected
 from guardmem_core.llm.base import LLMClient, LLMResponse
-from guardmem_core.pipeline.l1_extract.noise_rules import is_ambiguous, rule_verdict
+from guardmem_core.pipeline.l1_extract.noise_rules import (
+    TurnHistory,
+    is_ambiguous,
+    rule_verdict,
+)
 from guardmem_core.prompts.loader import render
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.turn import DecidedBy, DroppedTurn, NoiseReason, NoiseResult, Turn
@@ -249,19 +253,19 @@ async def filter_noise(
     kept: list[Turn] = []
     dropped: list[DroppedTurn] = []
     ambiguous: list[Turn] = []
-    prior: list[Turn] = []
+    history = TurnHistory()
 
     for turn in turns:
-        reason = rule_verdict(turn, prior)
+        reason = rule_verdict(turn, history)
         if reason is None:
             kept.append(turn)
-            if is_ambiguous(turn, prior):
+            if is_ambiguous(turn, history):
                 ambiguous.append(turn)
         else:
             dropped.append(DroppedTurn(turn=turn, reason=reason, decided_by=DecidedBy.RULE))
         # Every turn, kept or dropped, is something "already said in this
         # trace" for the turns that follow it.
-        prior.append(turn)
+        history.add(turn)
 
     if not ambiguous:
         return NoiseResult(kept=kept, dropped=dropped)
