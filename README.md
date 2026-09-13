@@ -8,9 +8,10 @@
 > The design suite, the toolchain and the gates are in place; `guardmem_core`
 > carries its typed foundation — settings, domain ids, the error hierarchy, the
 > Pydantic schema layer, the store and LLM protocols — the whole of **Layer 1**
-> (noise filter, K-sample extractor, span linker), and from S3.1–S3.4 the
+> (noise filter, K-sample extractor, span linker), and from S3.1–S3.5 the
 > bitemporal Postgres schema, the pgvector store over it, the outbox that
-> coordinates the dual write, and the graph store on the other side of it:
+> coordinates the dual write, the graph store on the other side of it, and the
+> ontology that says what a predicate is allowed to mean:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -162,7 +163,7 @@ stack it actually requires.
 
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.4**.
+Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.5**.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -173,7 +174,8 @@ is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
 drop 17 turns at **precision 1.000** and settle 30 of 40 turns without a model
 call. That is a unit-test gate on one small corpus, not a production figure, and
 two of the five drop classes are deliberately under-detected until the embedder
-(S3.2) and the ontology (S3.5) exist.
+(S3.2) and the ontology (S3.5) exist — both now do, and the rules that use them
+are Layer 2.
 
 S2.2 and S2.3 add the extractor and the span linker: K samples with a
 temperature-0 canonical draw, each proposed fact anchored to a verbatim span of
@@ -223,10 +225,20 @@ evaluated at all. It is the dev and single-tenant backend, and it enforces that:
 the `GraphStore` protocol gives its read methods no tenant to filter on, so it
 refuses to hold two. Neo4j swaps in at S7.1 behind the same three methods.
 
+S3.5 is the first thing that can say what a predicate *means*. The clinical
+starter pack declares fifteen predicates over six entity types, and each one
+states its cardinality, its blast radius, the weakest source allowed to assert
+it, and whether one source is enough. Those four fields are what Layer 2 and the
+risk scorer read: cardinality is what turns a second live value into a conflict
+regardless of what a language model thinks, and impact is what floors the risk
+score so a confident write to a critical field cannot auto-write on confidence
+alone. Nothing consumes it yet — the schema gate is the first consumer, and it
+is Layer 2.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S3.5, the ontology loader — the first thing that can say
-what a predicate means.
+push. The next step is S3.6, the seed script — the first thing that puts a
+tenant, an ontology and a set of assertions together.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

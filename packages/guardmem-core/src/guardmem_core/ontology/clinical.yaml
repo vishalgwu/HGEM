@@ -1,0 +1,177 @@
+# The clinical starter pack.  BUILD_NOTEBOOK.md S3.5
+#
+# Loaded and validated by `schemas/ontology.py`; the vocabulary is
+# `MEMORY_ENGINE.md` §2.1's, extended from its three worked examples to the
+# fifteen predicates the step asks for. Nothing here is medical advice or a
+# clinical standard - it is a demonstration ontology for a governance engine,
+# and a real deployment replaces it.
+#
+# Read the three fields that carry weight before editing any of them:
+#
+#   cardinality  ONE turns a second live value into a CARDINALITY conflict
+#                "regardless of NLI" (§2.2b). ONE_PER_TIME allows one value per
+#                interval - the right answer for anything that legitimately
+#                changes and whose history matters. MANY accumulates.
+#   impact       Floors the risk score (§3.3): low .15, medium .35, high .60,
+#                critical .80. A CRITICAL predicate cannot be auto-written on
+#                confidence alone, which is the point.
+#   min_source_tier
+#                The weakest source that may assert this at all. Required on
+#                every predicate - there is no safe default, so the file states
+#                it fifteen times rather than assuming it once.
+#
+# `requires_corroboration` defaults to false and is stated only where it is
+# true: §3.2's `S_cor` then demands more than one independent source, which is
+# the defence against a single poisoned document setting a dangerous field.
+
+name: clinical
+version: 1
+
+# Closed list. Every `subject` and every `entity_ref` target below is checked
+# against it at load, so a typo is a load error rather than a predicate nothing
+# can ever match.
+entities:
+  - Patient
+  - Provider
+  - Pharmacy
+  - Payer
+  - Person
+  - Document
+
+predicates:
+  # --- the critical six -----------------------------------------------------
+  # Everything here can hurt someone if it is wrong, so none of it auto-writes
+  # on confidence alone and most of it needs a second source.
+
+  allergy:
+    subject: Patient
+    object: {type: coded, system: RxNorm}
+    cardinality: many
+    impact: critical
+    min_source_tier: verified_user
+    requires_corroboration: true
+
+  medication:
+    subject: Patient
+    object: {type: coded, system: RxNorm}
+    cardinality: many
+    impact: critical
+    min_source_tier: verified_user
+    requires_corroboration: true
+
+  # ONE, not MANY: §2.2b's cardinality check is the whole reason a new primary
+  # diagnosis must supersede the old one rather than sit beside it.
+  primary_dx:
+    subject: Patient
+    object: {type: coded, system: ICD-10-CM}
+    cardinality: one
+    impact: critical
+    min_source_tier: trusted_system
+    requires_corroboration: true
+
+  blood_type:
+    subject: Patient
+    object: {type: coded, system: SNOMED-CT}
+    cardinality: one
+    impact: critical
+    min_source_tier: trusted_system
+    requires_corroboration: true
+
+  # A boolean, and still critical. The value is trivial; revoking or inventing
+  # a consent is not, which is why `irreversibility` is a separate risk feature
+  # from `impact` in §3.3.
+  consent_flag:
+    subject: Patient
+    object: {type: boolean}
+    cardinality: one
+    impact: critical
+    min_source_tier: verified_user
+    requires_corroboration: true
+
+  # ONE_PER_TIME because a directive is superseded by a later one and the
+  # earlier one still has to be answerable for the window it governed.
+  advance_directive:
+    subject: Patient
+    object: {type: entity_ref, entity: Document}
+    cardinality: one_per_time
+    impact: critical
+    min_source_tier: trusted_system
+    requires_corroboration: true
+
+  # --- relationships to other entities --------------------------------------
+
+  primary_care_provider:
+    subject: Patient
+    object: {type: entity_ref, entity: Provider}
+    cardinality: one
+    impact: medium
+    min_source_tier: verified_user
+
+  preferred_pharmacy:
+    subject: Patient
+    object: {type: entity_ref, entity: Pharmacy}
+    cardinality: one_per_time
+    impact: low
+    min_source_tier: unverified_user
+
+  # HIGH rather than medium: a wrong payer is a denied claim, and corroborated
+  # because it is the field most worth poisoning for financial gain.
+  insurance_plan:
+    subject: Patient
+    object: {type: entity_ref, entity: Payer}
+    cardinality: one_per_time
+    impact: high
+    min_source_tier: trusted_system
+    requires_corroboration: true
+
+  # MANY: a patient may nominate several, and each is separately sourced,
+  # separately scored and separately retractable - which is what §0's "a
+  # multi-valued fact is several assertions" means in practice.
+  emergency_contact:
+    subject: Patient
+    object: {type: entity_ref, entity: Person}
+    cardinality: many
+    impact: high
+    min_source_tier: verified_user
+
+  # --- descriptive state ----------------------------------------------------
+
+  care_plan_status:
+    subject: Patient
+    object: {type: text}
+    cardinality: one
+    impact: medium
+    min_source_tier: trusted_system
+
+  # ONE_PER_TIME, like every address: the previous one is not wrong, it is
+  # previous, and a point-in-time query has to be able to say so.
+  home_address:
+    subject: Patient
+    object: {type: text}
+    cardinality: one_per_time
+    impact: high
+    min_source_tier: verified_user
+
+  preferred_language:
+    subject: Patient
+    object: {type: text}
+    cardinality: one
+    impact: low
+    min_source_tier: unverified_user
+
+  dietary_restriction:
+    subject: Patient
+    object: {type: text}
+    cardinality: many
+    impact: medium
+    min_source_tier: unverified_user
+
+  # The only numeric predicate in the pack, and it exists partly to keep the
+  # `number` value type exercised: a type nothing declares is a type nothing
+  # tests.
+  weight_kg:
+    subject: Patient
+    object: {type: number}
+    cardinality: one_per_time
+    impact: low
+    min_source_tier: verified_user

@@ -2267,6 +2267,100 @@ string is an entity reference.
 
 ---
 
+## 2026-09-13 — Day 3 · S3.5 (ontology loader, clinical starter pack)
+
+**Shipped**
+
+- `schemas/ontology.py` — `Ontology`, `PredicateSpec`, and an `ObjectSpec` union
+  of `ScalarObject` / `CodedObject` / `EntityRefObject`, plus `parse_ontology`
+  and `load_ontology`.
+- `ontology/clinical.yaml` — fifteen predicates over six entity types, extending
+  `MEMORY_ENGINE.md` §2.1's three worked examples.
+- `pyyaml` added to `guardmem-core`; `tests/fixtures/strategy_ontology.py` for
+  the property suite. 606 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **I wrote nine refusal tests that tested nothing, and they all passed.** The
+  helper that produced a broken pack took keyword arguments and mangled the
+  names back into YAML — `pack(impact__critical="impact: catastrophic")` was
+  supposed to substitute `impact: critical`, and substituted nothing. So nine
+  tests parsed a *valid* pack, `parse_ontology` raised nothing, and
+  `pytest.raises` failed. That is the lucky version: the failure mode of a
+  vacuous `pytest.raises` test is usually silence, and I would have shipped nine
+  green tests covering nothing.
+
+  The fix is not a better substitution, it is an `assert old in text` inside the
+  helper, so a substitution that does not apply fails loudly. The general
+  lesson, which I keep relearning in new costumes: **a test helper that
+  transforms its input must assert the transformation happened.** The S3.2 log
+  has the same shape in blind string replacement producing `_write_andreveal`.
+
+- **Two defaults, two different right answers, and the difference is whether the
+  absence *means* something.** `requires_corroboration` may default to `false` —
+  §2.1's example omits it on two predicates and everybody reads that as "no". It
+  is the ordinary case. `min_source_tier` may not, and the same example omits it
+  too: there is no tier that is safe to assume. Permissive silently widens a
+  safety surface on every predicate somebody forgot; strict makes an omission
+  look like a broken predicate. So the pack states it fifteen times, and the
+  file says why rather than looking repetitive.
+
+- **The discriminated union paid for itself before I finished writing it.** My
+  first pass was one `ObjectSpec` with optional `system` and `entity`. Then I
+  wrote the test for `{type: coded}` with no system and realised it *validated*
+  — producing a coded value whose terminology nobody declared, which cannot be
+  validated, deduplicated, or shown to a reviewer. Three models discriminated on
+  `type` turn that into a load error and get `{type: text, system: RxNorm}` for
+  free from `extra="forbid"`.
+
+- **A `@cache` plus `frozen=True` still does not give you an immutable object.**
+  `load_ontology("clinical").predicates.pop("allergy")` would succeed and every
+  later caller in the process would get the mutated pack. `schemas/base.py`
+  already documents that freezing blocks attribute assignment and not container
+  mutation; caching is what turns that footnote into a shared-state hazard, so
+  the docstring says so at the call site.
+
+- **The property suite forced a better strategy than I would have written.**
+  `Ontology`'s validator requires every reference to resolve, so a strategy
+  drawing entities and predicates independently fails on nearly every example
+  and hypothesis reports it as a flaky filter rather than as the constraint it
+  is. Drawing the entity types first and building predicates from them is the
+  order a person writes a pack in, which is usually the sign a generator is
+  right.
+
+- **`strategies.py` was thirteen lines under the cap**, so the new models went
+  into `strategy_ontology.py`. That was going to be a shove; it turned out to be
+  a seam — these are the only models in the layer that describe a *declaration*
+  rather than a fact.
+
+**Still open**
+
+- **Nothing consumes the ontology yet.** `l2_validate/schema_gate.py` is the
+  first real consumer: it coerces a candidate's object against the declared
+  value type and sends an unknown predicate to the `quarantine` namespace. The
+  coercion table — `{type: coded}` to a Python type — belongs there and is
+  deliberately not here.
+- `StoreRouter.route()` still returns "both" for everything. The ontology now
+  exists to split it, but the field that decides is the object's `type`, and the
+  routing rule (§2.4's "typed relational predicates → graph") should be written
+  against a working L2 rather than guessed now.
+- Multi-hop `neighbors()` still follows every string object. `entity_ref` is now
+  declarable, so the graph *could* ask — but `GraphStore` has no ontology and
+  giving it one is a protocol change that belongs with the step that needs it.
+- **Only `clinical.yaml` ships.** `PROJECT_TREE.md` lists legal and fintech
+  packs; each arrives at the step that needs it, and three half-considered
+  ontologies would be worse than one.
+- §2.1 says an ontology change "triggers a revalidation sweep of affected
+  assertions". `version` makes that possible; nothing sweeps.
+
+**Tomorrow's first step**
+
+`S3.6` — the seed script. It is the first thing that puts a tenant, an ontology
+and a set of assertions together, which makes it the first end-to-end exercise
+of everything Day 3 built.
+
+---
+
 ---
 
 <!--

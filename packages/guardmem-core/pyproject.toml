@@ -8,12 +8,14 @@ requires-python = ">=3.12"
 # no web-framework dependency. PROJECT_TREE.md pins that as a hard rule and the
 # import-linter contract in the root pyproject.toml enforces it.
 #
-# These are exactly the dependencies S1.1 calls for. Two more are listed under
-# requirements/base.txt as part of this package's eventual runtime and enter
-# here at the step that first needs them:
-#     pyyaml    S3.5  ontology loader + S12.2 policy packs
+# These are exactly the dependencies S1.1 calls for. One more is listed under
+# requirements/base.txt as part of this package's eventual runtime and enters
+# here at the step that first needs it:
 #     tenacity  S9.3  jittered backoff on retryable errors
-# Adding them now would be scaffolding a dependency ahead of its use.
+# Adding it now would be scaffolding a dependency ahead of its use. `pyyaml`
+# left that list at S3.5, the step that loads the ontology - which is also the
+# step `prompts/loader.py` named when it explained why its frontmatter parser
+# is hand-rolled rather than a YAML call.
 dependencies = [
   "pydantic>=2.9",
   "pydantic-settings>=2.5",
@@ -33,6 +35,9 @@ dependencies = [
   # this one first". Neo4j arrives at S7.1 behind the same protocol and is NOT
   # listed here: a driver nothing imports is scaffolding.
   "networkx>=3.4",
+  # S3.5. The ontology starter packs are YAML (`MEMORY_ENGINE.md` §2.1) and
+  # `schemas/ontology.py` is the first module in this package to read one.
+  "pyyaml>=6.0",
 ]
 
 [build-system]

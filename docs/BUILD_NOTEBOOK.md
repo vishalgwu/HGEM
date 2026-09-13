@@ -1683,7 +1683,56 @@ Use the YAML from MEMORY_ENGINE.md 2.1 and extend to ~15 predicates (allergy, me
 primary_dx, pcp, pharmacy, insurance_plan, emergency_contact, care_plan_status, consent_flag, ...).
 Each declares cardinality, impact, min_source_tier, requires_corroboration.
 
+**Five corrections to this step, found by building it.**
+
+1. **`min_source_tier` is required, and §2.1's example omits it.** That example
+   is a sketch and the omission is load-bearing in the wrong direction: there is
+   no value that is safe to assume. Defaulting permissive silently widens a
+   safety surface on every predicate somebody forgot; defaulting strict makes an
+   omission look like a broken predicate. So the pack states it fifteen times.
+   `requires_corroboration` keeps a default of `false`, because *its* absence in
+   the example reads unambiguously as "no" and it is the ordinary case - most
+   facts are believed on one source.
+2. **The object spec is a discriminated union, not a model with optional
+   fields.** §2.1 writes `{type: coded, system: RxNorm}` and
+   `{type: entity_ref, entity: Provider}`; with one model and two optional keys,
+   `{type: coded}` validates and produces a coded value whose terminology nobody
+   declared - unvalidatable, undeduplicatable, unshowable to a reviewer. Three
+   models discriminated on `type` make that a load error and make
+   `{type: text, system: RxNorm}` one too, which `extra="forbid"` then catches
+   per branch.
+3. **Entity references have to be checked against the declared types.** §2.1
+   says the ontology declares entity types *and* predicates and never says the
+   two are cross-checked. Without it, `subject: Provder` is a predicate no
+   candidate can ever match and `entity: Pharmcy` is an edge that dangles - both
+   of which surface three layers away looking like an extraction failure. The
+   validator reports **every** unresolved reference at once, because fixing a
+   fifteen-predicate pack one error per run takes fifteen runs.
+4. **Duplicate keys must be an error.** `yaml.safe_load` keeps the last value
+   silently, so a pack with two `allergy:` blocks loads, validates, and enforces
+   whichever came second. `prompts/loader.py` made exactly this refusal one step
+   earlier for a hand-rolled parser; this is the same decision applied to one
+   that does have an opinion.
+5. **The loader needs a parse-from-text entry point, not only load-from-file.**
+   The DONE WHEN is a *rejection*, and a rejection cannot be tested by a
+   function that only reads files the package ships - the test would have to
+   install a deliberately broken pack into the wheel. `parse_ontology(raw,
+   source=...)` is also the shape a tenant-supplied pack actually needs, since
+   that arrives over the wire; `load_ontology(name)` is a thin wrapper that adds
+   the path guard, the filename/name check and the cache.
+
 DONE WHEN: loader validates the YAML into typed objects and rejects an unknown `impact` value.
+
+Worth doing beyond the step: **test the shipped pack as an asset, not only as
+input.** A loader that works on a file nobody checked is half a step. The suite
+asserts that `clinical.yaml` still carries §2.1's three worked examples verbatim,
+that every predicate the step names is present, and - derived from `RULES.md` §4,
+where "retrieved web content can never auto-write a HIGH-impact predicate" - that
+no high or critical predicate accepts a tier below a human.
+
+Three mutants, three kills: typing `impact` as `str` kills the DONE WHEN test,
+removing the entity cross-check kills all three dangling-reference tests, and
+dropping the duplicate-key constructor kills the duplicate test.
 
 COMMIT: `feat(s3.5): ontology loader and clinical starter pack`
 

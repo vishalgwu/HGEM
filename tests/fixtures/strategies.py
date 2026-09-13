@@ -66,6 +66,7 @@ from guardmem_core.schemas import (
 
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
+from fixtures.strategy_ontology import ONTOLOGY_STRATEGIES
 from fixtures.strategy_primitives import (
     _ANY_FLOAT,
     _ASSERTION_IDS,
@@ -254,6 +255,9 @@ def _extraction_results(draw: st.DrawFn) -> ExtractionResult:
 
 
 SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
+    # The ontology layer, from its own module - see `strategy_ontology.py`
+    # for why `Ontology` has to draw its entity types before its predicates.
+    **ONTOLOGY_STRATEGIES,
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

@@ -76,7 +76,8 @@ guardmem-ai/
 │   │       │   ├── receipt.py           # SourceTier, Provenance, WriteReceipt, AuditEvent
 │   │       │   ├── review.py            # ReviewTask, ReviewDecision, Diff
 │   │       │   ├── turn.py              # S2.1; Turn, NoiseReason, DroppedTurn, NoiseResult
-│   │       │   └── ontology.py          # Ontology, PredicateSpec - loader + validation (S3.5)
+│   │       │   └── ontology.py          # S3.5; Ontology, PredicateSpec, the ObjectSpec union,
+│   │       │                            #   parse_ontology + load_ontology
 │   │       ├── prompts/                 # RULES 3: versioned prompts, never inline f-strings
 │   │       │   ├── loader.py            # S2.1; render(name, version, variables), frontmatter
 │   │       │   ├── classify_noise/v1.md # S2.1; the Layer-1 noise classifier
@@ -84,7 +85,8 @@ guardmem-ai/
 │   │       │   ├── adjudicate_conflict/v1.md
 │   │       │   └── review_brief/v1.md
 │   │       ├── ontology/                # tenant starter packs, loaded by schemas/ontology.py
-│   │       │   └── {clinical,legal,fintech}.yaml
+│   │       │   └── clinical.yaml         # S3.5; 15 predicates, 6 entity types. legal/fintech
+│   │       │                             #   arrive at the step that needs them
 │   │       ├── pipeline/                # LAYER 1-3
 │   │       │   ├── orchestrator.py      # MemoryPipeline.run() — the single entrypoint
 │   │       │   ├── l1_extract/
@@ -271,6 +273,8 @@ guardmem-ai/
 │   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
+│   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
+│   │   │                                #   entity types have to be drawn before predicates
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.
 │                                        #   The ONLY conftest: a second one is a duplicate

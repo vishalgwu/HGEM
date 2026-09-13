@@ -17,6 +17,45 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S3.5 — the ontology loader and the clinical starter pack.**
+  `schemas/ontology.py` validates a YAML pack into typed objects —
+  `Ontology`, `PredicateSpec`, and an `ObjectSpec` union of `ScalarObject`,
+  `CodedObject` and `EntityRefObject` — and `ontology/clinical.yaml` is fifteen
+  predicates over six entity types, extending `MEMORY_ENGINE.md` §2.1's three
+  worked examples rather than reinterpreting them.
+- **`min_source_tier` is required on every predicate**, unlike §2.1's sketch.
+  There is no value that is safe to assume: defaulting permissive silently
+  widens a safety surface on every predicate somebody forgot, and defaulting
+  strict makes an omission look like a broken predicate.
+  `requires_corroboration` keeps its `false` default, because *its* absence in
+  the example reads unambiguously as "no".
+- **The object spec is a discriminated union.** One model with two optional keys
+  would accept `{type: coded}` and produce a coded value whose terminology
+  nobody declared — unvalidatable, undeduplicatable, and unshowable to a
+  reviewer. Three models discriminated on `type` make that a load error, and
+  `{type: text, system: RxNorm}` one too.
+- **Every entity reference is checked against the declared types**, and all
+  unresolved ones are reported at once. Without it, `subject: Provder` is a
+  predicate no candidate can ever match and `entity: Pharmcy` is an edge that
+  dangles — both of which surface three layers away looking like an extraction
+  failure.
+- **Duplicate keys are a load error.** `yaml.safe_load` keeps the last value
+  silently, so a pack with two `allergy:` blocks would load, validate, and
+  enforce whichever came second. `prompts/loader.py` made the same refusal one
+  step earlier for its hand-rolled parser.
+- **`parse_ontology(raw, source=...)` alongside `load_ontology(name)`.** The
+  DONE WHEN is a rejection, and a rejection cannot be tested by a function that
+  only reads files the package ships. It is also the shape a tenant-supplied
+  pack needs, since that arrives over the wire rather than as a file under
+  `ontology/`.
+- **The shipped pack is tested as an asset**: §2.1's three examples survive
+  verbatim, every predicate the step names is present, and — derived from
+  `RULES.md` §4 — no high or critical predicate accepts a source tier below a
+  human. 606 tests, 100% coverage. Three mutants, three kills.
+- **`pyyaml` is now a `guardmem-core` dependency**, which
+  `prompts/loader.py` predicted at S2.1 when it explained why its frontmatter
+  parser is hand-rolled: the parser was not worth pulling in for five scalar
+  keys, and this is the step that loads real YAML.
 - **S3.4 — the NetworkX graph store.** `memory/graph/networkx_store.py` is the
   first real `GraphStore`: a `MultiDiGraph` whose edges are keyed by
   `assertion_id`, which makes `upsert_assertion` idempotent for free — `add_edge`

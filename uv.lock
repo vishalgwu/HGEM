@@ -717,6 +717,7 @@ dependencies = [
     { name = "pgvector" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "rapidfuzz" },
     { name = "structlog" },
 ]
@@ -731,6 +732,7 @@ requires-dist = [
     { name = "pgvector", specifier = ">=0.5" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidfuzz", specifier = ">=3.10" },
     { name = "structlog", specifier = ">=24.4" },
 ]

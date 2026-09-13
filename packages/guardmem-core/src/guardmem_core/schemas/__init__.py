@@ -13,12 +13,17 @@ dependency order explicit and leaves no room for an import cycle:
 
 `turn` (S2.1) hangs off `base` alone rather than extending that chain: it is
 Layer 1's *input* vocabulary, and nothing it describes has been extracted yet.
+`ontology` (S3.5) hangs off the far end of it - it needs `Cardinality` from
+`entity`, `ImpactLevel` from `verdict` and `SourceTier` from `receipt`, which is
+the shape of the thing: a predicate declaration is a statement about all three.
 
-Which module owns what follows `PROJECT_TREE.md`. Three things it lists are
+Which module owns what follows `PROJECT_TREE.md`. Two things it lists are still
 deliberately absent, each deferred to the step that pins its shape rather than
-guessed at now: `Rule` and `PolicyPack` (S12.2, the policy engine), `Predicate`
-(S3.5, where the ontology loader validates it), and `Thresholds` (S5.4, where
-`decide()` takes it). `MemoryProposal` likewise arrives with the gateway.
+guessed at now: `Rule` and `PolicyPack` (S12.2, the policy engine) and
+`Thresholds` (S5.4, where `decide()` takes it). `MemoryProposal` likewise
+arrives with the gateway. The third, `Predicate`, arrived at S3.5 as
+`PredicateSpec` - named for what it is, since it declares what a predicate may
+say rather than being an instance of one.
 """
 
 from __future__ import annotations
@@ -30,6 +35,16 @@ from guardmem_core.schemas.candidate import (
     MemoryCandidate,
 )
 from guardmem_core.schemas.entity import Cardinality, Edge, Entity, StoredAssertion
+from guardmem_core.schemas.ontology import (
+    CodedObject,
+    EntityRefObject,
+    ObjectSpec,
+    Ontology,
+    PredicateSpec,
+    ScalarObject,
+    load_ontology,
+    parse_ontology,
+)
 from guardmem_core.schemas.policy import Obligation, ObligationKind
 from guardmem_core.schemas.receipt import (
     AuditEvent,
@@ -65,6 +80,7 @@ from guardmem_core.schemas.verdict import (
 __all__ = [
     "AuditEvent",
     "Cardinality",
+    "CodedObject",
     "ConfidenceReport",
     "ConflictKind",
     "ConflictReport",
@@ -75,6 +91,7 @@ __all__ = [
     "DroppedTurn",
     "Edge",
     "Entity",
+    "EntityRefObject",
     "ExtractedFact",
     "ExtractionResult",
     "GMModel",
@@ -82,18 +99,24 @@ __all__ = [
     "MemoryCandidate",
     "NoiseReason",
     "NoiseResult",
+    "ObjectSpec",
     "ObjectValue",
     "Obligation",
     "ObligationKind",
+    "Ontology",
+    "PredicateSpec",
     "Provenance",
     "ReviewAction",
     "ReviewDecision",
     "ReviewStatus",
     "ReviewTask",
     "RiskVerdict",
+    "ScalarObject",
     "SourceTier",
     "StoredAssertion",
     "Turn",
     "TurnRole",
     "WriteReceipt",
+    "load_ontology",
+    "parse_ontology",
 ]
