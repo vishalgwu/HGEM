@@ -1,4 +1,4 @@
-"""Opening the Postgres pool the stores run on.  BUILD_NOTEBOOK.md S3.2
+"""The Postgres pool, and the transactions everything on it runs in.  S3.2, S3.3
 
 Separate from `pgvector_store.py` because it has a different lifetime and a
 different owner. A pool is process-scoped and opened once at startup; a
@@ -7,17 +7,37 @@ authenticated request. Putting the constructor for the long-lived thing inside
 the module for the short-lived one invites a call site that opens a pool per
 request, which is the classic way to exhaust `max_connections`.
 
-S3.3's outbox relay needs the same pool and is not a vector store.
+S3.3 added the two transaction helpers, and they are here rather than on the
+store for a reason worth stating plainly: `SET LOCAL app.tenant_id` is the only
+thing standing between a pooled connection and a cross-tenant read, and a
+second, subtly different copy of it is exactly the bug it exists to prevent.
+The outbox relay needs the same transaction semantics as the store and is not a
+store, so the semantics belong to neither of them.
 """
 
 from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import asyncpg
 from pgvector.asyncpg import register_vector
 
 from guardmem_core.errors import StoreUnavailable
 
-__all__ = ["create_pool"]
+if TYPE_CHECKING:
+    from asyncpg.pool import PoolConnectionProxy
+
+    from guardmem_core.types import TenantId
+
+__all__ = ["Conn", "create_pool", "tenant_transaction", "transaction"]
+
+# What `Pool.acquire()` actually hands back. Not a `Connection`: it is a proxy
+# that forwards to one and is returned to the pool on exit, and `asyncpg-stubs`
+# is right to distinguish them. Named here, next to the helpers that yield it,
+# so the store and the relay annotate the same thing the same way.
+type Conn = PoolConnectionProxy[asyncpg.Record]
 
 
 async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> asyncpg.Pool:
@@ -51,3 +71,65 @@ async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> asy
         return await asyncpg.create_pool(dsn, min_size=min_size, max_size=max_size, init=_init)
     except (OSError, asyncpg.PostgresError) as exc:  # pragma: no cover - needs a dead database
         raise StoreUnavailable(f"cannot reach Postgres at the configured DSN: {exc}") from exc
+
+
+@asynccontextmanager
+async def transaction(pool: asyncpg.Pool) -> AsyncIterator[Conn]:
+    """Yield a pooled connection inside a transaction, translating driver faults.
+
+    Args:
+        pool: The process-wide pool.
+
+    Yields:
+        A connection with a transaction open. It commits on a clean exit and
+        rolls back on any exception, which is `asyncpg.Transaction`'s own
+        behaviour and the only reason this wrapper can be this thin.
+
+    Raises:
+        StoreUnavailable: the pool could not produce a working connection, or
+            the connection died mid-transaction. Retryable, which the driver's
+            own exception types do not say to a caller above the store.
+
+    Use this for the tables that carry no tenant column - `outbox` is the only
+    one today. Anything touching a tenant-scoped table wants
+    `tenant_transaction` instead, and the difference is not a style preference:
+    an RLS-protected table read on a connection with no `app.tenant_id` returns
+    zero rows rather than an error.
+    """
+    try:
+        async with pool.acquire() as connection, connection.transaction():
+            yield connection
+    except (OSError, asyncpg.PostgresConnectionError) as exc:  # pragma: no cover
+        # Needs a database that dies mid-transaction, which is a fault injection
+        # test and not this suite's.
+        raise StoreUnavailable(f"postgres connection failed: {exc}") from exc
+
+
+@asynccontextmanager
+async def tenant_transaction(
+    pool: asyncpg.Pool, tenant_id: TenantId, *, timeout_s: float
+) -> AsyncIterator[Conn]:
+    """Yield a connection inside a transaction scoped to one tenant.
+
+    Args:
+        pool: The process-wide pool.
+        tenant_id: The tenant every statement in this transaction speaks for.
+        timeout_s: Ceiling on the `set_config` round trip, per `RULES.md` §2.2.
+
+    Yields:
+        A connection with `app.tenant_id` set and a transaction open.
+
+    Raises:
+        StoreUnavailable: the pool could not produce a working connection.
+
+    The third argument to `set_config` is `is_local`, and passing `true` is what
+    makes this safe on a *pooled* connection: the setting reverts at COMMIT or
+    ROLLBACK, so it cannot leak to whoever checks the connection out next. A
+    plain `SET` here would be a cross-tenant read with no symptom - the query
+    would succeed and return the wrong tenant's rows.
+    """
+    async with transaction(pool) as connection:
+        await connection.execute(
+            "SELECT set_config('app.tenant_id', $1, true)", tenant_id, timeout=timeout_s
+        )
+        yield connection

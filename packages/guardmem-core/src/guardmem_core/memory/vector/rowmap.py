@@ -30,6 +30,7 @@ __all__ = [
     "EMBEDDING_DIM",
     "INSERT_ASSERTION",
     "INSERT_PROVENANCE",
+    "SELECT_ASSERTION",
     "SELECT_PROVENANCE",
     "assertion_from_row",
     "assertion_params",
@@ -257,6 +258,14 @@ INSERT_PROVENANCE: Final = """
     VALUES ($1::uuid, $2::uuid, $3, int4range($4, $5), $6, $7, $8, $9)
     ON CONFLICT (id) DO NOTHING
 """
+
+# One assertion by id, for the S3.3 relay. No `visible` predicate and no
+# `valid_to` predicate, which is what separates it from everything in the store:
+# this is read by the code that *sets* `visible`, so filtering on it would mean
+# the relay could only ever load rows it had already finished.
+SELECT_ASSERTION: Final = f"""
+    SELECT {ASSERTION_COLUMNS} FROM assertion WHERE id = $1::uuid
+"""  # noqa: S608 - ASSERTION_COLUMNS is a module constant; the id is bound
 
 SELECT_PROVENANCE: Final = """
     SELECT assertion_id, source_hash, lower(source_span) AS span_start,

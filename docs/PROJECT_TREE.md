@@ -108,10 +108,13 @@ guardmem-ai/
 │   │       │   ├── toxicity.py
 │   │       │   └── policy_engine.py     # OPA/Rego-compatible rule evaluation
 │   │       ├── memory/
-│   │       │   ├── router.py            # StoreRouter — vector vs graph vs both
+│   │       │   ├── router.py            # S3.3; StoreRouter — write entry point, tenant + visibility guards
+│   │       │   ├── outbox.py            # S3.3; the `outbox` table's shape, both directions
+│   │       │   ├── relay.py             # S3.3; drains the outbox: graph side, then visible=true
 │   │       │   ├── vector/
 │   │       │   │   ├── base.py          # VectorStore + Embedder Protocols (S1.7, S3.2)
-│   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered
+│   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered;
+│   │       │   │   │                    #   S3.3 added tenant_transaction, shared with the relay
 │   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both directions
 │   │       │   │   ├── pgvector_store.py
 │   │       │   │   └── qdrant_store.py
@@ -171,7 +174,9 @@ guardmem-ai/
 │   │   └── src/worker/
 │   │       ├── main.py
 │   │       ├── tasks/{evaluate.py,compact.py,reindex.py,digest.py,sla_sweeper.py,
-│   │       │        outbox_relay.py}
+│   │       │        outbox_relay.py}   # S3.3 put the relay's logic in
+│   │       │                           #   guardmem_core.memory.relay; this is the
+│   │       │                           #   arq binding that calls run_once()
 │   │       └── schedules.py             # cron: nightly GC, hourly drift probe
 │   │
 │   └── mcp_server/                      # stdio + streamable-HTTP transports
@@ -246,7 +251,9 @@ guardmem-ai/
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
 │   ├── integration/                     # testcontainers Postgres, from S3.2
 │   │   ├── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
-│   │   └── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of
+│   │   ├── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of
+│   │   ├── test_outbox_enqueue.py       #   S3.3; the assertion and its event, one transaction
+│   │   └── test_outbox_relay.py         #   S3.3 DONE WHEN: killed mid-flight, visible once
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
@@ -255,6 +262,8 @@ guardmem-ai/
 │   │   │                                #   FakeEmbedder (S3.2)
 │   │   ├── postgres.py                  # S3.2; the migrated testcontainer, as a pytest plugin
 │   │   ├── pgvector.py                  # S3.2; tenant, pool and store fixtures over it
+│   │   ├── outbox.py                    # S3.3; relay fixtures and the owner-side row probes
+│   │   ├── graph_faults.py              # S3.3; GraphStore doubles, one failure mode each
 │   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
 │   │   ├── strategies.py                # hypothesis strategies, one per schema

@@ -2067,6 +2067,116 @@ or the deferred trigger rejects the assertion at COMMIT.
 `visible` true, so it closes the loop this step deliberately left open, and
 `upsert`'s `ON CONFLICT DO NOTHING` exists for its replay semantics.
 
+## 2026-09-13 — Day 3 · S3.3 (outbox relay, store router, dual-write coordination)
+
+**Shipped**
+
+- `memory/relay.py` — `OutboxRelay.run_once()`: claim a bounded batch, apply the
+  graph side, then `visible = true` and `dispatched_at` in one transaction.
+  Nothing else in the system may set that column, which closes the loop S3.2
+  left open.
+- `memory/outbox.py` — the `outbox` table in both directions, the same seam
+  `rowmap.py` draws for `assertion`. `PgVectorStore.upsert` now enqueues the
+  event inside the transaction that writes the assertion.
+- `memory/router.py` — the write entry point, and the app-layer half of
+  `RULES.md` §4's defence in depth.
+- `tenant_transaction` moved out of the store into `pool.py`, where the relay
+  can share it.
+- Four new test modules, 520 tests, 100% coverage with the integration suite.
+
+**What broke / what I learned**
+
+- **The step's WHERE names a service that does not exist, and building it would
+  have been the wrong sixty minutes.** `services/worker/tasks/outbox_relay.py`
+  needs a workspace package, an `arq` dependency, a Dockerfile and a CI job —
+  none of which the DONE WHEN touches. It tests claim, dispatch and complete,
+  which is logic, so the logic went into `guardmem-core` behind a `run_once()`
+  with no loop in it. The arq binding is four lines and belongs to the step that
+  builds the worker. It also kept `RULES.md` §5's "no `sleep`" honest for free:
+  there is no loop here to sleep in.
+
+- **"Single Postgres transaction" decided where the enqueue lives, and I had it
+  in the router first.** A router that enqueues after the store's write opens a
+  *second* transaction, and the gap between them is an assertion that is
+  durable, sourced, invisible, and unreleasable by anything — strictly worse
+  than a partial write, because nothing retries it. The store already has to own
+  one transaction (the deferred provenance trigger), so it owns this too. The
+  layering objection is real and the answer is that atomicity across two tables
+  is a property of Postgres, not of a protocol.
+
+- **`uuid5` again, for the third time, and I nearly missed it.** I wrote the
+  outbox id as `uuid4` and only caught it writing the replay test. `upsert`
+  answers `ON CONFLICT DO NOTHING`, so a random event id deduplicates *nothing*:
+  the assertion collides on its primary key and does nothing while its event is
+  enqueued a second time, and the relay dispatches a write that may already be
+  dispatched. Exactly the shape that bit provenance at S3.2. The lesson has
+  generalised now — **any row this system writes on a replay path needs a key
+  derived from its content**, and "what does a retry do to this table?" belongs
+  in the review of every insert, not just the ones that look like queues.
+
+- **I moved the `attempts` increment three times before it was right.** After
+  the work: lost on the crash it exists to count. Before the claim: racy. In the
+  claim's own statement, committed before the dispatch starts: correct, and it
+  is what separates a poison event from one nobody has reached yet.
+
+- **`FORCE ROW LEVEL SECURITY` applies to `DELETE`, which broke cleanup in a way
+  that looked like a foreign key bug.** The relay is not tenant-bound, so its
+  tests write rows under *both* of the fixture's tenants. I widened
+  `_drop_tenant` to `tenant_id = ANY(...)` and the teardown started failing on a
+  reference from `entity` — because the owner is subject to its own policies and
+  the `DELETE` only reached rows the currently-set tenant made visible. It
+  deleted the first tenant's rows, silently skipped the second's, and fell over
+  three statements later. The fix is a loop with `set_config` per tenant. The
+  error pointed at the constraint; the cause was the policy.
+
+- **Three mutants, three kills.** Completing before the graph write killed both
+  DONE WHEN tests; an `upsert` that stops enqueuing killed every relay test; a
+  claim that stops counting `attempts` killed the retry and cap tests. The first
+  is the one worth having evidence for — it is the difference between a dual
+  write and two writes.
+
+- **Where you kill the relay is the entire test.** Dying before the graph write
+  proves nothing: nothing happened, and a retry repeats nothing. The only
+  interesting window is between the edge landing and the flip, because it is the
+  only point where a retry re-applies an effect that already took. Writing the
+  double that sits exactly there (`GraphThatDiesAfterWriting`) was the moment
+  "exactly once" stopped being a phrase and became at-least-once delivery with
+  idempotent effects, which is the only thing a queue with a crashing consumer
+  can actually promise.
+
+**Still open**
+
+- `route()` returns "both" and cannot return anything else. §2.4's three-way
+  split turns on the predicate's declared type, which is ontology content —
+  **S3.5**. Guessing now would guess in the direction that loses data: an
+  assertion wrongly routed vector-only writes no edge, so `degree()`
+  under-reports and §3.3's blast-radius feature prices a change as safer than it
+  is.
+- `ARCHITECTURE.md` §4's graph-outage row wants a **`graph_pending` flag** and a
+  vector-only write. There is no such column, and adding one without the health
+  probe that sets it would be a field nothing fills. Today a graph outage leaves
+  the event pending and the assertion invisible, which satisfies the "never drop
+  the assertion" half and is stricter than the degraded mode.
+- The relay dispatches **sequentially**. `RULES.md` §2.2 wants fan-out through a
+  `TaskGroup` bounded by a semaphore; with an in-process graph a batch of fifty
+  costs less than the round trip that claimed it. **S7.1** makes the graph a
+  network hop and is the step that should add it.
+- A capped event stays pending in `outbox` rather than moving to a dead-letter
+  table. Find them with
+  `SELECT * FROM outbox WHERE dispatched_at IS NULL AND attempts >= 5`.
+- Still no audit event on the write path. The §2.4 diagram puts one in the same
+  transaction as the assertion and the outbox row; `observability/audit.py` and
+  the hash chain arrive at their own step, and a half-built chain verifies
+  nothing.
+
+**Tomorrow's first step**
+
+`S3.4` — the NetworkX graph store. The relay already writes through the
+`GraphStore` protocol and every test of it runs against a fake, so this is the
+step that gives it a real backend and `degree()` its first real caller.
+
+---
+
 ---
 
 <!--

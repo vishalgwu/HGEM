@@ -91,24 +91,46 @@ async def _drop_tenant(owner: asyncpg.Connection, ids: dict[str, str]) -> None:
     order depend on which row points at which. Clearing the pointers first turns
     an ordering problem into a single statement.
 
+    `outbox` joined the list at S3.3, and it has to: `upsert` now enqueues an
+    event in the same transaction as the assertion, and `outbox.assertion_id` is
+    a foreign key. Leaving those rows behind would not leak a little state - it
+    would make every `DELETE FROM assertion` below fail on the reference, so the
+    *next* test's tenant would inherit this one's.
+
+    **Both tenants, one at a time, each behind its own `app.tenant_id`** - also
+    from S3.3, and the loop is not stylistic. `0001_initial` applies `FORCE ROW
+    LEVEL SECURITY`, so the owner is subject to its own policies and a `DELETE`
+    only reaches rows the current setting makes visible. A single statement over
+    `tenant_id = ANY(...)` would therefore delete the first tenant's rows,
+    silently skip the second's, and fail on the foreign key three lines later.
+    The second tenant used to hold no rows at all - it existed for a store to be
+    refused access to - but the relay is not tenant-bound, so its tests write
+    under both.
+
     That `DELETE` is available here at all and nowhere in the store is the
     point: this connection is the *owner*, and `RULES.md` non-negotiable #2
     revokes the same statement from `guardmem_app`, which is the role everything
     under test uses.
     """
-    await owner.execute(
-        "DELETE FROM provenance WHERE assertion_id IN"
-        " (SELECT id FROM assertion WHERE tenant_id = $1::uuid)",
-        ids["tenant"],
-    )
-    await owner.execute(
-        "UPDATE assertion SET superseded_by = NULL WHERE tenant_id = $1::uuid", ids["tenant"]
-    )
-    await owner.execute("DELETE FROM assertion WHERE tenant_id = $1::uuid", ids["tenant"])
-    await owner.execute("DELETE FROM entity WHERE tenant_id = $1::uuid", ids["tenant"])
-    await owner.execute(
-        "DELETE FROM tenant WHERE id = ANY($1::uuid[])", [ids["tenant"], ids["other"]]
-    )
+    owned = [ids["tenant"], ids["other"]]
+    for tenant in owned:
+        await owner.execute("SELECT set_config('app.tenant_id', $1, false)", tenant)
+        await owner.execute(
+            "DELETE FROM outbox WHERE assertion_id IN"
+            " (SELECT id FROM assertion WHERE tenant_id = $1::uuid)",
+            tenant,
+        )
+        await owner.execute(
+            "DELETE FROM provenance WHERE assertion_id IN"
+            " (SELECT id FROM assertion WHERE tenant_id = $1::uuid)",
+            tenant,
+        )
+        await owner.execute(
+            "UPDATE assertion SET superseded_by = NULL WHERE tenant_id = $1::uuid", tenant
+        )
+        await owner.execute("DELETE FROM assertion WHERE tenant_id = $1::uuid", tenant)
+        await owner.execute("DELETE FROM entity WHERE tenant_id = $1::uuid", tenant)
+    await owner.execute("DELETE FROM tenant WHERE id = ANY($1::uuid[])", owned)
 
 
 @pytest.fixture
@@ -167,13 +189,17 @@ def assertion(
 
 
 async def reveal(owner: asyncpg.Connection, *ids: str) -> None:
-    """Do what the S3.3 outbox relay will do: flip `visible` once both sides land.
+    """Flip `visible`, the way the outbox relay does once both sides land.
 
-    Standing in for it here rather than waiting for S3.3, because every read
-    path filters on `visible` and a store whose writes are correctly invisible
-    would otherwise have no observable search behaviour at all. The relay is the
-    only thing that may do this in production, which is why it is an owner
-    statement in a test rather than a method on the store.
+    Still an owner `UPDATE` rather than a call to the real `OutboxRelay`, even
+    though S3.3 built one. That is deliberate: these are the *store's* tests,
+    and routing them through the relay would mean a relay bug failed them - so a
+    suite about `search` filtering on `visible` would start reporting on
+    dispatch instead. `tests/integration/test_outbox_relay.py` exercises the
+    real path.
+
+    The relay remains the only thing that may do this in production, which is
+    why it is a statement in a fixture and never a method on the store.
     """
     await owner.execute("UPDATE assertion SET visible = true WHERE id = ANY($1::uuid[])", list(ids))
 

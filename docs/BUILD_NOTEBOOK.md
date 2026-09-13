@@ -1536,8 +1536,73 @@ Flow: single Postgres transaction inserts `assertion(visible=false)` + `outbox(e
 picks up the outbox row, writes the graph side, then sets `visible=true` and marks the outbox done.
 Retries are idempotent by `assertion_id`.
 
+**Six corrections to this step, found by building it.**
+
+1. **The relay is `memory/relay.py`, not `services/worker/tasks/outbox_relay.py`
+   — yet.** The WHERE names a service that does not exist, and standing one up
+   is a workspace package, an `arq` dependency, a Dockerfile and a CI job, none
+   of which the DONE WHEN exercises: it tests *claim, dispatch, complete*, which
+   is logic. So the logic lives in `guardmem-core`, where both stores already
+   are and where `lint-imports` forbids `arq` from ever reaching it, and
+   `run_once()` is the whole public surface. The arq task that calls it on a
+   schedule is four lines and belongs to the step that builds the worker. This
+   is also what keeps `RULES.md` §5's "no `sleep` (use fake clocks)" honest -
+   there is no loop here to sleep in.
+2. **The outbox insert belongs in `PgVectorStore.upsert`, not in the router.**
+   The step says "single Postgres transaction", and there is exactly one in the
+   write path: the store's, which already has to be one because
+   `assertion_requires_provenance` is DEFERRABLE INITIALLY DEFERRED. A router
+   that enqueued afterwards would open a second, and the gap between them is an
+   assertion that is durable, sourced, invisible, and unreleasable by anything -
+   worse than a partial write, because nothing retries it. Atomicity across two
+   tables is a property of Postgres, so it is expressed where the Postgres
+   transaction is.
+3. **"Idempotent by `assertion_id`" has to reach the outbox id too.** `upsert`
+   replays with `ON CONFLICT DO NOTHING`, so an event id that was a `uuid4`
+   would insert a *second* event each replay - and the relay would dispatch a
+   write that may already be dispatched. The id is `uuid5` of the assertion id.
+   Exactly the argument that fixed the provenance ids at S3.2, hit again for the
+   same reason: rows without natural keys replay badly.
+4. **The flow is three transactions, not one plus a relay.** Claim (commits the
+   `attempts` increment *before* the work, so a crash leaves evidence), dispatch
+   (no transaction - holding one across a call to another datastore ties up a
+   pooled connection for the length of somebody else's outage), complete
+   (`visible` and `dispatched_at` together, because a flip without a completion
+   re-dispatches forever and a completion without a flip is unreadable). The
+   honest guarantee is at-least-once delivery with exactly-once *effects*, which
+   is what the DONE WHEN's "exactly once" means and is all a queue with a
+   crashing consumer can offer.
+5. **`RULES.md` §2.3 requires a hard attempt cap, and the step has no queue to
+   put the loser in.** A capped event stops being claimed and stays pending
+   rather than moving to a dead-letter table it would be the only occupant of:
+   its assertion is invisible and therefore harmless, dropping it would lose the
+   write, and retrying forever starves everything behind it. Only
+   `StoreUnavailable` is caught - `ARCHITECTURE.md` §4 makes a graph outage
+   retryable, and a bug in a backend must not be filed as five late retries.
+6. **`memory/router.py` needed a reason to exist, and it turned out to be a real
+   one.** With the enqueue in the store and the graph write in the relay, the
+   router looked like a wrapper - and `RULES.md` §5 singles it out for 100%
+   branch coverage. What it is *for* is §4's "RLS **and** namespace prefixing
+   **and** an app-layer check": `rowmap.assertion_params` takes the store's
+   tenant as authoritative and relabels the row, so a batch carrying another
+   tenant's assertion reaches Postgres already wearing the right label and RLS
+   correctly lets it through. The router is the only layer that can see that
+   mismatch. Its *routing* decision is still trivial - §2.4's three-way split
+   turns on the predicate's declared type, which is ontology content, so
+   `route()` returns "both" and cannot return anything else until **S3.5**.
+
 DONE WHEN: test kills the relay mid-flight; the assertion is invisible to search; after the relay
 restarts, it becomes visible exactly once.
+
+Kill it in the right place. Dying *before* the graph write proves nothing -
+nothing happened and a retry repeats nothing. The window that matters is between
+the edge landing and the flip, because it is the only point where a retry
+re-applies an effect that already took; `GraphThatDiesAfterWriting` sits exactly
+there, and the restart has to leave one edge and one visible assertion.
+
+Three mutants, three kills: completing before the graph write kills both DONE
+WHEN tests, an `upsert` that stops enqueuing kills every relay test, and a claim
+that stops counting `attempts` kills the retry and cap tests.
 
 COMMIT: `feat(s3.3): outbox-coordinated dual write`
 

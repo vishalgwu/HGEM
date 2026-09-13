@@ -17,6 +17,52 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S3.3 — outbox-coordinated dual write.** `memory/router.py` is the write
+  entry point, `memory/outbox.py` holds the shape of the `outbox` table in both
+  directions, and `memory/relay.py` drains it: claim a bounded batch, apply the
+  graph side, then set `visible = true` and close the row. Nothing else in the
+  system may flip that column, which is what closes the loop S3.2 deliberately
+  left open — until now the integration tests stood in for the relay with an
+  owner `UPDATE`.
+- **The outbox event is enqueued by `PgVectorStore.upsert`, inside the
+  transaction that writes the assertion.** `ARCHITECTURE.md` §2.4 requires the
+  two to commit atomically, atomicity between two tables is a property of a
+  Postgres transaction, and that method owns the only one in the write path. An
+  assertion that landed without its event would be durable, sourced, invisible,
+  and unreleasable by anything.
+- **The outbox id is `uuid5` of the assertion id**, not a `uuid4`, for the same
+  reason the provenance ids are derived: `upsert` is replayed after a relay
+  restart and answers `ON CONFLICT DO NOTHING`, so a random id would enqueue a
+  second event for a write that may already have been dispatched.
+- **Three transactions in the relay, and the boundaries are the design.** The
+  claim commits the `attempts` increment before the work starts, so a crash
+  leaves evidence; the dispatch holds no transaction, so a graph outage does not
+  tie up a pooled connection; the completion writes `visible` and
+  `dispatched_at` together, because a flip without a completion is re-dispatched
+  forever and a completion without a flip is a fact nobody can read. Delivery is
+  at-least-once and the *effects* are exactly-once — `upsert_assertion` is
+  idempotent by id and `MARK_DISPATCHED` will not move a timestamp twice.
+- **A hard attempt cap** (`RULES.md` §2.3). An event that reaches it stops being
+  claimed and stays pending: its assertion is invisible and therefore harmless,
+  dropping it would lose the write, and retrying forever would starve the queue
+  behind it. Only `StoreUnavailable` is caught — a bug in a graph backend
+  propagates rather than being filed as five late retries.
+- **`StoreRouter` is the app-layer half of `RULES.md` §4's defence in depth.**
+  It refuses a batch carrying another tenant's assertion, which Postgres cannot:
+  `rowmap.assertion_params` takes the store's tenant as authoritative and
+  relabels the row, so by the time RLS sees it the row is telling the truth. It
+  also refuses an assertion that arrives `visible=true`, which the store would
+  otherwise ignore silently.
+- **`tenant_transaction` moved to `pool.py`** and is now shared by the store and
+  the relay. `SET LOCAL app.tenant_id` is the only thing between a pooled
+  connection and a cross-tenant read; a second, subtly different copy of it is
+  precisely the bug it exists to prevent.
+- **`tests/integration/test_outbox_relay.py` and `test_outbox_enqueue.py`** —
+  nineteen tests including the DONE WHEN, plus `test_store_router.py` and
+  `test_relay_defaults.py`. Three deliberate mutants were each killed by exactly
+  the tests that claim to cover them: completing before the graph write, an
+  `upsert` that stops enqueuing, and a claim that stops counting attempts. 520
+  tests, 100% coverage.
 - **S3.2 — the pgvector store.** `memory/vector/pgvector_store.py` implements
   `VectorStore` over the S3.1 schema, with `pool.py` (the process-wide asyncpg
   pool, `vector` codec registered per connection) and `rowmap.py` (the shape of

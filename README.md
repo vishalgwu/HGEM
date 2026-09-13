@@ -8,11 +8,12 @@
 > The design suite, the toolchain and the gates are in place; `guardmem_core`
 > carries its typed foundation — settings, domain ids, the error hierarchy, the
 > Pydantic schema layer, the store and LLM protocols — the whole of **Layer 1**
-> (noise filter, K-sample extractor, span linker), and from S3.1–S3.2 the
-> bitemporal Postgres schema and the pgvector store over it: write, search,
-> supersede, and point-in-time recall of a fact that has since been retired.
-> Nothing yet validates, scores or decides a candidate, and nothing connects
-> Layer 1's output to the store — that is the outbox at S3.3. Every performance
+> (noise filter, K-sample extractor, span linker), and from S3.1–S3.3 the
+> bitemporal Postgres schema, the pgvector store over it, and the outbox that
+> coordinates the dual write: write, search, supersede, point-in-time recall of
+> a fact that has since been retired, and a partial write that is never
+> retrievable. Nothing yet validates, scores or decides a candidate — that is
+> Layer 2, and it is next after the graph store. Every performance
 > and quality figure below is a **target**, not a measurement — see
 > [Status](#status) before quoting any number.
 
@@ -161,7 +162,7 @@ stack it actually requires.
 
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.2**.
+Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.3**.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -202,10 +203,21 @@ quietly when it matches nothing. A retired fact leaves search and stays
 recoverable through `as_of`, which is the claim the product rests on and is
 tested against a real Postgres rather than against a double.
 
+S3.3 closes the loop. The assertion row and an outbox event commit in one
+transaction; a relay then applies the graph side and sets `visible = true`, and
+nothing else in the system may set that column. So a dual write that is
+genuinely half-applied — the edge landed, the process died before the flip — is
+not briefly wrong but simply absent, and the event that releases it is still in
+the queue. Delivery is at-least-once and the effects are exactly-once, which is
+the only guarantee a queue with a crashing consumer can honestly offer: the
+graph write is idempotent by `assertion_id`, and the completion will not move a
+timestamp it has already written. `StoreRouter` sits in front of it as the
+app-layer tenant check `RULES.md` §4 asks for alongside row-level security.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S3.3, the outbox relay — the only component permitted to
-make a write visible.
+push. The next step is S3.4, the NetworkX graph store — the relay writes through
+the `GraphStore` protocol today and every test of it runs against a fake.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

@@ -1,4 +1,4 @@
-"""The pgvector-backed `VectorStore`.  BUILD_NOTEBOOK.md S3.2
+"""The pgvector-backed `VectorStore`.  BUILD_NOTEBOOK.md S3.2, S3.3
 
 The default backend named by `ARCHITECTURE.md` §2.4 and `PRD.md` FR-4.1:
 Postgres with `pgvector`, up to roughly 10M vectors, after which the same
@@ -7,11 +7,13 @@ protocol gets a Qdrant implementation and nothing above it changes.
 Three properties are worth reading before the code, because each is an invariant
 that a plausible-looking query would quietly break.
 
-**Writes are invisible.** `upsert` inserts `visible = false` as a literal and
-has no path that sets it true. The outbox relay flips it at S3.3, once the graph
-side has landed (`ARCHITECTURE.md` §2.4), which is what makes a half-finished
-dual write unretrievable rather than briefly wrong. Every read here filters on
-it.
+**Writes are invisible, and they enqueue their own release.** `upsert` inserts
+`visible = false` as a literal and has no path that sets it true; in the same
+transaction it enqueues the outbox event that `memory/relay.py` will act on once
+the graph side has landed (`ARCHITECTURE.md` §2.4). The pair is what makes a
+half-finished dual write unretrievable rather than briefly wrong - and what
+stops an invisible row being stranded with nothing left to release it. Every
+read here filters on it.
 
 **Nothing is deleted.** `RULES.md` non-negotiable #2 revokes `DELETE` on
 `assertion` and `provenance` from `guardmem_app` at the role level, so this
@@ -29,14 +31,15 @@ returns zero rows rather than every row.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Final
 
 import asyncpg
 
-from guardmem_core.errors import ConcurrencyConflict, StoreUnavailable
+from guardmem_core.errors import ConcurrencyConflict
+from guardmem_core.memory.outbox import INSERT_OUTBOX, outbox_params
+from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.memory.vector.rowmap import (
     ASSERTION_COLUMNS,
     EMBEDDING_DIM,
@@ -52,20 +55,14 @@ from guardmem_core.memory.vector.rowmap import (
 from guardmem_core.types import AssertionId, Namespace, TenantId
 
 if TYPE_CHECKING:
-    from asyncpg.pool import PoolConnectionProxy
+    from contextlib import AbstractAsyncContextManager
 
     from guardmem_core.memory.vector.base import Embedder
+    from guardmem_core.memory.vector.pool import Conn
     from guardmem_core.schemas.entity import StoredAssertion
     from guardmem_core.schemas.receipt import Provenance
 
 __all__ = ["PgVectorStore"]
-
-# What `Pool.acquire()` actually hands back. Not a `Connection`: it is a proxy
-# that forwards to one and is returned to the pool on exit, and `asyncpg-stubs`
-# is right to distinguish them. Worth naming rather than repeating, because this
-# is the first thing the stubs caught that the S3.1 `Any` override had hidden -
-# under that override every one of these annotations was unchecked.
-type _Conn = PoolConnectionProxy[asyncpg.Record]
 
 # `filters` on the protocol is `dict[str, object]`, which is to say it arrives
 # from a caller. `RULES.md` §4 forbids string-built SQL, and the way that rule
@@ -130,7 +127,7 @@ class PgVectorStore:
         self._timeout_s = timeout_s
 
     async def upsert(self, assertions: Sequence[StoredAssertion]) -> None:
-        """Write assertions and their citations, invisibly, in one transaction.
+        """Write assertions, their citations and their outbox events, atomically.
 
         Args:
             assertions: What to persist. `visible` is a literal `false` in the
@@ -142,10 +139,23 @@ class PgVectorStore:
             StoreUnavailable: Postgres is unreachable.
             ValueError: an embedding came back with the wrong dimension.
 
-        One transaction is not an optimisation. `assertion_requires_provenance`
-        is a DEFERRABLE INITIALLY DEFERRED constraint trigger that fires at
-        COMMIT, so an assertion and its provenance written in separate
-        transactions are rejected - correctly, as an unsourced write.
+        One transaction is not an optimisation, and it carries two separate
+        invariants. `assertion_requires_provenance` is a DEFERRABLE INITIALLY
+        DEFERRED constraint trigger that fires at COMMIT, so an assertion and
+        its provenance written in separate transactions are rejected -
+        correctly, as an unsourced write. And `ARCHITECTURE.md` §2.4 requires
+        the assertion row and its outbox event to commit together: an assertion
+        that landed without its event would be invisible with nothing left in
+        the system that could ever flip it, which is not a partial write but a
+        permanently unreadable one.
+
+        **The outbox row is written here rather than by the router**, and that
+        is the one place this class's Postgres-specificity is load-bearing
+        rather than incidental. Atomicity between two tables is a property of a
+        Postgres transaction, and this method owns the only one in the write
+        path. A `VectorStore` that cannot make that guarantee - Qdrant, above
+        `PRD.md` FR-4.1's threshold - needs its own coordination story, which is
+        exactly what §2.4 means by the backend being an operator decision.
 
         Idempotent by `ON CONFLICT DO NOTHING`, which is a stronger choice than
         it looks and is taken over `DO UPDATE` deliberately. S3.3 replays this
@@ -153,7 +163,9 @@ class PgVectorStore:
         been superseded by a later proposal. An overwrite would resurrect it -
         clear `valid_to`, drop `superseded_by`, and return a fact the system had
         already retired, through the front door of a *retry*. Doing nothing is
-        the only replay semantics that cannot undo a decision.
+        the only replay semantics that cannot undo a decision, and it is why the
+        outbox id is derived from the assertion id rather than generated: a
+        replay must not enqueue a second event for a write already dispatched.
         """
         if not assertions:
             return
@@ -163,9 +175,11 @@ class PgVectorStore:
             for assertion, vector in zip(assertions, vectors, strict=True)
         ]
         citations = [params for assertion in assertions for params in provenance_params(assertion)]
-        async with self._tenant_transaction() as connection:
+        events = [outbox_params(assertion, self._tenant_id) for assertion in assertions]
+        async with self._transaction() as connection:
             await connection.executemany(INSERT_ASSERTION, rows, timeout=self._timeout_s)
             await connection.executemany(INSERT_PROVENANCE, citations, timeout=self._timeout_s)
+            await connection.executemany(INSERT_OUTBOX, events, timeout=self._timeout_s)
 
     async def search(
         self,
@@ -212,7 +226,7 @@ class PgVectorStore:
             f"FROM assertion WHERE {' AND '.join(clauses)} "
             f"ORDER BY distance LIMIT ${len(params)}"
         )
-        async with self._tenant_transaction() as connection:
+        async with self._transaction() as connection:
             rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
             citations = await self._citations(connection, [row["id"] for row in rows])
         return [assertion_from_row(row, citations[row["id"]]) for row in rows]
@@ -241,7 +255,7 @@ class PgVectorStore:
         surface, since both arguments are `AssertionId` and nothing static
         distinguishes them.
         """
-        async with self._tenant_transaction() as connection:
+        async with self._transaction() as connection:
             status = await connection.execute(
                 _SUPERSEDE, at, new_id, old_id, timeout=self._timeout_s
             )
@@ -254,36 +268,19 @@ class PgVectorStore:
 
     # --- internals ----------------------------------------------------------
 
-    @asynccontextmanager
-    async def _tenant_transaction(self) -> AsyncIterator[_Conn]:
-        """Yield a connection inside a transaction scoped to this tenant.
+    def _transaction(self) -> AbstractAsyncContextManager[Conn]:
+        """This store's tenant-scoped unit of work.
 
-        Yields:
-            A connection with `app.tenant_id` set and a transaction open.
+        Returns:
+            A context manager yielding a connection with `app.tenant_id`
+            applied. `SET LOCAL`, and `pool.py` explains at length why the
+            `LOCAL` is the load-bearing word.
 
-        Raises:
-            StoreUnavailable: the pool could not produce a working connection.
-
-        The third argument to `set_config` is `is_local`, and passing `true` is
-        what makes this safe on a *pooled* connection: the setting reverts at
-        COMMIT or ROLLBACK, so it cannot leak to whoever checks the connection
-        out next. A plain `SET` here would be a cross-tenant read with no
-        symptom - the query would succeed and return the wrong tenant's rows.
+        A one-line forward rather than an import used directly at the three call
+        sites: the tenant is a property of *this store*, and spelling it out
+        three times is three chances to pass someone else's.
         """
-        try:
-            async with self._pool.acquire() as connection, connection.transaction():
-                await connection.execute(
-                    "SELECT set_config('app.tenant_id', $1, true)",
-                    self._tenant_id,
-                    timeout=self._timeout_s,
-                )
-                yield connection
-        except (OSError, asyncpg.PostgresConnectionError) as exc:  # pragma: no cover
-            # Needs a database that dies mid-transaction, which is a fault
-            # injection test and not this suite's. `StoreUnavailable` is
-            # retryable; the driver's own exception is not something callers
-            # above the store should have to know about.
-            raise StoreUnavailable(f"postgres connection failed: {exc}") from exc
+        return tenant_transaction(self._pool, self._tenant_id, timeout_s=self._timeout_s)
 
     async def _embed(self, assertions: Sequence[StoredAssertion]) -> list[list[float]]:
         """Embed a batch, checking the shape the column declares.
@@ -348,7 +345,7 @@ class PgVectorStore:
         return clauses, params
 
     async def _citations(
-        self, connection: _Conn, ids: Sequence[object]
+        self, connection: Conn, ids: Sequence[object]
     ) -> dict[object, list[Provenance]]:
         """Fetch every citation for `ids`, grouped by assertion.
 
