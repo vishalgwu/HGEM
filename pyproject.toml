@@ -82,6 +82,13 @@ dev = [
   # resolving from scratch. The deferral was right to be cautious and wrong
   # about the fact.
   "asyncpg-stubs==0.31.0",
+  # The third, added at S3.4, and the first one that was cheap because the
+  # lesson had landed: `networkx` ships no `py.typed`, so `mypy --strict` on
+  # `memory/graph/networkx_store.py` fails outright rather than degrading to
+  # `Any`. An `ignore_missing_imports` override would have silenced it and
+  # turned every graph call into `Any` - which is exactly the override S3.2
+  # deleted for `asyncpg`, having watched it hide a real annotation error.
+  "types-networkx==3.6.1.20260911",
   # gates (S1.2) - RULES.md 4 puts secret scanning in pre-commit AND CI
   "pre-commit==4.6.2",
   "detect-secrets==1.5.0",
@@ -245,6 +252,28 @@ name = "guardmem-core imports no web framework"
 type = "forbidden"
 source_modules = ["guardmem_core"]
 forbidden_modules = ["fastapi", "starlette", "uvicorn", "mcp", "arq"]
+
+# S3.4's DONE WHEN, in the form RULES.md 0 asks for: "the pipeline never imports
+# the concrete class". A comment saying so is a suggestion; this fails `make
+# lint`.
+#
+# Both concrete stores and both of their drivers, not just NetworkX. The rule is
+# about the direction of the dependency, not about one backend: ARCHITECTURE.md
+# 2.4 makes a backend swap configuration rather than code, and that is only true
+# while the decision engine talks to VectorStore/GraphStore and never to what
+# implements them. `networkx` and `asyncpg` are listed as well because the leak
+# that matters is a pipeline module reaching for a driver directly, which would
+# satisfy a rule phrased only about the store modules.
+[[tool.importlinter.contracts]]
+name = "the pipeline never imports a concrete store"
+type = "forbidden"
+source_modules = ["guardmem_core.pipeline"]
+forbidden_modules = [
+  "guardmem_core.memory.graph.networkx_store",
+  "guardmem_core.memory.vector.pgvector_store",
+  "networkx",
+  "asyncpg",
+]
 
 # ---------------------------------------------------------------------------
 # A note on pyproject vs requirements/

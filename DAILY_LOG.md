@@ -2177,6 +2177,96 @@ step that gives it a real backend and `degree()` its first real caller.
 
 ---
 
+## 2026-09-13 — Day 3 · S3.4 (NetworkX graph store)
+
+**Shipped**
+
+- `memory/graph/networkx_store.py` — a `MultiDiGraph` keyed by `assertion_id`,
+  the first real `GraphStore`. `degree()` and `neighbors()` over live edges, and
+  a single-tenant guard that is enforced rather than described.
+- An `import-linter` contract for S3.4's second DONE WHEN clause: the pipeline
+  may not import a concrete store or a driver.
+- `networkx` added to `guardmem-core`, `types-networkx` to the dev group,
+  mirrored into `requirements/` and both locks.
+- `tests/unit/test_networkx_graph_store.py` — 37 tests, most of them run twice.
+  561 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **The fake and the real store agreed on the first run, and that is the result
+  worth recording.** `fakes.py` has said since S1.7 that a fake permitting what
+  a real store forbids makes the whole week-1 unit suite a measurement of the
+  wrong system. It was an argument, not a fact, because there was no real
+  `GraphStore` to check it against. Parametrising the `store` fixture over both
+  turned it into a fact: every unit test written against `FakeGraphStore` since
+  S1.7 was measuring something the real backend also does. That took about four
+  extra lines and I would not have written them if the docstring had not been
+  quite so insistent.
+
+- **Building the first backend found a gap in the protocol, not in the
+  backend.** `degree(entity)` and `neighbors(entity)` take no tenant. For
+  `PgVectorStore` that was fine — the tenant binds at construction and RLS
+  enforces it underneath. Here there is no RLS, one process-wide graph, and no
+  argument to filter on, so two tenants in one store would price one's blast
+  radius with the other's edges. `PROJECT_TREE.md` already said "dev /
+  single-tenant fallback"; what it did not say is what happens if you ignore
+  that. Now `upsert_assertion` refuses a subject held for another tenant, and
+  the failure mode if someone points the multi-tenant relay at this is the good
+  one: the write raises, the event stays pending, the assertion stays invisible,
+  and `attempts` climbs to the cap where an operator finds it.
+
+- **The guard has to be on the subject and not the object, which I got wrong
+  first.** Guarding both refused a correct write immediately: two tenants
+  recording an allergy to penicillin legitimately share the node
+  `"penicillin"`, because a literal is a value and not an entity. A subject is
+  always a resolved `EntityId` and belongs to exactly one tenant. One line, and
+  the test that caught it is the one I nearly did not write.
+
+- **`MultiDiGraph` keyed by `assertion_id` gave me idempotence for free, and
+  something better than idempotence.** `add_edge` with an existing key replaces
+  the attributes rather than adding a parallel edge — so a replay does not just
+  deduplicate, it *refreshes*. A replay after supersession writes the new
+  `valid_to` through, and right now that is the only way the graph ever learns a
+  fact was retired: `GraphStore` has no `supersede` and §2.3's `SUPERSEDES` edge
+  belongs to the step that coordinates it.
+
+- **An ordered set for the BFS frontier, not a `set`.** A plain set makes
+  traversal order depend on string hashing, so two runs of the same test can
+  return the same edges in a different order — the kind of flake that gets
+  diagnosed three steps later and blamed on the wrong thing.
+  `dict.fromkeys`-style ordering costs nothing.
+
+- **The lock file rewrites its own header, every time.**
+  `uv pip compile` dropped thirty lines of hand-written notes from
+  `requirements.lock.txt` — the package count, the spaCy model caveat, the
+  reason `ml-local.txt` is excluded. Nothing failed; the notes were simply gone
+  from the diff. Pasted back with an S3.4 line added, and the header now says
+  that regenerating destroys it.
+
+**Still open**
+
+- **The graph has no supersession path.** `PgVectorStore.supersede` updates
+  Postgres and nothing tells the graph, so a retired edge stays live there until
+  the outbox happens to replay it. `neighbors()` filters correctly on what it
+  holds; keeping what it holds current is the missing half, and §2.3 names the
+  `SUPERSEDES` edge it should write. Belongs with the step that coordinates
+  supersession (L2, S5.x).
+- `GM_GRAPH_BACKEND` does not exist yet. `BUILD_NOTEBOOK.md` Appendix B
+  introduces it at **S7.1** with the Neo4j backend, and a setting with one legal
+  value is a setting nobody can get wrong.
+- Multi-hop follows every string object, because the ontology that decides which
+  strings are entity references arrives at **S3.5**. Both stores make the same
+  assumption, which is at least consistent.
+
+**Tomorrow's first step**
+
+`S3.5` — the ontology loader and the clinical starter pack. It is what
+`route()` needs to stop returning "both" for everything, what the span linker's
+two under-detected noise classes need, and what tells a traversal whether a
+string is an entity reference.
+
+---
+
 ---
 
 <!--

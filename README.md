@@ -8,12 +8,12 @@
 > The design suite, the toolchain and the gates are in place; `guardmem_core`
 > carries its typed foundation — settings, domain ids, the error hierarchy, the
 > Pydantic schema layer, the store and LLM protocols — the whole of **Layer 1**
-> (noise filter, K-sample extractor, span linker), and from S3.1–S3.3 the
-> bitemporal Postgres schema, the pgvector store over it, and the outbox that
-> coordinates the dual write: write, search, supersede, point-in-time recall of
-> a fact that has since been retired, and a partial write that is never
-> retrievable. Nothing yet validates, scores or decides a candidate — that is
-> Layer 2, and it is next after the graph store. Every performance
+> (noise filter, K-sample extractor, span linker), and from S3.1–S3.4 the
+> bitemporal Postgres schema, the pgvector store over it, the outbox that
+> coordinates the dual write, and the graph store on the other side of it:
+> write, search, supersede, point-in-time recall of a fact that has since been
+> retired, and a partial write that is never retrievable. Nothing yet validates,
+> scores or decides a candidate — that is Layer 2. Every performance
 > and quality figure below is a **target**, not a measurement — see
 > [Status](#status) before quoting any number.
 
@@ -162,7 +162,7 @@ stack it actually requires.
 
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.3**.
+Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.4**.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -214,10 +214,19 @@ graph write is idempotent by `assertion_id`, and the completion will not move a
 timestamp it has already written. `StoreRouter` sits in front of it as the
 app-layer tenant check `RULES.md` §4 asks for alongside row-level security.
 
+S3.4 gives the relay something real to write to. `NetworkXGraphStore` is a
+`MultiDiGraph` whose edges are keyed by `assertion_id`, so a replayed dispatch
+replaces an edge rather than duplicating it, and `degree()` returns a number the
+risk scorer can use — without it `MEMORY_ENGINE.md` §3.3's `graph_fanout`
+feature is a constant and the blast-radius half of the decision matrix cannot be
+evaluated at all. It is the dev and single-tenant backend, and it enforces that:
+the `GraphStore` protocol gives its read methods no tenant to filter on, so it
+refuses to hold two. Neo4j swaps in at S7.1 behind the same three methods.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S3.4, the NetworkX graph store — the relay writes through
-the `GraphStore` protocol today and every test of it runs against a fake.
+push. The next step is S3.5, the ontology loader — the first thing that can say
+what a predicate means.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

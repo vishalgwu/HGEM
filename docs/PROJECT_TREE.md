@@ -121,7 +121,9 @@ guardmem-ai/
 │   │       │   ├── graph/
 │   │       │   │   ├── base.py          # GraphStore Protocol (S1.7)
 │   │       │   │   ├── neo4j_store.py
-│   │       │   │   └── networkx_store.py   # dev / single-tenant fallback
+│   │       │   │   └── networkx_store.py   # S3.4; dev / single-tenant fallback -
+│   │       │   │                        #   MultiDiGraph keyed by assertion_id, and the
+│   │       │   │                        #   single-tenant half is enforced, not assumed
 │   │       │   ├── retrieval.py         # hybrid BM25 + dense + graph-expand
 │   │       │   └── compaction/
 │   │       │       ├── decay.py         # recency × usage × salience scoring
@@ -249,6 +251,8 @@ guardmem-ai/
 │   │                                    #   RULES 2.4 size caps enforced by
 │   │                                    #   unit/test_source_limits.py (S2.2)
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
+│   │                                    #   test_networkx_graph_store.py (S3.4) runs every
+│   │                                    #   shared case against BOTH GraphStore impls
 │   ├── integration/                     # testcontainers Postgres, from S3.2
 │   │   ├── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
 │   │   ├── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of

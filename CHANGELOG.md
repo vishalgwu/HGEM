@@ -17,6 +17,43 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S3.4 — the NetworkX graph store.** `memory/graph/networkx_store.py` is the
+  first real `GraphStore`: a `MultiDiGraph` whose edges are keyed by
+  `assertion_id`, which makes `upsert_assertion` idempotent for free — `add_edge`
+  with an existing key replaces that edge's attributes rather than adding a
+  parallel one, so the S3.3 relay can retry a dispatch it is not sure completed.
+  It is stronger than deduplication: a replay after a supersession writes the
+  new `valid_to` through, which is currently the only way the graph learns a
+  fact was retired.
+- **`degree()` is real, so `graph_fanout` can be.** `MEMORY_ENGINE.md` §3.3
+  feeds it through `min(1, log(1+deg)/log(1+50))` into the risk score; without a
+  graph that feature is a constant and the blast-radius half of the decision
+  matrix cannot be evaluated. It counts live edges in both directions — an
+  entity that forty assertions point *at* has exactly the blast radius the
+  feature exists to price.
+- **The single-tenant backend now enforces being single-tenant.** The protocol
+  gives `degree()` and `neighbors()` no tenant to filter on, so a graph holding
+  two tenants would price one's fanout with the other's edges.
+  `upsert_assertion` refuses a subject already held for a different tenant —
+  guarded on the subject only, since two tenants recording an allergy to
+  penicillin legitimately share the node `"penicillin"`. Entity ids are
+  database-wide UUIDs so the exposure was already nil; `RULES.md` §4 is explicit
+  that a property holding only because ids are unguessable is not a property.
+- **S3.4's second DONE WHEN clause is an `import-linter` contract**, not a
+  comment: `guardmem_core.pipeline` may not import `networkx_store`,
+  `pgvector_store`, `networkx` or `asyncpg`. The drivers are listed because the
+  leak that matters is a pipeline module reaching for one directly, which a rule
+  phrased only about the store modules would miss. `make lint` already runs it.
+- **Every shared graph test runs against both implementations.** `fakes.py` says
+  a fake permitting what a real store forbids makes the week-1 unit suite a
+  measurement of the wrong system, and until now there was no real `GraphStore`
+  to check that against. The `store` fixture is parametrised over both; they
+  agreed on the first run. Three mutants each failed only the `[networkx]` half,
+  which is the evidence the parametrisation works. 561 tests, 100% coverage.
+- **`networkx` is a `guardmem-core` dependency and `types-networkx` a dev one.**
+  The stubs rather than an `ignore_missing_imports` override, for the reason S3.2
+  deleted that override for `asyncpg`: it silences the error by turning every
+  call into `Any`. Regenerating `requirements.lock.txt` moved nothing else.
 - **S3.3 — outbox-coordinated dual write.** `memory/router.py` is the write
   entry point, `memory/outbox.py` holds the shape of the `outbox` table in both
   directions, and `memory/relay.py` drains it: claim a bounded batch, apply the

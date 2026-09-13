@@ -1615,8 +1615,60 @@ TIME: 45 min
 WHY: satisfies the `GraphStore` protocol so L2 and the risk scorer can call `degree()` today.
 Neo4j comes on day 7 and swaps in by config.
 
+**Four corrections to this step, found by building it.**
+
+1. **The protocol gives `degree()` and `neighbors()` no tenant, and this backend
+   holds one graph.** So a store carrying two tenants' subgraphs would price one
+   tenant's blast radius using the other's edges, and could not filter even if
+   it wanted to. `PROJECT_TREE.md` already calls this the "dev / single-tenant
+   fallback"; the store now *enforces* that rather than documenting it -
+   `upsert_assertion` refuses a subject already held for a different tenant.
+   Entity ids are database-wide UUIDs, so the practical exposure was already
+   nil, and `RULES.md` §4 is explicit that a property holding only because ids
+   are unguessable is not a property. Guarded on the **subject** only: two
+   tenants recording an allergy to penicillin legitimately share the node
+   `"penicillin"`, and guarding the object would refuse correct writes.
+2. **"The pipeline never imports the concrete class" is a linter's job.**
+   `RULES.md` §0: a rule not checkable by a linter, a test or a review gate is a
+   suggestion. It is now an `import-linter` contract in `pyproject.toml`, which
+   `make lint` already runs - and it forbids `pgvector_store`, `asyncpg` and
+   `networkx` alongside `networkx_store`, because the leak that matters is a
+   pipeline module reaching for a *driver*, which a rule phrased only about the
+   store modules would miss. Verified by mutation: an import added to
+   `l1_extract/extractor.py` breaks the contract two ways.
+3. **`MultiDiGraph` with the edge keyed by `assertion_id` makes idempotence
+   free.** `add_edge` with an existing key replaces that edge's attributes
+   instead of adding a parallel one, which is exactly the replay semantics S3.3
+   needs - and it is stronger than deduplication, because a replay after a
+   supersession also writes the new `valid_to` through. That is currently the
+   *only* way the graph learns a fact was retired: `GraphStore` has no
+   `supersede`, and §2.3's `SUPERSEDES` edge belongs to the step that
+   coordinates supersession.
+4. **A literal has to be a node too.** `ARCHITECTURE.md` §5 ends an `ASSERTS`
+   edge at `(:Entity|:Literal)`, and an edge needs both ends. Strings keep their
+   own value as the node key - which is what makes `degree()` agree with
+   `FakeGraphStore`'s `edge.object == entity` comparison, and lets a multi-hop
+   walk follow an entity reference with no ontology to ask. Everything else gets
+   a canonical `literal:` key that cannot collide with an `EntityId` and is not
+   followed by a traversal, because a number is never an entity reference.
+
 DONE WHEN: `degree()` and `neighbors()` return correct values in a unit test; the pipeline never
 imports the concrete class.
+
+Worth doing beyond the step: **run every shared test against both the fake and
+the real store.** `fakes.py` says a fake permitting what a real store forbids
+makes the whole week-1 unit suite a measurement of the wrong system, and until
+this step there was no real `GraphStore` to check that claim against. The `store`
+fixture is parametrised over both, so each behavioural test runs twice and the
+two are held to the same answers. They agreed on the first run, which is the
+result worth having - it means every unit test written against `FakeGraphStore`
+since S1.7 was measuring something real.
+
+Three mutants, three kills, and each failed only the `[networkx]` half of the
+parametrisation - which is itself the evidence that the parametrisation works:
+dropping the edge key kills the replay tests, counting only out-edges kills the
+"pointed at" degree test, and dropping the `valid_to` filter kills the retired-
+neighbour test.
 
 COMMIT: `feat(s3.4): networkx graph store`
 

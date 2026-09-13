@@ -28,6 +28,7 @@ pip-audit==2.10.1             # RULES.md 4 dependency CVE scan in CI
 import-linter==2.15           # PROJECT_TREE "One-way arrow": apps -> services -> packages -> stores
 types-pyyaml==6.0.12.20260906 # mypy --strict needs stubs for the ontology loader
 asyncpg-stubs==0.31.0         # S3.2 puts asyncpg in the package; `Any` stops being acceptable
+types-networkx==3.6.1.20260911  # S3.4; networkx ships no py.typed and the store is strict-checked
 
 # ---------------------------------------------------------------------------
 # NOT pip-installable - required by RULES.md 4 and S26.3 but installed by other

@@ -28,6 +28,11 @@ dependencies = [
   # belongs to the migration toolchain on the workspace root.
   "asyncpg>=0.31",
   "pgvector>=0.5",
+  # S3.4. The dev and single-tenant graph backend (`PROJECT_TREE.md`), and the
+  # first `GraphStore` implementation - `requirements/stores.txt` says "build
+  # this one first". Neo4j arrives at S7.1 behind the same protocol and is NOT
+  # listed here: a driver nothing imports is scaffolding.
+  "networkx>=3.4",
 ]
 
 [build-system]
