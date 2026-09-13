@@ -18,7 +18,6 @@ dependencies = [
   # artifacts have to agree - see tests/unit/test_dependency_consistency.py.
   "alembic==1.19.2",
   "sqlalchemy==2.0.52",
-  "asyncpg==0.31.0",
 ]
 
 [tool.uv.workspace]
@@ -72,6 +71,17 @@ dev = [
   # `import yaml` from S1.7 onward, the step that widened `make typecheck` to
   # cover `tests`. Locally it passed, because requirements.lock.txt installs it.
   "types-pyyaml==6.0.12.20260906",
+  # The second stub-only distribution, added at S3.2 for the same reason the
+  # first one had to be repaired: `asyncpg` now ships inside
+  # `packages/guardmem-core`, so `mypy --strict` checks a module that talks to
+  # it, and the `ignore_missing_imports` override below turned every connection,
+  # record and pool into `Any`. S3.1 deferred this on the belief that
+  # regenerating `requirements.lock.txt` would drag seventeen unrelated packages
+  # forward. Measured at S3.2: it moves nothing. `uv pip compile` honours the
+  # pins already in its output file, so the seventeen were an artefact of
+  # resolving from scratch. The deferral was right to be cautious and wrong
+  # about the fact.
+  "asyncpg-stubs==0.31.0",
   # gates (S1.2) - RULES.md 4 puts secret scanning in pre-commit AND CI
   "pre-commit==4.6.2",
   "detect-secrets==1.5.0",
@@ -170,23 +180,21 @@ strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
-# asyncpg ships no `py.typed`, so `mypy --strict` refuses the import outright
-# and `tests/integration/` cannot be checked at all. The values it hands back
-# become `Any`, which RULES.md 2.1 permits with a justification: this is it.
-#
-# The better fix is the real stub package, `asyncpg-stubs`. It is NOT added
-# here yet, and the reason is worth writing down rather than rediscovering.
-# Adding it to requirements/dev.txt means regenerating requirements.lock.txt,
-# and `uv pip compile` today resolves SEVENTEEN unrelated packages forward -
-# botocore, huggingface-hub, arize-phoenix, tqdm and more - because upstream
-# has moved since the lock was cut. A dependency bump of that size is a
-# reviewed change with its own commit and its own test run, not a side effect
-# of wanting types for one test module. Revisit when the lock is refreshed
-# deliberately; S3.2 puts asyncpg in the package itself, which is the point
-# where `Any` stops being acceptable.
+# `testcontainers` ships no `py.typed` and has no stub package. Unlike the
+# `asyncpg` case below, nothing here is worth chasing: the import is confined to
+# `tests/fixtures/postgres.py`, the only value taken from it is a container
+# handle whose host and port are immediately turned into a `str` DSN, and the
+# library is test scaffolding rather than something the product depends on.
 [[tool.mypy.overrides]]
-module = "asyncpg.*"
+module = "testcontainers.*"
 ignore_missing_imports = true
+
+# `asyncpg` ships no `py.typed`, so it is typed from `asyncpg-stubs` in the dev
+# group. There is deliberately NO `ignore_missing_imports` override for it: that
+# is what S3.1 used as a stopgap, and it does not merely silence the import - it
+# makes every connection, record and pool `Any`, which turns `--strict` off for
+# exactly the code that talks to the database. S3.2 moved `asyncpg` into
+# `guardmem-core` itself, so that trade stopped being acceptable.
 
 # ---------------------------------------------------------------------------
 # pytest

@@ -34,6 +34,13 @@ from guardmem_core.schemas import GMModel
 # defines the root - uv, ruff, mypy, pytest and coverage all resolve against it.
 _ROOT_MARKER = "pyproject.toml"
 
+# Postgres fixtures, registered as a plugin rather than as a second `conftest.py`
+# under `tests/integration/`. Two `conftest` modules in a tree without
+# `__init__.py` collide under `mypy`, which would take the whole test suite out
+# of `make typecheck`. Nothing here starts a container until a test asks for the
+# fixture, so the unit suite is unaffected. S3.2.
+pytest_plugins = ("fixtures.postgres", "fixtures.pgvector")
+
 
 def _find_repo_root() -> Path:
     """Walk upwards until the workspace root is found.

@@ -4,15 +4,17 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: Days 1 and 2 complete — Layer 1 works end to end.** The design
-> suite, the toolchain and the gates are in place; `guardmem_core` carries its
-> typed foundation — settings, domain ids, the error hierarchy, the Pydantic
-> schema layer, the store and LLM protocols — and the whole of **Layer 1**:
-> noise filter, K-sample extractor, span linker. Raw turns in, span-anchored
-> candidates out, with anything the source cannot support rejected and counted.
-> Nothing yet validates, scores or decides one. Every performance and quality
-> figure below is a **target**, not a measurement — see [Status](#status) before
-> quoting any number.
+> **Status: Layer 1 works end to end, and it now has somewhere to write to.**
+> The design suite, the toolchain and the gates are in place; `guardmem_core`
+> carries its typed foundation — settings, domain ids, the error hierarchy, the
+> Pydantic schema layer, the store and LLM protocols — the whole of **Layer 1**
+> (noise filter, K-sample extractor, span linker), and from S3.1–S3.2 the
+> bitemporal Postgres schema and the pgvector store over it: write, search,
+> supersede, and point-in-time recall of a fact that has since been retired.
+> Nothing yet validates, scores or decides a candidate, and nothing connects
+> Layer 1's output to the store — that is the outbox at S3.3. Every performance
+> and quality figure below is a **target**, not a measurement — see
+> [Status](#status) before quoting any number.
 
 ---
 
@@ -158,11 +160,12 @@ stack it actually requires.
 ## Status
 
 The engine is not implemented yet. The repository was reset to a documentation
-baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7) and
-**S2.1 is in**, so the toolchain, the gates, the local datastore stack, the typed
-foundation of `guardmem_core` — settings, domain ids, the error hierarchy, the
-Pydantic schema layer, and the `LLMClient` / `VectorStore` / `GraphStore`
-protocols with in-memory fakes — and Layer 1's noise filter are real.
+baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
+Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.2**.
+So the toolchain, the gates, the local datastore stack, the typed foundation of
+`guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
+layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
+in-memory fakes — Layer 1, and durable storage are real.
 
 The noise filter is the first component with a measured number attached, and it
 is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
@@ -188,7 +191,21 @@ revoked at the role level, the audit chain refuses UPDATE and DELETE, an
 assertion without a citation cannot commit, and a session with no tenant set
 sees nothing.
 
-Nothing reads or writes it yet. The next step is S3.2, the pgvector store.
+S3.2 is what reads and writes it. `PgVectorStore` implements the `VectorStore`
+protocol over that schema, and the three properties that matter are structural
+rather than conventional: a write lands `visible = false` as a statement
+literal, so a half-finished dual write has no parameter through which it could
+be made retrievable; the tenant is bound at construction and applied as
+`SET LOCAL app.tenant_id`, which is the value row-level security reads; and
+supersession is an `UPDATE` of `valid_to` that raises rather than passing
+quietly when it matches nothing. A retired fact leaves search and stays
+recoverable through `as_of`, which is the claim the product rests on and is
+tested against a real Postgres rather than against a double.
+
+That Postgres is a testcontainer, started by the suite from the repository's own
+`initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
+push. The next step is S3.3, the outbox relay — the only component permitted to
+make a write visible.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

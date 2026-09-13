@@ -16,88 +16,30 @@ migration, a psql session or a bug cannot route around them:
 - #4 the audit chain is append-only - INSERT only, no UPDATE, no DELETE;
 - §4 tenant isolation - row-level security, failing closed when no tenant is set.
 
-**Skipped, not failed, when no database is reachable.** `RULES.md` §5 wants the
-integration suite green with no skips *on main*, which is a CI-with-a-service
-statement; S3.2 is the step that brings testcontainers in and makes that
-enforceable. Until then a developer without `make dev` running should get a
-skip, not a wall of red that trains them to ignore the suite.
+**The database comes from a testcontainer, not from `make dev`.** That changed
+at S3.2: `tests/fixtures/postgres.py` starts a pinned `pgvector` image, mounts
+the repository's own `infra/docker/initdb/` into it, and runs
+`alembic upgrade head`. These tests were previously skipped unless a developer
+happened to have the dev stack running, which is the same as not having them.
+They now skip only when there is no Docker daemon at all.
+
+`GM_TEST_DATABASE_URL` still points the suite at an existing database, for
+iterating locally without paying container startup on every run.
 """
 
 from __future__ import annotations
 
-import socket
 from collections.abc import AsyncIterator
-from typing import Any, Final
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
-from guardmem_core.settings import get_settings
-
-# The least-privilege role the application connects as, created by
-# `infra/docker/initdb/02-app-role.sql`. A development credential for a
-# container that listens on localhost, committed for the same reason the
-# compose file's `POSTGRES_PASSWORD` is.
-_APP_ROLE: Final = "guardmem_app"
-_APP_PASSWORD: Final = "guardmem_app"
-
-
-def _endpoint() -> dict[str, Any]:
-    """Host, port, database and credentials from `GM_DATABASE_URL`.
-
-    `PostgresDsn` is a `MultiHostUrl` - Postgres connection strings may carry
-    several hosts for failover - so the fields live under `hosts()`, not on the
-    URL itself. Only the first is used: the dev stack is one container, and a
-    multi-host DSN is a production concern for whichever pooler S26.2 puts in
-    front.
-    """
-    url = get_settings().database_url
-    first = url.hosts()[0]
-    return {
-        "host": first["host"] or "localhost",
-        "port": first["port"] or 5432,
-        "user": first["username"],
-        "password": first["password"],
-        "database": (url.path or "/guardmem").lstrip("/"),
-    }
-
-
-def _dsn(user: str | None = None, password: str | None = None) -> str:
-    """The settings DSN as asyncpg wants it, optionally as another role.
-
-    `GM_DATABASE_URL` carries SQLAlchemy's `+asyncpg` driver marker, which
-    asyncpg itself does not understand, so the string is rebuilt rather than
-    passed through.
-    """
-    parts = _endpoint()
-    if user is None:
-        user, password = parts["user"], parts["password"]
-    return f"postgresql://{user}:{password}@{parts['host']}:{parts['port']}/{parts['database']}"
-
-
-def _database_reachable() -> bool:
-    """Is anything listening where the settings say the database is?"""
-    parts = _endpoint()
-    try:
-        with socket.create_connection((parts["host"], parts["port"]), timeout=1):
-            return True
-    except OSError:
-        return False
-
-
-pytestmark = [
-    pytest.mark.skipif(
-        not _database_reachable(),
-        reason="no database at GM_DATABASE_URL; start it with `make dev`",
-    ),
-]
-
 
 @pytest.fixture
-async def owner() -> AsyncIterator[asyncpg.Connection]:
+async def owner(postgres_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     """A connection as the table owner, used to seed and to clean up."""
-    connection = await asyncpg.connect(_dsn())
+    connection = await asyncpg.connect(postgres_dsn)
     try:
         yield connection
     finally:
@@ -181,9 +123,9 @@ async def seeded(owner: asyncpg.Connection) -> AsyncIterator[dict[str, str]]:
 
 
 @pytest.fixture
-async def app_role(seeded: dict[str, str]) -> AsyncIterator[asyncpg.Connection]:
+async def app_role(seeded: dict[str, str], app_role_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     """A connection as the application role, scoped to the seeded tenant."""
-    connection = await asyncpg.connect(_dsn(_APP_ROLE, _APP_PASSWORD))
+    connection = await asyncpg.connect(app_role_dsn)
     await connection.execute("SELECT set_config('app.tenant_id', $1, false)", seeded["tenant"])
     try:
         yield connection

@@ -22,6 +22,12 @@ dependencies = [
   "anyio>=4.6",
   "numpy>=2.1",
   "rapidfuzz>=3.10",
+  # S3.2. PROJECT_TREE's ownership table lets this layer import "store
+  # drivers", and `memory/vector/pgvector_store.py` is the first module that
+  # does. Not sqlalchemy: the store speaks asyncpg directly, and sqlalchemy
+  # belongs to the migration toolchain on the workspace root.
+  "asyncpg>=0.31",
+  "pgvector>=0.5",
 ]
 
 [build-system]

@@ -110,7 +110,9 @@ guardmem-ai/
 │   │       ├── memory/
 │   │       │   ├── router.py            # StoreRouter — vector vs graph vs both
 │   │       │   ├── vector/
-│   │       │   │   ├── base.py          # VectorStore Protocol (S1.7); store owns write-side embedding
+│   │       │   │   ├── base.py          # VectorStore + Embedder Protocols (S1.7, S3.2)
+│   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered
+│   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both directions
 │   │       │   │   ├── pgvector_store.py
 │   │       │   │   └── qdrant_store.py
 │   │       │   ├── graph/
@@ -242,18 +244,24 @@ guardmem-ai/
 │   │                                    #   RULES 2.4 size caps enforced by
 │   │                                    #   unit/test_source_limits.py (S2.2)
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
-│   ├── integration/                     # a live Postgres today; testcontainers at S3.2
-│   │   └── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
+│   ├── integration/                     # testcontainers Postgres, from S3.2
+│   │   ├── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
+│   │   └── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
 │   ├── fixtures/                        # a package, so mypy resolves one module name
-│   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7)
+│   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7),
+│   │   │                                #   FakeEmbedder (S3.2)
+│   │   ├── postgres.py                  # S3.2; the migrated testcontainer, as a pytest plugin
+│   │   ├── pgvector.py                  # S3.2; tenant, pool and store fixtures over it
 │   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
-│   └── conftest.py                      # REPO_ROOT + all_schema_models()
+│   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.
+│                                        #   The ONLY conftest: a second one is a duplicate
+│                                        #   module name and mypy refuses the pair (S3.2)
 │
 ├── scripts/
 │   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths

@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fixtures.fakes import FakeGraphStore, FakeLLM, FakeVectorStore
+from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.llm.base import LLMResponse, Tier
 from guardmem_core.schemas import Provenance, SourceTier, StoredAssertion
 from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
@@ -227,27 +228,51 @@ async def test_supersede_retires_without_deleting() -> None:
     assert await store.search(namespace=_NS, embedding=[0.1], k=10, filters={}) == []
 
 
-async def test_superseding_an_already_retired_assertion_is_a_no_op() -> None:
+async def test_superseding_an_already_retired_assertion_conflicts() -> None:
     """S3.2's `UPDATE ... WHERE valid_to IS NULL` matches nothing the second
-    time. The fake behaves the same way, so a transposed or replayed call
-    cannot rewrite a tombstone that is already correct."""
+    time, and the store raises on a zero-row result rather than passing
+    quietly. The fake does the same, and the tombstone is left as it was."""
     store = FakeVectorStore()
     await store.upsert([_assertion("a_old")])
     first = _WHEN + timedelta(days=30)
     await store.supersede(AssertionId("a_old"), AssertionId("a_new"), first)
 
-    await store.supersede(AssertionId("a_old"), AssertionId("a_other"), _WHEN)
+    with pytest.raises(ConcurrencyConflict):
+        await store.supersede(AssertionId("a_old"), AssertionId("a_other"), _WHEN)
 
     retired = store.assertions[AssertionId("a_old")]
     assert retired.valid_to == first
     assert retired.superseded_by == "a_new"
 
 
-async def test_superseding_an_unknown_assertion_raises() -> None:
-    """Loud on purpose. The real `UPDATE` would match no rows and pass; in a
-    unit test that is always a broken test rather than a race."""
-    with pytest.raises(KeyError):
+async def test_superseding_an_unknown_assertion_conflicts() -> None:
+    """Same zero-row result, same refusal. In a unit test an id that does not
+    exist is a broken test; in production it is a tenant boundary or a race,
+    and both want the caller to re-read rather than to believe it worked."""
+    with pytest.raises(ConcurrencyConflict):
         await FakeVectorStore().supersede(AssertionId("a_missing"), AssertionId("a_new"), _WHEN)
+
+
+async def test_as_of_recovers_an_assertion_that_has_since_been_superseded() -> None:
+    """The S3.2 DONE WHEN, held at the unit layer as well as against Postgres.
+
+    A superseded fact is absent from a live search and present in a
+    point-in-time one. The fake has to agree with the store here or the unit
+    suite would certify a `memory.timeline` handler that the database refuses.
+    """
+    store = FakeVectorStore()
+    await store.upsert([_assertion("a_old")])
+    retired_at = _WHEN + timedelta(days=30)
+    await store.supersede(AssertionId("a_old"), AssertionId("a_new"), retired_at)
+
+    async def found(as_of: datetime | None) -> list[str]:
+        results = await store.search(namespace=_NS, embedding=[0.0], k=10, filters={}, as_of=as_of)
+        return [a.assertion_id for a in results]
+
+    assert await found(None) == []
+    assert await found(retired_at - timedelta(days=1)) == ["a_old"]
+    # Half-open: at exactly `valid_to` the successor is true and this one is not.
+    assert await found(retired_at) == []
 
 
 # --- FakeGraphStore --------------------------------------------------------

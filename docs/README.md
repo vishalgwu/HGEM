@@ -12,11 +12,14 @@ are real - `make lint`, `make typecheck`, `make test`, the pre-commit hooks and
 GitHub Actions all run today - and so is the typed foundation of `guardmem_core`:
 settings, domain ids, the error hierarchy, the Pydantic schema layer, the store
 and LLM protocols with in-memory fakes, the versioned prompt loader, and the
-noise filter, K-sample extractor and span linker that make up Layer 1. Nothing
-downstream exists yet. S3.1 adds the initial migration - bitemporal assertions,
-provenance, the audit chain, the outbox and row-level security - so four of
-`RULES.md`'s non-negotiables are enforced by Postgres rather than by convention.
-The next step is S3.2, the pgvector store.
+noise filter, K-sample extractor and span linker that make up Layer 1. S3.1 adds
+the initial migration - bitemporal assertions, provenance, the audit chain, the
+outbox and row-level security - so four of `RULES.md`'s non-negotiables are
+enforced by Postgres rather than by convention, and S3.2 adds the pgvector store
+over it, verified against a testcontainer rather than against a fake. Nothing
+between Layer 1 and that store exists yet: no validation, no scoring, no
+decision, and no relay to make a write visible. The next step is S3.3, the
+outbox.
 
 Everything in this directory remains specification. Nothing here is evidence of
 an implemented feature; see "How to use this baseline" below.

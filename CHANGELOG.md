@@ -17,6 +17,48 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S3.2 — the pgvector store.** `memory/vector/pgvector_store.py` implements
+  `VectorStore` over the S3.1 schema, with `pool.py` (the process-wide asyncpg
+  pool, `vector` codec registered per connection) and `rowmap.py` (the shape of
+  `assertion` and `provenance` in both directions, and the SQL that fills it)
+  beside it. Writes land `visible = false` as a statement literal, so there is
+  no parameter through which a caller could make a partial dual write
+  retrievable; every read filters `visible` and `retracted_at IS NULL`; nothing
+  deletes.
+- **`as_of` on `VectorStore.search`.** A protocol change, made here because the
+  step's DONE WHEN requires a point-in-time query and `MCP_INTEGRATION.md` §2.1
+  already publishes the parameter. It is **valid** time —
+  `valid_from <= as_of AND (valid_to IS NULL OR valid_to > as_of)`, half-open —
+  because supersession sets `valid_to`. The system axis
+  (`recorded_at`/`retracted_at`) answers a different question and belongs with
+  `memory.timeline`.
+- **An `Embedder` protocol**, injected rather than constructed. §0.4 makes the
+  store the owner of write-side embedding, but `guardmem-core` importing a
+  provider SDK would invert the dependency `LLMClient` exists to prevent.
+  `FakeEmbedder` is the deterministic double: hash in, unit vector out.
+- **The tenant is bound at construction**, and every statement runs inside a
+  transaction with `SET LOCAL app.tenant_id` — the value S3.1's RLS policies
+  read. `SET LOCAL` specifically: it reverts at COMMIT, so a pooled connection
+  cannot carry one tenant's setting into the next checkout.
+- **Testcontainers, and the integration suite CI actually runs.** S3.1 deferred
+  this and said so. `tests/fixtures/postgres.py` starts the pinned `pgvector`
+  image, mounts the repository's own `infra/docker/initdb/` into it, and applies
+  the schema with `alembic upgrade head` as a subprocess — so the database under
+  test is provisioned by the files that ship, not by a copy written for tests.
+  The fifteen S3.1 invariant tests stop skipping, `ci.yml` gains an
+  `integration` job, and `RULES.md` §5's "green with no skips on main" has
+  something enforcing it. Coverage with the integration suite is 100%.
+- **`tests/integration/test_pgvector_store.py`** — sixteen tests, including the
+  DONE WHEN in full. Three deliberate mutants were each killed by exactly the
+  test that claims to cover them: ignoring `as_of`, dropping `visible` from the
+  filter, and `DO UPDATE` in place of `DO NOTHING`.
+- **`asyncpg-stubs`.** S3.1 deferred it on the belief that regenerating
+  `requirements.lock.txt` would drag seventeen unrelated packages forward.
+  Measured at S3.2: it moves nothing. `uv pip compile` honours the pins already
+  in its output file, so the seventeen were an artefact of resolving from
+  scratch. The `ignore_missing_imports` override for `asyncpg` is gone, and it
+  immediately caught a real annotation error — `Pool.acquire()` yields a
+  `PoolConnectionProxy`, not a `Connection`.
 - **S3.1 — the initial migration.** `infra/migrations/alembic/versions/0001_initial.py`:
   eight tables, the bitemporal columns, both partial retrieval indexes,
   row-level security on every tenant-scoped table, and the grants that make
@@ -46,6 +88,19 @@ repository; the log records what happened while changing it.
   string read from `Settings` rather than the ini — `RULES.md` §2.4 wants one
   settings object, and a DSN in a tracked file is the one that ends up pointing
   at the wrong database.
+
+### Changed
+
+- **`supersede` raises `ConcurrencyConflict` on a zero-row `UPDATE`** rather
+  than passing quietly, and `FakeVectorStore` was changed to match. The step's
+  snippet is silent when the incumbent is already retired — but that result is
+  the only place a transposed `supersede(new, old)` can ever surface, since both
+  arguments are `AssertionId` and nothing static tells them apart. It is also
+  the right answer for a cross-tenant call, which RLS makes match nothing.
+- **`make test` and `make test-all` now mean different things on purpose.** The
+  first is unit and property only — seconds, no Docker, the inner loop and the
+  CI `gates` job. The second includes the integration suite and is the only
+  target whose coverage number is real.
 
 ### Fixed
 

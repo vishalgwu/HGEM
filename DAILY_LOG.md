@@ -1957,6 +1957,104 @@ or the deferred trigger rejects the assertion at COMMIT.
 
 ---
 
+## 2026-09-13 — Day 3 · S3.2 (pgvector store, testcontainers, CI integration job)
+
+**Shipped**
+
+- `memory/vector/pgvector_store.py` — `VectorStore` over the S3.1 schema, with
+  `pool.py` and `rowmap.py` beside it. One store per tenant; every statement
+  inside a transaction carrying `SET LOCAL app.tenant_id`.
+- `as_of` added to `VectorStore.search`, and an `Embedder` protocol added to
+  `memory/vector/base.py`. Both are protocol changes the step needed and did not
+  mention.
+- Testcontainers, at last: `tests/fixtures/postgres.py` starts the pinned
+  `pgvector` image, mounts the repo's own `initdb/` into it, and runs
+  `alembic upgrade head`. The fifteen S3.1 tests stop skipping.
+- `ci.yml` gains an `integration` job. **473 tests, 100% coverage** with the
+  integration suite included.
+- `asyncpg-stubs` added; the `ignore_missing_imports` override deleted.
+
+**What broke / what I learned**
+
+- **The deferral in S3.1 was based on a measurement of the wrong thing.** I
+  wrote, in `pyproject.toml` and in the log, that adding `asyncpg-stubs` would
+  drag seventeen unrelated packages forward and therefore deserved its own
+  commit. Today I ran it: `uv pip compile requirements-dev.txt -o
+  requirements.lock.txt` added exactly one package and moved nothing. `uv pip
+  compile` honours the pins already present in its output file unless told to
+  upgrade; the seventeen came from a resolution *from scratch*. The caution was
+  right, the fact was wrong, and the only way to tell which was to run it.
+
+  It paid for itself immediately. With the stubs in place, `mypy --strict`
+  caught the first annotation error on the new module: `Pool.acquire()` yields a
+  `PoolConnectionProxy[Record]`, not a `Connection[Record]`. Under the override,
+  every connection in that file had been `Any`.
+
+- **I shaved a module to fit a line cap, and the cap's own error message told me
+  not to.** `pgvector_store.py` came in at 424 lines against a 400 cap, and I
+  trimmed prose to 403, then to 401 — at which point what I was doing was
+  obvious. The test says "split it along a real seam rather than shaving it".
+  There were two seams: `rowmap.py` (the table's shape, in both directions, with
+  the SQL that fills it — so adding a column is one file to edit) and `pool.py`
+  (process-scoped lifetime, request-scoped store; the constructor for the
+  long-lived thing sitting inside the module for the short-lived one invites a
+  pool per request). The store is 367 lines and the split made it better, which
+  is the argument for having a cap at all.
+
+- **Two `conftest.py` files are one module name too many.** I put the container
+  fixtures in `tests/integration/conftest.py`, and `mypy` refused the whole test
+  tree: "Duplicate module named conftest". In a package with no `__init__.py`
+  there is nothing to disambiguate them. The fix is `pytest_plugins` in the one
+  root conftest, which also puts the fixtures next to the other fixtures.
+
+- **I let blind string replacement loose on a 500-line file and it produced
+  `_write_andreveal` and `test_..._absent_fromsearch`.** Renaming
+  `_reveal` → `reveal` matched inside `_write_and_reveal`; renaming `_search`
+  matched inside `from_search`. Then ruff's `--fix` helpfully removed the
+  now-undefined import, which hid half of it. Nothing shipped broken — lint and
+  mypy caught all of it — but the twenty minutes were self-inflicted, and the
+  lesson is that a rename across a file is an AST job or an anchored one, never
+  a substring one.
+
+- **`assert True not in row` does not test what it looks like.** I wrote it to
+  prove `visible` is not among the INSERT parameters, and it failed — because
+  `corroboration_count` is `1` and `1 == True` in Python. The check that
+  actually holds is `not any(isinstance(value, bool) for value in row)`. A
+  boolean identity trap in a test asserting the absence of a boolean is a
+  pleasing shape of bug.
+
+- **Three mutants, three kills.** Green tests prove nothing on their own, so I
+  broke the store three ways and checked which tests noticed: ignoring `as_of`
+  killed the DONE WHEN test, dropping `visible` from the filter killed the
+  invisibility test, and `ON CONFLICT DO UPDATE` killed the replay test. That
+  last one is the one I most wanted evidence for — it is the difference between
+  a retry and a resurrection.
+
+- **`ryuk` would not pull on this machine** (registry EOF, twice), so the local
+  runs used `TESTCONTAINERS_RYUK_DISABLED=true`. Safe here because the fixture
+  stops the container in a `finally`; CI pulls it normally. Worth knowing the
+  flag exists before a demo.
+
+**Still open**
+
+- The outbox relay (S3.3) is the only thing that may flip `visible`, and until
+  it exists the integration tests stand in for it with an owner `UPDATE`.
+- `embed_text` renders `predicate: object`. `verbatim` would very likely
+  retrieve better but it is a *list*, so the vector would depend on how many
+  sources a fact has — the axis `S_cor` owns. Revisit at S22 with the eval
+  harness, which is the first point there is a number to compare.
+- `search` with `as_of` cannot use `assertion_hnsw` (partial on
+  `valid_to IS NULL AND visible`) and falls back to a sequential scan. Correct
+  for now; revisit if point-in-time queries ever become hot.
+
+**Tomorrow's first step**
+
+`S3.3` — outbox and dual-write coordination. It is the component that flips
+`visible` true, so it closes the loop this step deliberately left open, and
+`upsert`'s `ON CONFLICT DO NOTHING` exists for its replay semantics.
+
+---
+
 <!--
 Template for the next entry:
 

@@ -27,19 +27,23 @@ testcontainers, from S3.2.
 
 from __future__ import annotations
 
+import hashlib
+import math
+import struct
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from pydantic import BaseModel
 
+from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 from guardmem_core.memory.graph.base import GraphStore
-from guardmem_core.memory.vector.base import VectorStore
+from guardmem_core.memory.vector.base import Embedder, VectorStore
 from guardmem_core.schemas.entity import Edge, StoredAssertion
 from guardmem_core.types import AssertionId, EntityId, Namespace
 
-__all__ = ["FakeGraphStore", "FakeLLM", "FakeVectorStore", "RecordedCall"]
+__all__ = ["FakeEmbedder", "FakeGraphStore", "FakeLLM", "FakeVectorStore", "RecordedCall"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +121,68 @@ class FakeLLM:
 
 
 @dataclass(slots=True)
+class FakeEmbedder:
+    """A deterministic `Embedder`: same text in, same unit vector out.
+
+    Attributes:
+        dim: Vector length. Defaults to the 1024 `assertion.embedding` declares,
+            so the store's dimension check passes; a test that wants to see that
+            check fire sets it to something else.
+        texts: Every batch this was asked to embed, flattened, in order. What a
+            test asserts against to prove the store embeds the *assertion* and
+            not, say, its id.
+
+    Not a model, and not pretending to be one. It hashes the text and expands
+    the digest into a unit vector, which buys exactly two properties: identical
+    text embeds identically, so a search for a known assertion's own text finds
+    it; and different text lands somewhere effectively unrelated, so "nearest"
+    is not accidentally everything. Semantic similarity is not modelled at all
+    and must not be tested here - `RULES.md` §5 puts that in the nightly eval
+    suite, where there is a labelled corpus to measure it against.
+    """
+
+    dim: int = 1024
+    texts: list[str] = field(default_factory=list)
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        """Return one deterministic unit vector per text, in input order."""
+        self.texts.extend(texts)
+        return [self._vector(text) for text in texts]
+
+    def _vector(self, text: str) -> list[float]:
+        """Expand a digest of `text` into `dim` floats, normalised.
+
+        Normalised because `assertion_hnsw` indexes `vector_cosine_ops`: with
+        unit vectors, cosine distance and ordering by it behave the way a test
+        reading `ORDER BY distance` would expect, and an all-zero vector - which
+        an unnormalised scheme can produce - has no cosine distance at all.
+        """
+        raw = b"".join(
+            hashlib.sha256(f"{index}:{text}".encode()).digest()
+            for index in range(self.dim // 8 + 1)
+        )
+        values = [
+            struct.unpack_from(">i", raw, offset * 4)[0] / 2**31 for offset in range(self.dim)
+        ]
+        norm = math.sqrt(sum(value * value for value in values)) or 1.0
+        return [value / norm for value in values]
+
+
+def _is_valid_at(assertion: StoredAssertion, as_of: datetime | None) -> bool:
+    """Is this assertion believed now, or was it true at `as_of`?
+
+    The half-open convention matches the store's, which matches `supersede`:
+    `prior.valid_to` is set to the successor's `valid_from`, so at exactly that
+    instant the successor is true and the prior one is not.
+    """
+    if as_of is None:
+        return assertion.valid_to is None
+    return assertion.valid_from <= as_of and (
+        assertion.valid_to is None or assertion.valid_to > as_of
+    )
+
+
+@dataclass(slots=True)
 class FakeVectorStore:
     """An in-memory `VectorStore` that keeps the invariants pgvector keeps.
 
@@ -145,8 +211,9 @@ class FakeVectorStore:
         embedding: list[float],
         k: int,
         filters: dict[str, object],
+        as_of: datetime | None = None,
     ) -> list[StoredAssertion]:
-        """Return up to `k` live assertions in `namespace` matching `filters`.
+        """Return up to `k` assertions in `namespace` matching `filters`.
 
         "Live" is the whole point of this method and it is three conditions,
         every one of which a real backend also applies: `visible` is true (the
@@ -154,6 +221,12 @@ class FakeVectorStore:
         and `retracted_at` is unset. Invariant I6 says a tombstoned assertion
         never appears in retrieval results, and this is where the unit suite
         gets held to it.
+
+        `as_of` moves the second of those conditions onto world time:
+        `valid_from <= as_of < valid_to`, half-open, so a superseded assertion
+        is recoverable at an instant it was still believed. The visibility and
+        retraction conditions do not move - a partial write was never true at
+        any time, and neither was a retracted one.
 
         `embedding` is accepted and ignored - ordering is by insertion, newest
         first. Tests that need a specific order should write in that order,
@@ -164,7 +237,7 @@ class FakeVectorStore:
             for assertion in reversed(list(self.assertions.values()))
             if assertion.namespace == namespace
             and assertion.visible
-            and assertion.valid_to is None
+            and _is_valid_at(assertion, as_of)
             and assertion.retracted_at is None
             and all(
                 getattr(assertion, attribute, None) == expected
@@ -177,19 +250,25 @@ class FakeVectorStore:
         """Retire `old_id` in favour of `new_id`, without deleting anything.
 
         Sets `valid_to` and `superseded_by` on the incumbent, exactly as S3.2's
-        `UPDATE` does, and like that statement it is a no-op when the row is
-        already retired - which is what makes a transposed call harmless rather
-        than corrupting.
+        `UPDATE assertion ... WHERE id = $3 AND valid_to IS NULL` does - and
+        refuses in exactly the cases that statement matches zero rows.
 
         Raises:
-            KeyError: if `old_id` was never written. The real store's `UPDATE`
-                would match no rows and pass silently; here it is loud, because
-                in a unit test a supersede against an id that does not exist is
-                always a broken test rather than a race.
+            ConcurrencyConflict: `old_id` is not a live assertion here - it was
+                already retired, or it was never written. S3.2 made the real
+                store raise on a zero-row UPDATE rather than pass quietly,
+                because that result is the only place a transposed
+                `supersede(new, old)` can surface: both arguments are
+                `AssertionId`, so nothing static tells them apart. A fake that
+                stayed silent where the store raises would let a unit suite
+                certify a call the integration suite then fails on.
         """
-        incumbent = self.assertions[old_id]
-        if incumbent.valid_to is not None:
-            return
+        incumbent = self.assertions.get(old_id)
+        if incumbent is None or incumbent.valid_to is not None:
+            raise ConcurrencyConflict(
+                f"assertion {old_id} is not live; it was already superseded or "
+                "never written. Re-read with search() and re-propose."
+            )
         self.assertions[old_id] = incumbent.model_copy(
             update={"valid_to": at, "superseded_by": new_id}
         )
@@ -267,5 +346,6 @@ class FakeGraphStore:
 # `isinstance` check would not do: `@runtime_checkable` compares method *names*
 # and ignores signatures, arity and async-ness entirely.
 _llm: LLMClient = FakeLLM()
+_embedder: Embedder = FakeEmbedder()
 _vectors: VectorStore = FakeVectorStore()
 _graph: GraphStore = FakeGraphStore()

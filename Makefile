@@ -83,9 +83,16 @@ typecheck:
 # command line makes coverage resolve it after import, which reports
 # "module-not-measured" and silently drops real code from the report. RULES.md 5
 # leans on this number, so it has to be honest.
+# Unit and property: no I/O, no Docker, seconds. This is the inner loop and the
+# one CI's `gates` job runs.
 test:
 	$(UV) pytest tests/unit tests/property --cov
 
+# Everything, including the integration suite - which from S3.2 starts its own
+# pgvector container, so this needs a Docker daemon and pulls a 620 MB image the
+# first time. It is also the only target whose coverage number is the real one:
+# `test` alone cannot reach the store, and reporting 25% on a module the
+# integration suite covers fully would be a worse lie than not measuring it.
 test-all:
 	$(UV) pytest --cov
 

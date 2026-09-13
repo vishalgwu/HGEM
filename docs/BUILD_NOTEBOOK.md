@@ -1453,8 +1453,63 @@ async def supersede(self, old_id, new_id, at):
 ```
 Never `DELETE`. Ever.
 
+**Six corrections to this step, found by building it.**
+
+1. **`as_of` is not on the protocol yet, and the DONE WHEN needs it.** S1.7's
+   `VectorStore.search` has no such parameter, so "a point-in-time query with
+   `as_of`" could not be written. Added here rather than at the MCP layer,
+   because `MCP_INTEGRATION.md` §2.1 already publishes `as_of` on
+   `memory.search` and leaving it off the store would have meant a second
+   retrieval path later. It is **valid** time: supersession sets `valid_to`
+   (§2.3), so that is the axis a retired fact is recoverable on. Reconstructing
+   what the system *believed* on a date is the system axis and belongs with
+   `memory.timeline`.
+2. **The store cannot construct its own embedder.** §0.4 makes this module the
+   owner of write-side embedding, but `guardmem-core` importing a provider SDK
+   would invert the dependency the `LLMClient` protocol exists to prevent. An
+   `Embedder` protocol sits beside `VectorStore` in `base.py` and is injected.
+3. **The tenant is a constructor argument, not a method argument.** Every
+   statement runs inside a transaction with `SET LOCAL app.tenant_id` applied,
+   which the RLS policies from S3.1 read. `SET LOCAL` specifically: it reverts
+   at COMMIT, so a pooled connection cannot carry one tenant's setting to the
+   next checkout - which would be a cross-tenant read with no symptom. Binding
+   it at construction also leaves the protocol's signatures untouched.
+4. **A replayed `upsert` must be `ON CONFLICT DO NOTHING`, never `DO UPDATE`.**
+   S3.3 replays this call after a relay restart, and by then the row may
+   legitimately have been superseded. An overwrite would clear `valid_to`, drop
+   `superseded_by`, and return a fact the system had already retired - through
+   the front door of a *retry*. The same reasoning forces deterministic
+   provenance ids: `Provenance` carries no id of its own, so a `uuid4` would
+   make every replay insert a duplicate citation and `corroboration_count`
+   would start disagreeing with the evidence it summarises. They are `uuid5` of
+   `(assertion_id, source_hash, span)`.
+5. **The zero-row `UPDATE` in the step's snippet must raise, not pass.** As
+   written it is silent when the row is already retired - and that is the only
+   place a transposed `supersede(new, old)` can ever surface, since both
+   arguments are `AssertionId` and nothing static tells them apart. It raises
+   `ConcurrencyConflict`, which is also the right answer for the race it was
+   already handling and for a cross-tenant call that RLS makes match nothing.
+6. **`filters: dict[str, object]` is caller input reaching a WHERE clause.**
+   `RULES.md` §4 forbids string-built SQL, and a dict key interpolated as a
+   column name is how that rule gets broken by accident. The keys are a closed
+   vocabulary mapped onto columns; anything else raises.
+
 DONE WHEN: integration test (testcontainers Postgres) — write, search, supersede; the superseded
 row is absent from search results and present in a point-in-time query with `as_of`.
+
+Worth doing beyond the step, and it is what S3.1 deferred:
+`tests/fixtures/postgres.py` starts the pinned `pgvector` image, mounts the
+repository's own `infra/docker/initdb/` into it, and applies the schema with
+`alembic upgrade head` as a subprocess - so the container under test is
+provisioned by the files that ship, not by a copy written for tests. The fifteen
+S3.1 invariant tests stop skipping, CI gains an `integration` job, and
+`RULES.md` §5's "no skips on main" finally has something enforcing it.
+
+Verify the tests bite before believing them. Three mutants, each killed by
+exactly the test that claims to cover it: ignoring `as_of` kills the DONE WHEN;
+dropping `visible` from the filter kills the invisibility test; `DO UPDATE`
+instead of `DO NOTHING` kills the replay test. A green suite that no mutation
+turns red is measuring nothing.
 
 COMMIT: `feat(s3.2): pgvector store`
 

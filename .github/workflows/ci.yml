@@ -7,7 +7,11 @@
 # S1.2 acceptance check.
 #
 # Two jobs, because they answer different questions:
-#   gates  - does the code pass lint, types and tests?
+#   gates  - does the code pass lint, types and the fast tests?
+#   integration - do the invariants hold against a real Postgres? Split from
+#            `gates` because it pulls a container image and takes minutes rather
+#            than seconds, and because a lint failure should not wait on Docker
+#            to be reported. Added at S3.2.
 #   hooks  - does the pre-commit config itself work, and is the tree free of
 #            secrets? RULES.md 4 requires gitleaks AND detect-secrets in
 #            pre-commit *and* CI, and this is where the CI half is satisfied.
@@ -98,7 +102,51 @@ jobs:
         run: make typecheck
 
       - name: Test
+        # Unit and property only. The integration suite is its own job below -
+        # see `make test` vs `make test-all` in the Makefile.
         run: make test
+
+  integration:
+    name: integration (testcontainers Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # `RULES.md` §5: the integration suite is green with no skips on main. That
+    # sentence had nothing enforcing it until S3.2, because the tests skipped
+    # whenever no database was reachable and a runner never has one. They now
+    # start their own - `tests/fixtures/postgres.py` runs the pinned pgvector
+    # image, mounts the repository's real `infra/docker/initdb/` into it, and
+    # applies the schema with `alembic upgrade head`. No `services:` block, for
+    # that reason: a service container would be a second, hand-written copy of
+    # the dev stack, and the point is to exercise the one that ships.
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.8"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: integration
+
+      - name: Install Python 3.12
+        run: uv python install
+
+      - name: Install the workspace
+        run: uv sync --locked --dev
+
+      - name: Pre-pull the database image
+        # Outside the test timeout, and separately visible in the log. A 620 MB
+        # pull that fails inside a fixture reads as a mysterious timeout;
+        # failing here says "the registry was unreachable", which is what
+        # happened.
+        run: docker pull pgvector/pgvector:0.8.6-pg16
+
+      - name: Test
+        run: uv run pytest tests/integration -q
 
   hooks:
     name: pre-commit
