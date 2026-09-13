@@ -17,6 +17,74 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S2.2 — K-sample structured extraction.** `pipeline/l1_extract/extractor.py`
+  and `prompts/extract_memories/v1.md`: denoised text in, span-anchored
+  `MemoryCandidate`s out, plus the K samples Layer 3 will cluster.
+- **Sample 0 is canonical and is drawn at temperature 0**, which takes two calls
+  rather than the one the step's snippet makes. `LLMClient.complete` takes a
+  single temperature for all `n` samples, so `K > 1` draws `n=1` at 0.0 and then
+  `n=k-1` at 0.7. The snippet's `temperature=0.0 if k == 1 else 0.7` draws every
+  sample at 0.7, which leaves no canonical text and makes `MEMORY_ENGINE.md`
+  §3.1's minority-cluster drop — "a candidate that appears in zero clusters
+  containing sample 0's meaning" — a statement about nothing.
+- **`pipeline/l1_extract/span_linker.py`** — §1.3's rule, the exact-match half.
+  It lands a step early because `extract` cannot build a `MemoryCandidate`
+  without a `Provenance`, and a `Provenance` has no valid state without a span.
+  S2.3 adds the rapidfuzz fallback and invariant I1's property test; the
+  signature does not change. An empty `verbatim` returns `None` rather than
+  `(0, 0)`, because a zero-width span satisfies a `NOT NULL` constraint while
+  quoting nothing.
+- **`ExtractionContext`** — the five caller-owned fields grouped into one object
+  because they share a property: each is something the extraction model must
+  never be in a position to assert. A hallucinated `tenant_id` is a
+  tenant-isolation bug; a hallucinated `source_tier` lifts the cap `RULES.md`
+  §4 puts on auto-writable impact. `ExtractedFact` carries only subject,
+  predicate, object and verbatim, so the rest is unreachable by construction
+  rather than by validation.
+- **A short sample count is refused, not absorbed.** If the provider returns
+  fewer samples than asked for, K collapses toward 1 — and §3.1 sets
+  `H_norm := 0` at K=1, which is *maximum* confidence on that term. Absorbing it
+  would let a degraded provider widen the auto-write path, which
+  `ARCHITECTURE.md` §0 forbids in as many words. An unparseable sample fails the
+  whole extraction for the neighbouring reason: dropping one quietly makes the
+  entropy denominator a lie in the same direction.
+- **Canary spotlighting across every sample of every call**, not just the
+  canonical one — checking only sample 0 would leave K-1 completions unexamined.
+- `prompts/extract_memories/v1.md`, whose rules are tightened from the step's
+  draft in the directions that cost recall rather than precision: one claim per
+  fact, copy the verbatim character for character, and an empty result is
+  explicitly a valid answer, because a model that believes it must return
+  something will invent it.
+
+### Changed
+
+- **ADR-0006 amends `MEMORY_ENGINE.md` §0's `ExtractionResult`**, adding
+  `samples: list[list[ExtractedFact]]` and `dropped_unsourced: int`. Without the
+  first, the K samples §3.1 clusters have no route from Layer 1 to Layer 3 and
+  S5.1 would have to re-extract — K more calls, different samples, and replay
+  stops reproducing decisions. Without the second, the rule §1.3 calls the one
+  that "kills most confabulated facts" has an activation count nobody can see,
+  which is the failure §1.1 forbids one layer up in the same words. A validator
+  keeps `k_samples` and `len(samples)` in agreement, because a mismatch
+  normalises entropy against a sample set that was never drawn and produces a
+  plausible number in the right range.
+- **`RULES.md` §2.4's function cap now states that it counts the body, not the
+  docstring**, and `tests/unit/test_source_limits.py` enforces both caps. The
+  two readings had coexisted until this step made them contradict: §8 requires
+  every public function to document what it returns *and* raises, which no
+  function with seven parameters and five raise conditions can do inside 50
+  lines measured from `def`. The proof that the body reading is intended was
+  already in the tree — `llm/base.py::complete` sits at exactly 50 lines
+  measured from `def` while its body is the single token `...`. §0 of that
+  document says a rule nothing checks should be deleted from it, so the caps are
+  now a test rather than a script pasted into a terminal once per step.
+- **`tests/fixtures/strategy_primitives.py`** — the shared generative vocabulary
+  split out of `strategies.py`, which reached the 400-line cap exactly where the
+  previous step predicted it would.
+- **`tests/fixtures/extraction.py`** and `tests/unit/test_extractor_refusals.py`
+  — the extraction tests split along the seam between the path where nothing
+  goes wrong and everything the extractor refuses.
+
 - **S2.1 — the Layer-1 noise filter.** `pipeline/l1_extract/noise_filter.py`
   and `noise_rules.py`: the five drop classes of `MEMORY_ENGINE.md` §1.1, with
   deterministic rules settling the cheap majority and the ambiguous remainder

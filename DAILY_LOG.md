@@ -1433,6 +1433,149 @@ uncertainty. `ExtractionResult.dropped_noise` is filled from `len(result.dropped
 
 ---
 
+## 2026-09-12 — Day 2 · S2.2 (K-sample structured extraction)
+
+**Shipped**
+
+- `pipeline/l1_extract/extractor.py` — `ExtractionContext`, `ExtractionBatch`,
+  `extract()`. Two calls when K > 1: canonical at temperature 0, spread at 0.7.
+- `pipeline/l1_extract/span_linker.py` — §1.3's rule, exact-match half.
+- `prompts/extract_memories/v1.md`.
+- `ExtractedFact`, and two new fields on `ExtractionResult`, under **ADR-0006**.
+- `tests/unit/test_source_limits.py` — `RULES.md` §2.4's caps, enforced.
+- 107 new tests — **366 total, 100% coverage across 30 modules**, branches
+  included.
+
+**What broke / what I learned**
+
+- **The step's own snippet cannot produce the canonical sample it describes.**
+  `temperature=0.0 if k == 1 else 0.7` draws *every* sample at 0.7, while §1.2
+  says sample 0 is drawn at 0 and "the other K-1 exist only to estimate
+  uncertainty". `LLMClient.complete` takes one temperature for all `n` samples,
+  so the ladder needs two calls. It would have been easy not to notice: every
+  result-level assertion I wrote passes under the single-call version. What
+  breaks is one step removed — §3.1 drops "a candidate that appears in zero
+  clusters containing sample 0's meaning", and with no temperature-0 draw there
+  is no sample 0 to be about, only the first of five equally noisy ones. So the
+  test asserts the *calls*, not just their results.
+
+- **Two spec gaps in the same object, and the second one is why I wrote an
+  ADR rather than a workaround.** `ExtractionResult` as §0 declares it has
+  nowhere to put the K samples, so Layer 3 has nothing to cluster; and nowhere
+  to put the unsourced drop count, so §1.3's rule — the one the spec calls the
+  thing that "kills most confabulated facts" — has an activation count nobody
+  can see. That is exactly the failure §1.1 forbids one layer up, in the same
+  words. I could have derived the count as `len(samples[0]) - len(candidates)`,
+  and it would be true today and quietly false the moment anything else drops a
+  fact. A count should be counted.
+
+  Writing ADR-0006 took twenty minutes and forced me to write down the three
+  alternatives I had already half-rejected. Two of them were worse than I
+  thought: re-extracting at S5.1 costs K more calls *and* breaks replay, because
+  the samples would differ every run.
+
+- **A short sample count is the most dangerous thing a provider can do to this
+  pipeline, and the tolerant handling is the wrong one.** If a provider returns
+  three samples when asked for five, the obvious move is to use what came back.
+  Follow it through: K collapses toward 1, §3.1 sets `H_norm := 0` at K=1, and
+  zero entropy is *maximum* confidence on that term. A degraded provider would
+  make the system more confident, not less — and `ARCHITECTURE.md` §0 says
+  "degradation never widens the auto-write path" in as many words. So it raises,
+  retryably, and the proposal parks. I nearly wrote the tolerant version first.
+
+- **`span_linker.py` had to land a step early, and the reason is a type.**
+  `extract` returns `ExtractionResult`, which carries `MemoryCandidate`s, which
+  require a `Provenance`, which has no valid state without a span. There is no
+  version of S2.2 that defers span linking to S2.3. The exact-match half lands
+  here and S2.3 adds the fuzzy fallback to the same function — which is a
+  smaller change than moving code between modules would have been.
+
+- **Eleven parameters is what the naive signature costs, and the length cap is
+  what made me look at it.** `extract` needed content, llm, ontology, k, tier,
+  tenant, namespace, trace, source tier, captured_at, dropped_noise. I was about
+  to accept that. `RULES.md` §2.4 would not let the function fit, and the fix
+  that made it fit was also the right design: five of those eleven share a
+  property — each is something the model must never be in a position to assert —
+  and grouping them into `ExtractionContext` makes that property visible instead
+  of implied. A hallucinated `tenant_id` is a tenant-isolation bug; a
+  hallucinated `source_tier` lifts the cap `RULES.md` §4 puts on auto-writable
+  impact. The size limit was pointing at a design smell, which is what those
+  limits are for.
+
+- **Then the limit turned out to be ambiguous, and I had been enforcing the
+  wrong reading for two steps.** Measured from `def`, `extract` could not carry
+  the docstring §8 requires — seven parameters and five raise conditions do not
+  fit in 50 lines. I was about to add a wrapper function whose only purpose was
+  to hold a docstring, which is the point at which a rule is being gamed rather
+  than followed.
+
+  The evidence that settled it was already in the tree: `llm/base.py::complete`
+  sits at exactly 50 lines measured from `def` and its body is the single token
+  `...`. Under the strict reading the repository's own reference Protocol is at
+  the cap while containing no logic at all — so the strict reading makes §2.4 a
+  docstring-length limit, not the complexity signal it sits beside `C901` to be.
+  RULES §2.4 now says which it is.
+
+  And I stopped checking it by hand. §0 of that document is unambiguous — "if a
+  rule below isn't checkable by a linter, a test, or a CODEOWNERS review gate,
+  it's a suggestion" — and I had been pasting an AST script into a terminal once
+  per step, which is how the `strategies.py` breach went unnoticed until it was
+  predicted. `tests/unit/test_source_limits.py` runs it now, and it caught both
+  real breaches immediately.
+
+- **Both drift guards fired again, and both were right.** The property suite's
+  registry check caught `ExtractedFact`, `ExtractionBatch` and then
+  `ExtractionContext` the moment each appeared without a strategy. That guard
+  has now paid for itself at every step since S1.7.
+
+- **A test I wrote turned out to be unreachable, and the type system was why.**
+  I parametrised the short-sample refusal over "zero samples" and "one sample";
+  zero is not expressible, because `LLMResponse.samples` is `min_length=1`. The
+  only reachable short count is a partial one. Deleted rather than worked
+  around — a test for a state the types forbid is a test of the test.
+
+**Also fixed, found while checking claims**
+
+- `tests/fixtures/strategies.py` breached the 400-line cap exactly where
+  yesterday's log said it would, at the next step that added a schema. Split
+  into `strategy_primitives.py` (the vocabulary) and `strategies.py` (the
+  builders and the registry).
+- `tests/unit/test_extractor.py` reached 473 lines; split into the path where
+  nothing goes wrong and `test_extractor_refusals.py`, with the shared
+  scaffolding in `tests/fixtures/extraction.py`.
+
+**Still open**
+
+- **Temporal extraction is not implemented and it is a stated gap, not an
+  oversight.** `ExtractedFact` has no `valid_from` / `valid_to`, because the v1
+  prompt does not ask for them and a field the prompt never fills is a field
+  that is always `None`. §2.2(c)'s temporal-overlap check is the first real
+  consumer, so a v2 prompt belongs at **S4.3** — and a prompt change is a
+  semver-minor change that triggers the nightly eval gate (`RULES.md` §3).
+- `ExtractionResult.dropped_noise` arrives as an argument to `extract`. That is
+  the honest option of the two available, but it is a seam the orchestrator has
+  to remember; **S5.6** is where it gets wired, and where a forgotten count
+  would silently read as zero.
+- `GM_ANTHROPIC_API_KEY` is still blank. S2.2 runs entirely on fakes, so the
+  first step that genuinely needs it is now the first live extraction run — but
+  nothing in the suite will tell me it is missing until then.
+- Coverage still 100% against `fail_under = 85`; the raise to 90 is S7.2.
+- The dev stack is on 5433 / 6380 / 7475 / 7688 while `.env` says the defaults.
+  Harmless until S3.1; a trap the moment anything connects.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S2.3` — the span linker's fuzzy fallback. `link_span` already exists and its
+signature does not change; what is left is `rapidfuzz.fuzz.partial_ratio_alignment`
+with score ≥ 92, and the property test invariant I1 rests on: for any candidate
+with no matching substring, the pipeline emits `REJECT(UNSOURCED)` and never a
+stored assertion. `ExtractionResult.dropped_unsourced` already counts what the
+exact matcher rejects, so the fallback's effect will be visible as that number
+falling.
+
+---
+
 <!--
 Template for the next entry:
 

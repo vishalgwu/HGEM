@@ -47,7 +47,8 @@ guardmem-ai/
 │   │   ├── 0002-bitemporal-tombstones-over-hard-delete.md
 │   │   ├── 0003-write-ahead-accept-async-eval.md
 │   │   ├── 0004-semantic-entropy-as-confidence-primitive.md
-│   │   └── 0005-mcp-as-primary-agent-surface.md
+│   │   ├── 0005-mcp-as-primary-agent-surface.md
+│   │   └── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
@@ -65,7 +66,7 @@ guardmem-ai/
 │   │       ├── errors.py                # GuardMemError hierarchy → HTTP/MCP mapping
 │   │       ├── schemas/                 # S1.6; __init__.py re-exports the layer
 │   │       │   ├── base.py              # GMModel (extra=forbid/frozen/strict) + ObjectValue
-│   │       │   ├── candidate.py         # MemoryCandidate, ExtractionResult
+│   │       │   ├── candidate.py         # MemoryCandidate, ExtractedFact, ExtractionResult
 │   │       │   ├── entity.py            # Cardinality, Entity, StoredAssertion, Edge
 │   │       │   ├── verdict.py           # ImpactLevel, Conflict*, ConfidenceReport,
 │   │       │   │                        #   RiskVerdict, Decision, DecisionRecord
@@ -77,7 +78,7 @@ guardmem-ai/
 │   │       ├── prompts/                 # RULES 3: versioned prompts, never inline f-strings
 │   │       │   ├── loader.py            # S2.1; render(name, version, variables), frontmatter
 │   │       │   ├── classify_noise/v1.md # S2.1; the Layer-1 noise classifier
-│   │       │   ├── extract_memories/v1.md
+│   │       │   ├── extract_memories/v1.md   # S2.2; K-sample extraction
 │   │       │   ├── adjudicate_conflict/v1.md
 │   │       │   └── review_brief/v1.md
 │   │       ├── ontology/                # tenant starter packs, loaded by schemas/ontology.py
@@ -85,10 +86,10 @@ guardmem-ai/
 │   │       ├── pipeline/                # LAYER 1-3
 │   │       │   ├── orchestrator.py      # MemoryPipeline.run() — the single entrypoint
 │   │       │   ├── l1_extract/
-│   │       │   │   ├── extractor.py     # structured-output extraction, K-sampling
+│   │       │   │   ├── extractor.py     # S2.2; ExtractionContext, K-sampling, span link
 │   │       │   │   ├── noise_filter.py  # S2.1; rules tier + one batched FAST call
 │   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
-│   │       │   │   └── span_linker.py   # candidate → verbatim source span offsets
+│   │       │   │   └── span_linker.py   # S2.2 exact match; S2.3 adds the fuzzy fallback
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # entity/predicate ontology validation
 │   │       │   │   ├── conflict.py      # NLI contradiction + cardinality + temporal
@@ -240,8 +241,10 @@ guardmem-ai/
 │   ├── security/                        # injection corpus regression
 │   ├── fixtures/                        # a package, so mypy resolves one module name
 │   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7)
+│   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
-│   │   └── strategies.py                # hypothesis strategies, one per schema
+│   │   ├── strategies.py                # hypothesis strategies, one per schema
+│   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT + all_schema_models()
 │
 ├── scripts/

@@ -19,11 +19,10 @@ a strategy cannot go quietly untested.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from hypothesis import strategies as st
 
 from guardmem_core.llm.base import LLMResponse, Tier
+from guardmem_core.pipeline.l1_extract.extractor import ExtractionBatch, ExtractionContext
 from guardmem_core.pipeline.l1_extract.noise_filter import (
     NoiseClassification,
     NoiseVerdict,
@@ -42,6 +41,7 @@ from guardmem_core.schemas import (
     DroppedTurn,
     Edge,
     Entity,
+    ExtractedFact,
     ExtractionResult,
     GMModel,
     ImpactLevel,
@@ -62,80 +62,30 @@ from guardmem_core.schemas import (
     TurnRole,
     WriteReceipt,
 )
-from guardmem_core.types import (
-    AssertionId,
-    CandidateId,
-    EntityId,
-    Namespace,
-    ReviewerId,
-    ReviewTaskId,
-    TenantId,
-    TraceId,
-    TurnId,
-)
 
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
-# --- primitives ------------------------------------------------------------
-
-_TEXT = st.text(max_size=32)
-_ID = st.text(min_size=1, max_size=24)
-_UNIT = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
-_COSINE = st.floats(min_value=-1.0, max_value=1.0, allow_nan=False, allow_infinity=False)
-_ANY_FLOAT = st.floats(allow_nan=False, allow_infinity=False)
-
-_ASSERTION_IDS = _ID.map(AssertionId)
-_CANDIDATE_IDS = _ID.map(CandidateId)
-_ENTITY_IDS = _ID.map(EntityId)
-_NAMESPACES = _ID.map(Namespace)
-_REVIEWER_IDS = _ID.map(ReviewerId)
-_REVIEW_TASK_IDS = _ID.map(ReviewTaskId)
-_TENANT_IDS = _ID.map(TenantId)
-_TRACE_IDS = _ID.map(TraceId)
-_TURN_IDS = _ID.map(TurnId)
-
-# Naive and UTC-aware both, because pydantic serialises them differently ("...Z"
-# or not) and both have to come back as what they were. Sub-minute offsets are
-# not generated: ISO-8601 cannot represent them and no store here emits one.
-_WHEN = st.datetimes(timezones=st.one_of(st.none(), st.just(UTC)))
-
-# Only what survives a JSON round trip. A `datetime` nested inside one would
-# validate, serialise to a string and come back a string - see `schemas/base.py`
-# and the test pinning it in tests/unit/test_schema_models.py.
-_JSON_VALUE = st.recursive(
-    st.none() | st.booleans() | st.integers() | _ANY_FLOAT | st.text(max_size=16),
-    lambda children: (
-        st.lists(children, max_size=3) | st.dictionaries(st.text(max_size=8), children, max_size=3)
-    ),
-    max_leaves=5,
+from fixtures.strategy_primitives import (
+    _ANY_FLOAT,
+    _ASSERTION_IDS,
+    _CANDIDATE_IDS,
+    _COSINE,
+    _ENTITY_IDS,
+    _ID,
+    _JSON_OBJECT,
+    _NAMESPACES,
+    _OBJECT_VALUE,
+    _REVIEW_TASK_IDS,
+    _REVIEWER_IDS,
+    _SPAN,
+    _TENANT_IDS,
+    _TEXT,
+    _TRACE_IDS,
+    _TURN_IDS,
+    _UNIT,
+    _WHEN,
+    _ordered_datetimes,
 )
-_JSON_OBJECT = st.dictionaries(st.text(max_size=8), _JSON_VALUE, max_size=3)
-
-# `ObjectValue`: str | float | bool | dict. A list is not a member, by design.
-_OBJECT_VALUE = st.one_of(_TEXT, _ANY_FLOAT, st.booleans(), _JSON_OBJECT)
-
-# Non-negative and strictly increasing, as `Provenance` requires.
-_SPAN = st.tuples(
-    st.integers(min_value=0, max_value=10_000),
-    st.integers(min_value=1, max_value=2_000),
-).map(lambda pair: (pair[0], pair[0] + pair[1]))
-
-
-@st.composite
-def _ordered_datetimes(draw: st.DrawFn) -> tuple[datetime, datetime]:
-    """Two datetimes in order, and comparable with each other.
-
-    Both are drawn with the same tz-awareness on purpose: Python raises
-    `TypeError` comparing a naive datetime with an aware one, so a mixed pair
-    would crash the sort here rather than exercise the validator.
-    """
-    tz_strategy = draw(st.sampled_from([st.none(), st.just(UTC)]))
-    pair = draw(st.lists(st.datetimes(timezones=tz_strategy), min_size=2, max_size=2))
-    pair.sort()
-    return pair[0], pair[1]
-
-
-# --- models ----------------------------------------------------------------
 
 _PROVENANCE = st.builds(
     Provenance,
@@ -268,6 +218,37 @@ _PROMPT_SPECS = st.builds(
     changelog=_ID,
 )
 
+_EXTRACTED_FACTS = st.builds(
+    ExtractedFact,
+    subject=_ID,
+    predicate=_ID,
+    object=_OBJECT_VALUE,
+    verbatim=st.text(max_size=64),
+)
+
+
+@st.composite
+def _extraction_results(draw: st.DrawFn) -> ExtractionResult:
+    """A result whose `k_samples` agrees with the sample sets it carries.
+
+    Drawing the two independently would fail the validator almost every time,
+    and a strategy that mostly generates invalid input tests the validator
+    rather than the model. The agreement is derived here for the same reason
+    `_ordered_datetimes` exists.
+    """
+    samples = draw(st.lists(st.lists(_EXTRACTED_FACTS, max_size=2), min_size=1, max_size=3))
+    return ExtractionResult(
+        candidates=draw(st.lists(_memory_candidates(), max_size=2)),
+        samples=samples,
+        k_samples=len(samples),
+        dropped_noise=draw(st.integers(min_value=0, max_value=100)),
+        dropped_unsourced=draw(st.integers(min_value=0, max_value=100)),
+        tokens_in=draw(st.integers(min_value=0, max_value=10_000)),
+        tokens_out=draw(st.integers(min_value=0, max_value=10_000)),
+        cache_hit=draw(st.booleans()),
+    )
+
+
 SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
@@ -284,15 +265,17 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     RenderedPrompt: st.builds(RenderedPrompt, spec=_PROMPT_SPECS, text=_TEXT, version_id=_ID),
     Provenance: _PROVENANCE,
     MemoryCandidate: _memory_candidates(),
-    ExtractionResult: st.builds(
-        ExtractionResult,
-        candidates=st.lists(_memory_candidates(), max_size=3),
-        k_samples=st.integers(min_value=1, max_value=5),
-        dropped_noise=st.integers(min_value=0, max_value=100),
-        tokens_in=st.integers(min_value=0, max_value=10_000),
-        tokens_out=st.integers(min_value=0, max_value=10_000),
-        cache_hit=st.booleans(),
+    ExtractedFact: _EXTRACTED_FACTS,
+    ExtractionContext: st.builds(
+        ExtractionContext,
+        tenant_id=_TENANT_IDS,
+        namespace=_NAMESPACES,
+        trace_id=_TRACE_IDS,
+        source_tier=st.sampled_from(SourceTier),
+        captured_at=_WHEN,
     ),
+    ExtractionBatch: st.builds(ExtractionBatch, facts=st.lists(_EXTRACTED_FACTS, max_size=3)),
+    ExtractionResult: _extraction_results(),
     Entity: st.builds(
         Entity, entity_id=_ENTITY_IDS, tenant_id=_TENANT_IDS, type=_ID, canonical_name=_TEXT
     ),

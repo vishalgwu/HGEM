@@ -57,10 +57,18 @@ class MemoryCandidate(_M):
     prompt_version: str
     trace_id: str
 
+class ExtractedFact(_M):                   # what a model is allowed to assert
+    subject: str
+    predicate: str
+    object: str | float | bool | dict
+    verbatim: str = Field(max_length=2000)
+
 class ExtractionResult(_M):
     candidates: list[MemoryCandidate]
+    samples: list[list[ExtractedFact]]     # draw order; sample 0 is canonical (ADR-0006)
     k_samples: int
     dropped_noise: int
+    dropped_unsourced: int                 # facts §1.3 rejected for want of a span (ADR-0006)
     tokens_in: int
     tokens_out: int
     cache_hit: bool
@@ -149,6 +157,11 @@ Every candidate must resolve to a verbatim span. The extractor is asked to retur
 substring; `span_linker` then locates it in the source with exact match, falling back to fuzzy
 alignment (rapidfuzz, ratio ≥ 92) and rejecting below that. **No span → `REJECT(reason=UNSOURCED)`.**
 This single rule kills most confabulated facts before any scoring happens.
+
+Every rejection is *counted*, into `ExtractionResult.dropped_unsourced`, for the
+same reason §1.1 counts noise drops: a rule whose activation count cannot be seen
+cannot be tuned, and a span linker that quietly stopped matching would look like
+a drop in recall rather than a bug. See ADR-0006.
 
 ---
 

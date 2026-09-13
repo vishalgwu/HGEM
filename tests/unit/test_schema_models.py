@@ -211,7 +211,14 @@ def test_freezing_makes_a_model_hashable_only_if_its_fields_are() -> None:
     assert isinstance(hash(_PROVENANCE), int)
 
     empty_extraction = ExtractionResult(
-        candidates=[], k_samples=1, dropped_noise=0, tokens_in=0, tokens_out=0, cache_hit=False
+        candidates=[],
+        samples=[[]],
+        k_samples=1,
+        dropped_noise=0,
+        dropped_unsourced=0,
+        tokens_in=0,
+        tokens_out=0,
+        cache_hit=False,
     )
     with pytest.raises(TypeError, match="unhashable"):
         hash(empty_extraction)

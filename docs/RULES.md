@@ -95,6 +95,18 @@ Retries only on `retryable=True`, with jittered exponential backoff and a hard a
 
 ### 2.4 Structure & Naming
 - Module ≤ 400 lines; function ≤ 50 lines; cyclomatic complexity ≤ 10 (ruff `C901`).
+  **The function cap counts the body, not the docstring.** Both readings were in
+  use until S2.2 made them contradict each other: §8 requires every public
+  function to document what it returns *and what it raises*, and a function with
+  seven parameters and five raise conditions cannot satisfy that inside 50 lines
+  measured from `def`. The proof that the body reading is the intended one is in
+  this repository — `llm/base.py::complete` sits at exactly 50 lines measured
+  from `def` while its body is the single token `...`, so the strict reading
+  makes the rule a docstring-length limit rather than a complexity signal, which
+  is what it sits beside `C901` to be. Module length is measured plainly, in
+  lines, because a long file is a navigation cost whatever is in it.
+  Both are enforced by `tests/unit/test_source_limits.py`, not by convention —
+  §0 of this document says a rule nothing checks should be deleted from it.
 - Dependency direction is enforced by `import-linter` contracts (see `PROJECT_TREE.md` §Ownership).
 - No global mutable state. Settings come from a single `pydantic-settings` object, injected.
 - No business logic in routers. A router validates, calls one core function, and shapes the response.

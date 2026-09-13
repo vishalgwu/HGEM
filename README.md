@@ -4,12 +4,12 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: Day 1 complete, and the first pipeline stage is in.** The design
-> suite, the toolchain and the gates are in place; `guardmem_core` carries its
-> typed foundation — settings, domain ids, the error hierarchy, the Pydantic
-> schema layer, the store and LLM protocols — and, as of S2.1, **Layer 1's noise
-> filter**, the first code that actually decides something. Nothing yet
-> extracts, validates, scores or decides *a fact*. Every performance and quality
+> **Status: Day 1 complete, and Layer 1 extracts.** The design suite, the
+> toolchain and the gates are in place; `guardmem_core` carries its typed
+> foundation — settings, domain ids, the error hierarchy, the Pydantic schema
+> layer, the store and LLM protocols — and, as of S2.1 – S2.2, **Layer 1's noise
+> filter and K-sample extractor**: raw text in, span-anchored candidates out.
+> Nothing yet validates, scores or decides one. Every performance and quality
 > figure below is a **target**, not a measurement — see [Status](#status) before
 > quoting any number.
 
@@ -168,9 +168,15 @@ is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
 drop 17 turns at **precision 1.000** and settle 30 of 40 turns without a model
 call. That is a unit-test gate on one small corpus, not a production figure, and
 two of the five drop classes are deliberately under-detected until the embedder
-(S3.2) and the ontology (S3.5) exist. Nothing downstream of it exists yet:
-nothing extracts, validates, scores or decides. The next step is S2.2, K-sample
-structured extraction.
+(S3.2) and the ontology (S3.5) exist.
+
+S2.2 adds the extractor: K samples with a temperature-0 canonical draw, each
+proposed fact anchored to a verbatim span of the source, and anything that
+cannot be located in the source rejected as unsourced and counted. That span
+rule is the anti-confabulation mechanism, and it is not a judgement — a model
+that invents a fact must also invent the sentence it came from. Nothing
+downstream exists yet: nothing validates, scores or decides. The next step is
+S2.3, the span linker's fuzzy fallback.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

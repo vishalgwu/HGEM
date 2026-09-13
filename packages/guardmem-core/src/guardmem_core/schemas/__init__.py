@@ -24,7 +24,11 @@ guessed at now: `Rule` and `PolicyPack` (S12.2, the policy engine), `Predicate`
 from __future__ import annotations
 
 from guardmem_core.schemas.base import GMModel, ObjectValue
-from guardmem_core.schemas.candidate import ExtractionResult, MemoryCandidate
+from guardmem_core.schemas.candidate import (
+    ExtractedFact,
+    ExtractionResult,
+    MemoryCandidate,
+)
 from guardmem_core.schemas.entity import Cardinality, Edge, Entity, StoredAssertion
 from guardmem_core.schemas.policy import Obligation, ObligationKind
 from guardmem_core.schemas.receipt import (
@@ -71,6 +75,7 @@ __all__ = [
     "DroppedTurn",
     "Edge",
     "Entity",
+    "ExtractedFact",
     "ExtractionResult",
     "GMModel",
     "ImpactLevel",

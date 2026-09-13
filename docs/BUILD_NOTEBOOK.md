@@ -1162,8 +1162,68 @@ async def extract(content: str, *, ontology: Ontology, k: int, llm: LLMClient) -
 ```
 Sample 0 at temperature 0 is canonical; the rest exist only for entropy (MEMORY_ENGINE 1.2).
 
+**Nine corrections to this step, found by building it.**
+
+1. **The snippet's single call cannot produce a temperature-0 canonical
+   sample.** `temperature=0.0 if k == 1 else 0.7` draws *every* sample at 0.7,
+   while §1.2 says sample 0 is drawn at 0 and "the other K-1 exist only to
+   estimate uncertainty". `LLMClient.complete` takes one temperature for all `n`
+   samples, so `K > 1` needs **two** calls: `n=1` at 0.0, then `n=k-1` at 0.7.
+   Without that there is no canonical text, and §3.1's minority-cluster drop -
+   "a candidate that appears in zero clusters containing sample 0's meaning" -
+   has no sample 0 to be about.
+2. **`samples.raw_text` does not exist.** `LLMResponse` carries
+   `samples: list[str]`; check the canary across every sample of every call. A
+   check on the canonical sample alone leaves K-1 completions unexamined, which
+   is where a patient injection would aim.
+3. **`Ontology` does not exist and must not be invented here.** S3.5 owns that
+   shape and its loader. Extraction needs only the rendered text, so the
+   parameter is `ontology_yaml: str`. Predicates are not validated here either:
+   an unknown predicate is S4.1's schema gate sending the candidate to
+   quarantine (§2.1), and doing it twice would give the ontology two homes.
+4. **`ExtractionResult` cannot carry what this step produces.** The K samples
+   have nowhere to live, so Layer 3 has nothing to cluster; and the unsourced
+   drop count has nowhere to live, so §1.3's rule has an invisible activation
+   count. Both are added, with `ExtractedFact`, under **ADR-0006** - which is
+   the only legitimate way to change a schema `MEMORY_ENGINE.md` §0 owns.
+5. **`span_linker.py` has to land here, not at S2.3.** `extract` cannot build a
+   `MemoryCandidate` without a `Provenance`, and a `Provenance` has no valid
+   state without a span. The exact-match half lands with this step; S2.3 adds
+   the fuzzy fallback and invariant I1's property test, and the signature does
+   not change.
+6. **A short sample count must be refused, not absorbed.** If the provider
+   returns fewer samples than asked for, K collapses toward 1 - and §3.1 sets
+   `H_norm := 0` at K=1, which is *maximum* confidence on that term. Absorbing
+   it would let a degraded provider widen the auto-write path, which
+   `ARCHITECTURE.md` §0 forbids in as many words.
+7. **An unparseable sample fails the whole extraction.** `RULES.md` §2.1 is
+   explicit that `extra="forbid"` "matters most on LLM structured output", and
+   dropping a bad sample quietly would make the entropy denominator a lie in
+   the same direction a short count does.
+8. **The caller-owned fields want to be one object.** Eleven parameters is what
+   the naive signature costs, and `RULES.md` §2.4's length cap is what surfaced
+   it. `ExtractionContext` groups the five that share a property: each is
+   something the model must never be in a position to assert. A hallucinated
+   `tenant_id` is a tenant-isolation bug; a hallucinated `source_tier` lifts the
+   cap §4 puts on auto-writable impact.
+9. **§2.4's function cap was ambiguous and now is not.** Measured from `def`, no
+   function with seven parameters and five raise conditions can satisfy §8's
+   docstring requirement - and `llm/base.py::complete` sits at exactly 50 lines
+   with a one-token body, which shows the strict reading makes it a
+   docstring-length limit rather than the complexity signal it sits beside
+   `C901` to be. RULES §2.4 now states that the cap counts the body, and
+   `tests/unit/test_source_limits.py` enforces both caps so they stop being
+   checked by hand.
+
 DONE WHEN: with `FakeLLM` returning fixed samples, `extract()` returns K sample sets and the
 canonical candidate list; a canary in the output raises `InjectionDetected`.
+
+Worth doing beyond the step: assert the *calls*, not only their results. A single
+call at 0.7 satisfies every result-level assertion while leaving no canonical
+sample, so the temperature ladder needs a test of its own. And write the
+smuggled-field cases - a reply carrying `tenant_id`, `source_hash` or
+`confidence` - because "the model may only assert four things" is a security
+property, not a schema detail.
 
 COMMIT: `feat(s2.2): k-sample structured extraction`
 
@@ -1174,6 +1234,13 @@ COMMIT: `feat(s2.2): k-sample structured extraction`
 WHERE: `pipeline/l1_extract/span_linker.py`
 TIME: 45 min
 WHY: no span, no write. This single rule kills most confabulation before scoring.
+
+NOTE: the module already exists. `link_span` landed at S2.2 holding the
+exact-match half, because `extract` cannot build a `MemoryCandidate` without a
+`Provenance` and a `Provenance` has no valid state without a span. What is left
+for this step is the rapidfuzz fallback below and the property test - the
+signature does not change, and `ExtractionResult.dropped_unsourced` already
+counts what the exact matcher rejects.
 
 DO:
 ```python
