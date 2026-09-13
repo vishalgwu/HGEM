@@ -17,6 +17,70 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S2.3 — the span linker's fuzzy fallback, and invariant I1's property
+  suite.** `link_span` tries an exact match, then
+  `rapidfuzz.partial_ratio_alignment` at score ≥ 92 as `MEMORY_ENGINE.md` §1.3
+  specifies, and Layer 1 is complete: raw turns in, span-anchored candidates out.
+- **A fuzzy span is snapped to whole words and stripped of surrounding
+  whitespace before it is stored.** The aligner optimises a similarity score,
+  not readability: measured, the claim `allergic to penicilin` scores 95.24 and
+  its raw span is `allergic to penicilli`, truncated mid-word. The reviewer's
+  highlight is rendered from `source_span` (`DESIGN_SYSTEM.md` §3.2), and half a
+  word is not a quote a human can act on. Widening is safe in the only direction
+  that matters — the result still contains the matched region, so it cannot turn
+  a true citation into a false one.
+- **`tests/property/test_i1_sourced_writes.py`** — the invariant, at the
+  boundary where it is actually enforced. Neither `REJECT` nor a store exists
+  yet, so the literal form of I1 has to wait for S5.4; what can be asserted
+  today is stronger than a policy anyway, because it holds by construction:
+  `MemoryCandidate` requires a `Provenance`, `Provenance` requires a span, and
+  `link_span` is the only thing that makes one. Plus the conservation law that
+  makes the rule observable — candidates plus `dropped_unsourced` always equal
+  the facts the model proposed.
+- **`tests/unit/test_layer1_end_to_end.py`** — the notebook's END OF DAY 2
+  CHECK, as a test rather than a manual look. It composes the noise filter and
+  the extractor, which is what makes the seam between them visible: the document
+  the spans index into is the *denoised* one, so a caller that joins the kept
+  turns differently here and in S5.6 would put every stored span a few
+  characters off — onto real text, which is why it would not look like a bug.
+
+### Fixed
+
+- **A blank `verbatim` produced a span that quoted nothing.** `" "` is a
+  substring of almost any source, so the exact pass found it and returned a
+  one-character span of whitespace — non-empty, so `Provenance` accepted it, and
+  a citation of nothing, which `RULES.md` §1.1 treats as no span at all. The
+  fuzzy path already refused it, so the two halves of one function disagreed
+  about the same input. **Found by the I1 property test**: the hand-written case
+  that was supposed to cover this used three spaces, which are not a substring
+  of the test source, so it took the fuzzy path and passed for the wrong reason.
+
+### Changed
+
+- **ADR-0007 amends `MEMORY_ENGINE.md` §0's `Provenance`.** `verbatim` is now
+  the *source* text at the span, never the model's claim — its own contract
+  already required that ("what the reviewer reads and what NLI compares against,
+  so it is the text itself and never a paraphrase"), and once matching is fuzzy
+  the two are different strings. A `verbatim` that disagreed with its span would
+  show a reviewer one thing and highlight another, and feed §2.2's NLI a
+  paraphrase. `alignment: float = 1.0` records how far the claim was from what
+  was stored, which is the input §3.2's fuzzy-match penalty needs and which
+  cannot be recovered later — with `verbatim` being the source text, comparing
+  the two returns 1.0 by construction.
+- `link_span` returns a `SpanMatch` rather than a bare tuple, because the caller
+  now needs the span, the text at it, and the alignment.
+- **No minimum-length guard on fuzzy matches, and that was measured rather than
+  assumed.** At 92 the threshold is self-limiting on short strings: one wrong
+  character in a three-character needle scores 67, and `hivez` against a source
+  containing `hives` scores 80. An unspecified extra rule would have been a
+  guess dressed as caution.
+- `_snap` is total, with no unreachable "matched only whitespace" branch.
+  Reaching one would need the aligner to return an all-whitespace window at
+  score ≥ 92, and the score *is* the similarity between needle and window — a
+  non-blank needle scores 0 against a blank one, and a blank needle is refused
+  before the call. The invariant is asserted over 500 generated examples instead
+  of guarded by code that cannot run.
+
 - **S2.2 — K-sample structured extraction.** `pipeline/l1_extract/extractor.py`
   and `prompts/extract_memories/v1.md`: denoised text in, span-anchored
   `MemoryCandidate`s out, plus the K samples Layer 3 will cluster.

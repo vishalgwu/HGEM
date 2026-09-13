@@ -247,8 +247,8 @@ def _to_candidates(
     candidates: list[MemoryCandidate] = []
     unsourced = 0
     for fact in facts:
-        span = link_span(fact.verbatim, content)
-        if span is None:
+        match = link_span(fact.verbatim, content)
+        if match is None:
             unsourced += 1
             continue
         candidates.append(
@@ -266,9 +266,13 @@ def _to_candidates(
                 object=fact.object,
                 provenance=Provenance(
                     source_hash=source_hash,
-                    source_span=span,
+                    source_span=match.span,
                     source_tier=context.source_tier,
-                    verbatim=fact.verbatim,
+                    # The SOURCE text, not `fact.verbatim`. ADR-0007: a
+                    # reviewer's quote and their highlight are rendered from
+                    # different fields and must not be able to disagree.
+                    verbatim=match.text,
+                    alignment=match.alignment,
                     captured_at=context.captured_at,
                 ),
                 extracted_by=extracted_by,

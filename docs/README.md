@@ -7,14 +7,14 @@ Every durable decision must have an auditable receipt.
 
 **Status: the build has started.** The repository was reset to a documentation
 baseline on September 9, 2026. `BUILD_NOTEBOOK.md` Day 1 is complete
-(S1.1 - S1.7) and Layer 1 is built (S2.1 - S2.2). The toolchain and the gates are
-real - `make lint`, `make typecheck`, `make test`, the pre-commit hooks and
+(S1.1 - S1.7), and Layer 1 is complete (S2.1 - S2.3). The toolchain and the gates
+are real - `make lint`, `make typecheck`, `make test`, the pre-commit hooks and
 GitHub Actions all run today - and so is the typed foundation of `guardmem_core`:
 settings, domain ids, the error hierarchy, the Pydantic schema layer, the store
-and LLM protocols with in-memory fakes, the versioned prompt loader, and Layer
-1's noise filter and K-sample extractor. Nothing downstream exists: nothing
-validates, scores or decides. The next step is S2.3, the span linker's fuzzy
-fallback.
+and LLM protocols with in-memory fakes, the versioned prompt loader, and the
+noise filter, K-sample extractor and span linker that make up Layer 1. Nothing
+downstream exists: nothing validates, scores or decides. The next step is S3.1,
+the initial migration.
 
 Everything in this directory remains specification. Nothing here is evidence of
 an implemented feature; see "How to use this baseline" below.
@@ -55,7 +55,7 @@ D4E49FEFFB9FA1A5325D1E9AE9AF530604F871E9EA8327998EFE4902161357CD
 | [PROJECT_TREE.md](PROJECT_TREE.md) | Planned repository layout to build incrementally |
 | [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | Planned agent tools, resources, prompts, and authentication contracts |
 | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) | Dashboard and human review interface requirements |
-| [Architecture decisions](adr/) | Rationale for dual stores, bitemporal history, async evaluation, entropy, MCP, and the S2.2 amendment to `ExtractionResult` |
+| [Architecture decisions](adr/) | Rationale for dual stores, bitemporal history, async evaluation, entropy, MCP, and the Day-2 amendments to `ExtractionResult` and `Provenance` |
 | [Incident runbooks](runbooks/) | Draft response procedures for poisoning, review backlogs, and provider outages |
 
 The diagrams illustrate distinct parts of this design:

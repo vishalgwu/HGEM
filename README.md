@@ -4,11 +4,12 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: Day 1 complete, and Layer 1 extracts.** The design suite, the
-> toolchain and the gates are in place; `guardmem_core` carries its typed
-> foundation — settings, domain ids, the error hierarchy, the Pydantic schema
-> layer, the store and LLM protocols — and, as of S2.1 – S2.2, **Layer 1's noise
-> filter and K-sample extractor**: raw text in, span-anchored candidates out.
+> **Status: Days 1 and 2 complete — Layer 1 works end to end.** The design
+> suite, the toolchain and the gates are in place; `guardmem_core` carries its
+> typed foundation — settings, domain ids, the error hierarchy, the Pydantic
+> schema layer, the store and LLM protocols — and the whole of **Layer 1**:
+> noise filter, K-sample extractor, span linker. Raw turns in, span-anchored
+> candidates out, with anything the source cannot support rejected and counted.
 > Nothing yet validates, scores or decides one. Every performance and quality
 > figure below is a **target**, not a measurement — see [Status](#status) before
 > quoting any number.
@@ -170,13 +171,17 @@ call. That is a unit-test gate on one small corpus, not a production figure, and
 two of the five drop classes are deliberately under-detected until the embedder
 (S3.2) and the ontology (S3.5) exist.
 
-S2.2 adds the extractor: K samples with a temperature-0 canonical draw, each
-proposed fact anchored to a verbatim span of the source, and anything that
-cannot be located in the source rejected as unsourced and counted. That span
-rule is the anti-confabulation mechanism, and it is not a judgement — a model
-that invents a fact must also invent the sentence it came from. Nothing
-downstream exists yet: nothing validates, scores or decides. The next step is
-S2.3, the span linker's fuzzy fallback.
+S2.2 and S2.3 add the extractor and the span linker: K samples with a
+temperature-0 canonical draw, each proposed fact anchored to a verbatim span of
+the source, and anything the source cannot support rejected as unsourced and
+counted. That span rule is the anti-confabulation mechanism, and it is not a
+judgement — a model that invents a fact must also invent the sentence it came
+from, and an invented sentence is not in the source. It is enforced by
+construction rather than by policy: a candidate requires provenance, provenance
+requires a span, and the linker is the only thing that makes one.
+
+Nothing downstream exists yet: nothing validates, scores or decides. The next
+step is S3.1, the initial migration — the first code that touches a database.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

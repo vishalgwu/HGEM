@@ -55,7 +55,17 @@ class Provenance(GMModel):
         source_tier: Trust tier of the source.
         verbatim: The exact text the claim rests on, capped at 2000 characters
             by the spec. This is what the reviewer reads and what NLI compares
-            against, so it is the text itself and never a paraphrase.
+            against, so it is the text itself and never a paraphrase - and from
+            S2.3 that is enforced by construction: `span_linker` returns the
+            *source* text at the span it found, not the model's claim, so
+            `source[source_span] == verbatim` always (ADR-0007).
+        alignment: How closely the model quoted, normalised to [0, 1]. Exactly
+            1.0 on an exact match, which is what every provenance meant before
+            this field existed, hence the default. Below 1.0 says the model
+            paraphrased its own citation - a grounding signal in its own right,
+            and the input `MEMORY_ENGINE.md` §3.2's fuzzy-match penalty needs.
+            It cannot be recovered later: `verbatim` is the source text, so
+            comparing the two would return 1.0 by construction.
         captured_at: When the source was captured.
     """
 
@@ -63,6 +73,7 @@ class Provenance(GMModel):
     source_span: tuple[int, int]
     source_tier: SourceTier
     verbatim: str = Field(max_length=2000)
+    alignment: float = Field(default=1.0, ge=0.0, le=1.0)
     captured_at: datetime
 
     @model_validator(mode="after")

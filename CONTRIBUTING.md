@@ -2,8 +2,8 @@
 
 > **Status: early build.** `guardmem_core` now carries settings, domain ids, the
 > error hierarchy, the schema layer, the store and LLM protocols, the versioned
-> prompt loader, and Layer 1 end to end — noise filter and K-sample extractor
-> (S1.1 – S2.2). The gates around it have been real since S1.2 —
+> prompt loader, and Layer 1 end to end — noise filter, K-sample extractor and
+> span linker (S1.1 – S2.3). The gates around it have been real since S1.2 —
 > `make lint`, `make typecheck`, `make test`, the pre-commit hooks and CI all
 > run today, at 100% branch coverage. The suite-level gates below (integration,
 > contract, e2e, eval) become enforceable at the step that creates them. They

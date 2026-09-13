@@ -48,7 +48,8 @@ guardmem-ai/
 │   │   ├── 0003-write-ahead-accept-async-eval.md
 │   │   ├── 0004-semantic-entropy-as-confidence-primitive.md
 │   │   ├── 0005-mcp-as-primary-agent-surface.md
-│   │   └── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
+│   │   ├── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
+│   │   └── 0007-provenance-records-its-span-alignment.md
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
@@ -89,7 +90,7 @@ guardmem-ai/
 │   │       │   │   ├── extractor.py     # S2.2; ExtractionContext, K-sampling, span link
 │   │       │   │   ├── noise_filter.py  # S2.1; rules tier + one batched FAST call
 │   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
-│   │       │   │   └── span_linker.py   # S2.2 exact match; S2.3 adds the fuzzy fallback
+│   │       │   │   └── span_linker.py   # S2.3; SpanMatch, exact then fuzzy >= 92, snapped
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # entity/predicate ontology validation
 │   │       │   │   ├── conflict.py      # NLI contradiction + cardinality + temporal
@@ -234,6 +235,8 @@ guardmem-ai/
 │   └── profiles/{p95_targets.yaml}
 │
 ├── tests/                                # in scope for `make typecheck` from S1.7
+│   │                                    #   RULES 2.4 size caps enforced by
+│   │                                    #   unit/test_source_limits.py (S2.2)
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
 │   ├── integration/                     # testcontainers: pg, neo4j, redis
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas

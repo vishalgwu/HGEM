@@ -1253,12 +1253,72 @@ def link_span(verbatim: str, source: str) -> tuple[int, int] | None:
     return None       # caller REJECTs with reason=UNSOURCED
 ```
 
+**Six corrections to this step, found by building it.**
+
+1. **The aligner's raw span is not a quote, and storing it would put half a word
+   in front of a reviewer.** Measured: `allergic to penicilin` scores 95.24 and
+   the returned span is `allergic to penicilli`, truncated mid-word;
+   `allergic to penicillin.` returns a span with a trailing space. The
+   reviewer's highlight is rendered from `source_span`
+   (`DESIGN_SYSTEM.md` §3.2), so the span is snapped to whole words and
+   stripped of surrounding whitespace before it is returned. Widening is safe in
+   the only direction that matters - the result still contains the matched
+   region, so it cannot turn a true citation into a false one.
+2. **`verbatim` has to become the *source* text, not the model's claim.** Once
+   matching is fuzzy the two are different strings, and `Provenance.verbatim`'s
+   own contract says "never a paraphrase" - it is what the reviewer reads and
+   what §2.2's NLI compares against. **ADR-0007** records the change.
+3. **§3.2 needs a number this step is the only place to compute.** `S_src`
+   applies a "fuzzy-match penalty [...] if span alignment < 1.0", and once
+   `verbatim` is the source text the alignment cannot be recovered later -
+   comparing the two returns 1.0 by construction. `Provenance.alignment` is
+   added by the same ADR, defaulting to 1.0, which is what an exact match means.
+4. **`link_span` returns a `SpanMatch`, not a tuple**, because of 2 and 3: the
+   caller needs the span, the source text at it, and the alignment.
+5. **A blank `verbatim` has to be refused before the exact pass, not just the
+   fuzzy one.** `" "` is a substring of almost any source, so `source.find`
+   succeeds and returns a span quoting a single space - non-empty, so
+   `Provenance` accepts it, and a citation of nothing. The fuzzy path already
+   rejected it; the two halves of the same function disagreed about the same
+   input. **The property test found this, not a hand-written case** - the
+   hand-written one used three spaces, which are not a substring of the test
+   source, so it took the fuzzy path and passed for the wrong reason.
+6. **No minimum-length guard, and that was measured rather than assumed.** The
+   obvious next worry is a three-character claim fuzzy-matching at 92. It does
+   not: one wrong character in a three-character needle scores 67 (`PCQ`
+   against a source containing `PCP`), and `hivez` against `hives` scores 80.
+   The threshold is self-limiting on short strings, and an unspecified extra
+   rule would have been a guess dressed as caution.
+
 DONE WHEN: property test — for any candidate with no matching substring, the pipeline emits
 `REJECT(UNSOURCED)` and never a stored assertion. This is invariant I1 in RULES.md.
+
+**What I1 can honestly assert at this point in the build**, since neither
+`REJECT` nor a store exists yet: `MemoryCandidate` requires a `Provenance`,
+`Provenance` requires a span, and `link_span` is the only thing that makes one -
+so an unsourced fact cannot become a candidate by any code path. The property
+suite asserts that, plus the conservation law that makes it observable:
+candidates plus `dropped_unsourced` always equal the facts the model proposed.
+Rejecting an unsourced fact and forgetting to count it would satisfy every other
+property while making §1.3's rule invisible in the funnel.
+
+Two rejections worth recording as measurements rather than defending: a
+case-different quote scores 86.36 and a doubled-whitespace quote 91.67, both
+under the threshold. Both are harmless quoting differences and both cost recall.
+The number is §1.3's, and Checkpoint B is where it gets revisited with an AUROC
+behind it - its own diagnosis says to tighten it, not loosen it.
 
 COMMIT: `feat(s2.3): span linker with fuzzy fallback`
 
 END OF DAY 2 CHECK: raw text in -> candidates out, each with a span, K samples retained.
+
+Make that a test rather than a manual check - `tests/unit/test_layer1_end_to_end.py`
+composes the two stages, and composing them is what makes the seam visible. The
+join between them is not owned by either stage: the document the spans index
+into is the *denoised* one, so a caller who joins the kept turns differently
+here and in S5.6 puts every stored span a few characters off - onto real text,
+which is why it would not look like a bug. `dropped_noise` crosses the same seam
+and reads as zero if a caller forgets it.
 
 ---
 

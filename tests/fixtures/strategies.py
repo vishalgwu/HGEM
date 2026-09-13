@@ -27,6 +27,7 @@ from guardmem_core.pipeline.l1_extract.noise_filter import (
     NoiseClassification,
     NoiseVerdict,
 )
+from guardmem_core.pipeline.l1_extract.span_linker import SpanMatch
 from guardmem_core.prompts.loader import PromptSpec, RenderedPrompt
 from guardmem_core.schemas import (
     AuditEvent,
@@ -87,12 +88,15 @@ from fixtures.strategy_primitives import (
     _ordered_datetimes,
 )
 
+_SPAN_MATCHES = st.builds(SpanMatch, span=_SPAN, text=_TEXT, alignment=_UNIT)
+
 _PROVENANCE = st.builds(
     Provenance,
     source_hash=_TEXT,
     source_span=_SPAN,
     source_tier=st.sampled_from(SourceTier),
     verbatim=st.text(max_size=2000),
+    alignment=_UNIT,
     captured_at=_WHEN,
 )
 
@@ -264,6 +268,7 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     PromptSpec: _PROMPT_SPECS,
     RenderedPrompt: st.builds(RenderedPrompt, spec=_PROMPT_SPECS, text=_TEXT, version_id=_ID),
     Provenance: _PROVENANCE,
+    SpanMatch: _SPAN_MATCHES,
     MemoryCandidate: _memory_candidates(),
     ExtractedFact: _EXTRACTED_FACTS,
     ExtractionContext: st.builds(

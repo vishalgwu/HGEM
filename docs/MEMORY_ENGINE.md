@@ -40,7 +40,8 @@ class Provenance(_M):
     source_hash: str                       # sha256 of the source document/turn
     source_span: tuple[int, int]           # char offsets into that document
     source_tier: SourceTier
-    verbatim: str = Field(max_length=2000) # exact text the claim rests on
+    verbatim: str = Field(max_length=2000) # the SOURCE text at that span, never the claim
+    alignment: float = Field(default=1.0, ge=0, le=1)  # claim vs stored text (ADR-0007)
     captured_at: datetime
 
 class MemoryCandidate(_M):
@@ -157,6 +158,12 @@ Every candidate must resolve to a verbatim span. The extractor is asked to retur
 substring; `span_linker` then locates it in the source with exact match, falling back to fuzzy
 alignment (rapidfuzz, ratio ≥ 92) and rejecting below that. **No span → `REJECT(reason=UNSOURCED)`.**
 This single rule kills most confabulated facts before any scoring happens.
+
+A fuzzy span is snapped to whole words and stripped of surrounding whitespace before it is stored,
+and `Provenance.verbatim` is then the *source* text at that span rather than the model's claim —
+the aligner's raw span truncates words (`allergic to penicilli`), which is not a quote a reviewer
+can act on. How far the claim was from the stored text is recorded as `Provenance.alignment`, which
+is the input §3.2's fuzzy-match penalty needs. See ADR-0007.
 
 Every rejection is *counted*, into `ExtractionResult.dropped_unsourced`, for the
 same reason §1.1 counts noise drops: a rule whose activation count cannot be seen

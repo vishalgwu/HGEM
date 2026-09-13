@@ -1576,6 +1576,131 @@ falling.
 
 ---
 
+## 2026-09-12 — Day 2 · S2.3 (span linker, fuzzy fallback) · END OF DAY 2
+
+**Shipped**
+
+- `span_linker.py` — `SpanMatch`, exact match then `partial_ratio_alignment` at
+  ≥ 92, with the span snapped to whole words.
+- `Provenance.alignment`, and `verbatim` redefined as the source text, under
+  **ADR-0007**.
+- `tests/property/test_i1_sourced_writes.py` — invariant I1, 500 examples.
+- `tests/unit/test_layer1_end_to_end.py` — the END OF DAY 2 CHECK as a test.
+- 33 new tests — **399 total, 100% coverage across 31 modules**, branches
+  included. **Layer 1 is complete**: raw turns in, sourced candidates out.
+
+**What broke / what I learned**
+
+- **The property test found a real bug on its first run, and the hand-written
+  test for the same thing had been passing for the wrong reason.** A `verbatim`
+  of `" "` is a substring of almost any source, so the *exact* pass found it and
+  returned a one-character span quoting whitespace — non-empty, so `Provenance`
+  accepted it, and a citation of nothing, which `RULES.md` §1.1 treats exactly
+  as no span at all. The fuzzy path had already refused it inside `_snap`, so
+  the two halves of one function disagreed about the same input.
+
+  My unit test for this used *three* spaces. Three spaces are not a substring of
+  the test source, so it took the fuzzy path and passed — testing the branch
+  that was already correct. That is the sharpest argument for property testing I
+  have hit on this project: I wrote the case, I believed it covered the rule,
+  and it covered the other half of the function.
+
+- **The aligner returns a span, not a quote.** `allergic to penicilin` scores
+  95.24 and the raw span is `allergic to penicilli` — truncated mid-word.
+  `allergic to penicillin.` returns a span with a trailing space. The reviewer's
+  highlight is rendered from `source_span` and half a word is not something a
+  human can act on, so spans are snapped to whole words. Widening is safe in the
+  one direction that matters: the result still contains the matched region, so it
+  can quote more of the sentence but never turn a false citation into a true one.
+
+- **Fuzzy matching forced a decision the exact version never had to make: when
+  the claim and the source differ, which one is `verbatim`?** Its own docstring
+  had already answered — "what the reviewer reads and what NLI compares against,
+  so it is the text itself and never a paraphrase" — so the source text wins.
+  But that destroys the information §3.2 needs: the fuzzy-match penalty is a
+  function of "span alignment", and once `verbatim` *is* the source text,
+  comparing the two returns 1.0 by construction. So the alignment has to be
+  measured here and stored, or the penalty is unimplementable at S5.2. ADR-0007.
+
+  Second ADR in two steps, which gave me pause. Both were forced the same way:
+  a downstream clause the spec itself states, needing a value nothing carries.
+  The alternative each time was to silently not implement the clause.
+
+- **I nearly added a minimum-length guard on fuzzy matches, and the data said
+  not to.** A three-character claim matching at 92 sounds alarming. Measured:
+  one wrong character in a three-character needle scores 67 (`PCQ` against a
+  source containing `PCP`), and `hivez` against `hives` scores 80. The threshold
+  is self-limiting on short strings. An unspecified extra rule would have been a
+  guess dressed as caution, and I would have written a paragraph defending it.
+
+- **An unreachable guard came back, and I removed it rather than testing it.**
+  `_snap` returned `None` when it had matched only whitespace. Coverage flagged
+  the branch; a brute-force search over 60,000 mutated inputs never produced one.
+  The argument is sound rather than statistical: the aligner's score *is* the
+  similarity between needle and window, a non-blank needle scores 0 against a
+  blank window, and a blank needle is refused before the call. So the two
+  conditions cannot hold together. `_snap` is total now, and the invariant it
+  was guarding is asserted over 500 generated examples instead. Same lesson as
+  the `_near_duplicate` guard at S2.1.
+
+- **The other two uncovered branches were reachable, and brute force is how I
+  found the inputs.** Trailing whitespace in the raw span and a span starting
+  mid-word both happen, but not on any example I thought to write — 60,000
+  random mutations of the source produced `'e the CVS on Elm Strfet '` for the
+  first. Both are tests now, with the inputs recorded. Guessing at adversarial
+  inputs for a similarity metric is not something intuition is good at.
+
+- **Two rejections cost recall and I left them alone.** A case-different quote
+  scores 86.36 and a doubled-whitespace quote 91.67; both are harmless quoting
+  differences and both fall under §1.3's 92. Nudging the threshold to catch them
+  would be tuning a spec number to make two cases pass, and Checkpoint B's own
+  diagnosis says to *tighten* it if `S_src` underperforms, not loosen it. Both
+  are recorded as measurements in the test file so the Checkpoint B conversation
+  has them.
+
+**END OF DAY 2 CHECK**
+
+Raw text in, candidates out, each with a span, K samples retained — and it is a
+test rather than a look, because composing the two stages is what makes the seam
+between them visible. `tests/unit/test_layer1_end_to_end.py` asserts the thing
+that is easiest to get wrong later: **the document the spans index into is the
+denoised one**, not the transcript. A caller that joins the kept turns one way
+here and another way in S5.6 puts every stored span a few characters off — onto
+real text, which is precisely why it would not look like a bug. `dropped_noise`
+crosses the same seam and reads as zero if a caller forgets it.
+
+- `make lint`, `make typecheck`, `make test` — all green. 399 tests, 100%
+  coverage, branches included.
+- Day 2 complete: S2.1, S2.2, S2.3.
+
+**Still open**
+
+- **Temporal extraction is still not implemented**, by decision rather than
+  oversight: `ExtractedFact` has no `valid_from` / `valid_to` because the v1
+  prompt does not ask for them. §2.2(c)'s temporal-overlap check is the first
+  real consumer, so a v2 prompt belongs at **S4.3**.
+- `ExtractionResult.dropped_noise` and the denoised-document join both cross the
+  filter/extractor seam by convention. **S5.6** is where the orchestrator makes
+  them structural; until then `test_layer1_end_to_end.py` is the only thing
+  holding the shape.
+- Coverage still 100% against `fail_under = 85`; the raise to 90 is S7.2.
+- `GM_ANTHROPIC_API_KEY` is still blank. All of Layer 1 runs on fakes, so
+  nothing in the suite reports it missing — the first live run will.
+- The dev stack is on 5433 / 6380 / 7475 / 7688 while `.env` says the defaults.
+  **S3.1 is the step that connects**, so this stops being harmless tomorrow.
+- Branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S3.1` — the initial Alembic migration: `tenant`, `entity`, `assertion`,
+`audit_event`, `outbox`, `review_task`, `policy_version`, with the bitemporal
+columns, the RLS policy and `REVOKE DELETE` that `RULES.md` non-negotiable #2
+depends on. First thing to settle before writing any SQL is the port question
+above — and `Provenance` is now a list on `StoredAssertion` with an `alignment`
+per entry, which the table shape has to account for.
+
+---
+
 <!--
 Template for the next entry:
 
