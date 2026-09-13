@@ -15,6 +15,78 @@ repository; the log records what happened while changing it.
 
 ## [Unreleased]
 
+### Added
+
+- **S3.1 — the initial migration.** `infra/migrations/alembic/versions/0001_initial.py`:
+  eight tables, the bitemporal columns, both partial retrieval indexes,
+  row-level security on every tenant-scoped table, and the grants that make
+  `RULES.md`'s non-negotiables properties of the *database* rather than promises
+  of the application. `make migrate` runs clean from an empty volume.
+- **Provenance is its own table.** `ARCHITECTURE.md` §5 sketched `source_hash`
+  and `source_span` as columns on `assertion`, and `schemas/entity.py` already
+  said S3.1 would settle it. It has to be a list: `MEMORY_ENGINE.md` §2.4
+  resolves a duplicate by *appending* a `Provenance` and bumping
+  `corroboration_count`, and §3.2's `S_cor` is a function of independent
+  sources — a column pair cannot represent a corroborated fact at all, so S3.2
+  would have had to split the table one step later. §5 is updated to match.
+- **"No unsourced write" survives the split as a deferred constraint trigger.**
+  With no column to mark `NOT NULL`, `RULES.md` §1.1 becomes "every assertion
+  has at least one provenance row", checked at COMMIT — deferred because the
+  assertion and its citations are written in one transaction, which the outbox
+  pattern already requires.
+- **`infra/docker/initdb/02-app-role.sql`** — the `guardmem_app` role the
+  revokes target. Roles are cluster state and grants are schema state, so the
+  role is created by the deployment (initdb in dev, Terraform in prod) and the
+  migration raises if it is missing rather than skipping the revoke.
+- **`tests/integration/test_migration_invariants.py`** — 15 tests turning S3.1's
+  three manual DONE WHEN commands into assertions, alongside the four
+  non-negotiables the schema now carries. Skips cleanly when no database is
+  reachable; testcontainers arrives at S3.2.
+- `alembic.ini` and `infra/migrations/alembic/env.py`, with the connection
+  string read from `Settings` rather than the ini — `RULES.md` §2.4 wants one
+  settings object, and a DSN in a tracked file is the one that ends up pointing
+  at the wrong database.
+
+### Fixed
+
+- **A `CHECK` on the provenance span passed when it should have failed.**
+  `int4range(5, 5)` is an *empty* range; `lower()` and `upper()` return NULL on
+  one; and a `CHECK` that evaluates to NULL **passes**. A zero-width span —
+  which `Provenance` refuses in Python and §1.1 treats as no span at all — was
+  being stored. `NOT isempty(source_span)` is the fix, found by running the
+  constraint rather than by reading it.
+- **Row-level security did not apply to the table owner.** `ENABLE ROW LEVEL
+  SECURITY` exempts the owner from its own policies, and the migration runs as
+  the owner — so the obvious "SELECT and see" check would have shown every
+  tenant's rows and looked like proof that isolation worked. `FORCE ROW LEVEL
+  SECURITY` closes it.
+- **Tenant isolation raised a 500 where it should have returned nothing.** A
+  session that sets `app.tenant_id` and then `RESET`s it reads back the empty
+  string, not NULL, and `''::uuid` raises `invalid input syntax`.
+  `NULLIF(current_setting('app.tenant_id', true), '')` collapses unset and empty
+  to NULL. A *malformed* tenant id still raises, deliberately: unset is silence,
+  malformed is a bug in tenant propagation, and swallowing it would make "this
+  patient has no memories" the symptom of a broken caller.
+
+### Changed
+
+- `.env` points at `5433 / 6380 / 7688`, the ports the dev stack actually
+  publishes on this machine. `.env.example` keeps the documented defaults —
+  the shift is a local collision with another checkout, not a project decision.
+- `tests/unit/test_source_limits.py` covers `infra/` now that it holds Python,
+  and exempts alembic revisions from **both** line caps. Recorded honestly: the
+  first version of that exemption covered the module cap only, arguing the
+  function cap "is about complexity" — measuring showed the argument cuts the
+  other way, since `_belief_tables` is 59 lines because two `CREATE TABLE`
+  statements are 59 lines and its cyclomatic complexity is 1. `C901`, which is
+  the actual complexity gate, still applies to migrations.
+- `asyncpg` has no `py.typed`, so `mypy --strict` cannot check
+  `tests/integration/`. A per-module override carries the justification.
+  `asyncpg-stubs` is the better fix and is **not** taken yet: adding it means
+  regenerating `requirements.lock.txt`, and `uv pip compile` today resolves
+  seventeen unrelated packages forward — a reviewed change with its own commit,
+  not a side effect of wanting types for one test module.
+
 ### Fixed
 
 - **CI had been red for six commits, and every local run was green.** `mypy

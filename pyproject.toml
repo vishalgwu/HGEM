@@ -7,7 +7,19 @@ requires-python = ">=3.12"
 # package from - it does not pull it in on its own. Without this line the S1.1
 # acceptance check, `uv run python -c "import guardmem_core"`, fails with
 # ModuleNotFoundError.
-dependencies = ["guardmem-core"]
+dependencies = [
+  "guardmem-core",
+  # Migration toolchain, owned by the workspace rather than by the library.
+  # `infra/migrations/` is not a package and nothing under `guardmem_core`
+  # imports these yet: S3.2's pgvector store is the step that adds sqlalchemy,
+  # asyncpg and pgvector to `packages/guardmem-core/pyproject.toml`, where the
+  # PROJECT_TREE ownership table already permits "store drivers". Pinned to the
+  # same versions `requirements/stores.txt` cites for S3.1, because the two
+  # artifacts have to agree - see tests/unit/test_dependency_consistency.py.
+  "alembic==1.19.2",
+  "sqlalchemy==2.0.52",
+  "asyncpg==0.31.0",
+]
 
 [tool.uv.workspace]
 members = ["packages/*", "services/*"]
@@ -157,6 +169,24 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
+
+# asyncpg ships no `py.typed`, so `mypy --strict` refuses the import outright
+# and `tests/integration/` cannot be checked at all. The values it hands back
+# become `Any`, which RULES.md 2.1 permits with a justification: this is it.
+#
+# The better fix is the real stub package, `asyncpg-stubs`. It is NOT added
+# here yet, and the reason is worth writing down rather than rediscovering.
+# Adding it to requirements/dev.txt means regenerating requirements.lock.txt,
+# and `uv pip compile` today resolves SEVENTEEN unrelated packages forward -
+# botocore, huggingface-hub, arize-phoenix, tqdm and more - because upstream
+# has moved since the lock was cut. A dependency bump of that size is a
+# reviewed change with its own commit and its own test run, not a side effect
+# of wanting types for one test module. Revisit when the lock is refreshed
+# deliberately; S3.2 puts asyncpg in the package itself, which is the point
+# where `Any` stops being acceptable.
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # pytest

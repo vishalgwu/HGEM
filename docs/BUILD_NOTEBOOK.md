@@ -1372,8 +1372,64 @@ CREATE POLICY tenant_isolation ON assertion
 REVOKE DELETE ON assertion FROM guardmem_app;   -- RULES.md non-negotiable #2
 ```
 
+**Seven corrections to this step, found by building it.**
+
+1. **`REVOKE ... FROM guardmem_app` needs a role that does not exist.** The
+   compose stack creates `guardmem`, which *owns* the tables - and an owner is
+   not subject to its own grants, so revoking from it protects nothing. The
+   app role is created by `infra/docker/initdb/02-app-role.sql` (dev) or by
+   Terraform (prod), never by the migration: roles are cluster state, grants
+   are schema state. The migration raises a clear exception if the role is
+   absent rather than skipping the revoke, because a migration that silently
+   does not apply a P0 safety property is worse than one that fails.
+2. **Provenance has to be its own table, and this is the step that decides it.**
+   `schemas/entity.py` carries `provenance: list[Provenance]` and says S3.1
+   settles the storage. It must be a list: §2.4 resolves a duplicate by
+   appending a `Provenance` and bumping `corroboration_count`, and §3.2's
+   `S_cor` is a function of independent sources. A column pair cannot represent
+   a corroborated fact, so S3.2 would have split the table one step later -
+   the retrofit this step exists to avoid. `ARCHITECTURE.md` §5 is updated.
+3. **That costs the `NOT NULL` `RULES.md` §1.1 relies on, so it is paid back.**
+   With no column to mark, "no unsourced write" becomes "every assertion has at
+   least one provenance row", enforced by a DEFERRABLE INITIALLY DEFERRED
+   constraint trigger that fires at COMMIT - by which point the transaction that
+   wrote the assertion has written its citations.
+4. **`CHECK (lower(span) >= 0 AND upper(span) > lower(span))` does not do what
+   it looks like.** `int4range(5, 5)` is an *empty* range; `lower()` and
+   `upper()` return NULL on one; a CHECK that evaluates to NULL **passes**. A
+   zero-width span - which `Provenance` refuses in Python and §1.1 treats as no
+   span at all - was being stored. `NOT isempty(source_span)` is the fix, and it
+   was found by running the check, not by reading it.
+5. **`ALTER TABLE ... ENABLE ROW LEVEL SECURITY` is not enough.** A table's
+   owner is exempt from its own policies, and the migration runs as the owner -
+   so the obvious "let me just SELECT and see" check would show every tenant's
+   rows and look like proof that isolation works. `FORCE ROW LEVEL SECURITY` is
+   what closes that.
+6. **`current_setting('app.tenant_id')::uuid` raises where it should return
+   nothing.** With `missing_ok` it returns NULL when never set - but a session
+   that set the value and then `RESET` it reads back the **empty string**, and
+   `''::uuid` raises `invalid input syntax`. Isolation surfaced as a 500 rather
+   than as zero rows. `NULLIF(current_setting('app.tenant_id', true), '')` is
+   the fix. A *malformed* tenant id still raises, deliberately: unset is
+   silence, malformed is a bug in tenant propagation, and swallowing it would
+   make "this patient has no memories" the symptom of a broken caller.
+7. **RLS belongs on every tenant-scoped table, not only `assertion`.**
+   `RULES.md` §4 calls tenant isolation "defense-in-depth", and a policy on one
+   table out of five is not depth.
+
 DONE WHEN: `make migrate` runs clean; `\d assertion` shows the bitemporal columns; a DELETE as the
 app role raises a permission error.
+
+Worth doing beyond the step: make those three checks a test.
+`tests/integration/test_migration_invariants.py` asserts all of them plus the
+four non-negotiables the schema is carrying (#1 unsourced writes, #2 destructive
+mutation, #4 the append-only audit chain, §4 isolation), and skips cleanly when
+no database is reachable. A manual DONE WHEN is run once, by the person who
+wrote the thing being checked.
+
+Verify it cold, too: `make dev-reset && make dev && make migrate` should take an
+empty volume to a migrated schema with no manual step in between - which is also
+what proves `initdb` still does its half.
 
 COMMIT: `feat(s3.1): initial migration with bitemporal assertions and rls`
 

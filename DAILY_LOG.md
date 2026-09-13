@@ -1840,6 +1840,123 @@ table shape has to account for both.
 
 ---
 
+## 2026-09-13 — Day 3 · S3.1 (initial migration, bitemporal assertions, RLS)
+
+**Shipped**
+
+- `0001_initial` — eight tables, bitemporal columns, two partial retrieval
+  indexes, RLS on every tenant-scoped table, and the grants that hold
+  `RULES.md`'s non-negotiables.
+- `infra/docker/initdb/02-app-role.sql`, `alembic.ini`, `env.py`.
+- `tests/integration/test_migration_invariants.py` — 15 tests.
+- `.env` moved to the shifted ports; cold start verified from an empty volume.
+- 428 tests, 2 skipped, 100% branch coverage.
+
+**What broke / what I learned**
+
+- **Four bugs in my own SQL, and three of them would have passed review.** They
+  were found by running the constraints, not by reading them, which is the
+  argument for making a DONE WHEN a test rather than a paragraph.
+
+  `CHECK (lower(span) >= 0 AND upper(span) > lower(span))` reads as airtight.
+  `int4range(5, 5)` is an **empty** range, `lower()` and `upper()` return NULL
+  on one, and **a CHECK that evaluates to NULL passes**. So the one thing the
+  constraint existed to reject - a span that cites nothing, which `Provenance`
+  refuses in Python and §1.1 calls no span at all - went straight in.
+
+  `ENABLE ROW LEVEL SECURITY` does not apply to the table's owner. The migration
+  runs as the owner. So the natural way to convince yourself isolation works -
+  connect, SELECT, see only your tenant - would have shown every tenant's rows
+  and looked like a pass. `FORCE ROW LEVEL SECURITY` is the other half.
+
+  `current_setting('app.tenant_id', true)` returns NULL when the variable was
+  never set, which is the case everyone tests. A session that sets it and then
+  `RESET`s it reads back the **empty string**, and `''::uuid` raises. Tenant
+  isolation surfaced as a 500 instead of as zero rows.
+
+- **The third of those forced a design decision I had not noticed I was
+  making.** Fixing the empty string with `NULLIF` raised the question of what a
+  *malformed* tenant id should do. Swallowing everything uncastable into "no
+  rows" is tempting and wrong: in a product whose subject is remembered facts, a
+  bug in tenant propagation would then present as "this patient has no
+  memories". Unset is silence; malformed is an error. Both are fail-closed, only
+  one is diagnosable.
+
+- **The step's REVOKE needs a role the stack does not create.** `guardmem` owns
+  the tables, and an owner is not subject to its own grants - so revoking DELETE
+  from it protects nothing at all. The app role belongs to the deployment
+  (initdb here, Terraform in production) and the grants belong to the table, so
+  the migration raises if the role is missing rather than skipping the revoke. A
+  migration that silently does not apply a P0 property is worse than one that
+  fails, because failing is the only signal anyone gets.
+
+- **Provenance had to become its own table, and the docs had already said so.**
+  `schemas/entity.py` recorded at S1.6 that the domain model holds a list and
+  that S3.1 would decide the storage. Following `ARCHITECTURE.md` §5 literally
+  would have meant S3.2 splitting the table one step later - precisely the
+  retrofit this step's WHY warns about. The cost is that §1.1's `NOT NULL` has
+  no column to live on any more, which is why the deferred constraint trigger
+  exists. Deferred, because assertion and citations are written in one
+  transaction; a plain trigger would fire before the citations were there.
+
+- **I reversed one of my own decisions on evidence, mid-step.** I extended the
+  size gate to `infra/` and exempted alembic revisions from the *module* cap
+  only, writing that the function cap "still applies: that one is about
+  complexity". Then `_belief_tables` failed it at 59 lines - because two
+  `CREATE TABLE` statements are 59 lines. Its cyclomatic complexity is 1. Line
+  count is not complexity, which is exactly why `C901` exists as a separate
+  rule, and `C901` still covers migrations. The exemption now covers both caps
+  and says why it changed.
+
+- **`asyncpg` has no `py.typed`, which is the `types-pyyaml` failure again.**
+  This time the gate caught it in the same minute rather than six commits later.
+  The real fix is `asyncpg-stubs`, and I did not take it: adding one stub means
+  regenerating `requirements.lock.txt`, and `uv pip compile` today moves
+  seventeen unrelated packages forward - botocore, huggingface-hub,
+  arize-phoenix, tqdm. That is a dependency bump that deserves its own commit
+  and its own test run, not a passenger on a migration. A justified per-module
+  override holds the line until then.
+
+**DONE WHEN**
+
+- `make migrate` runs clean, from a destroyed volume: `make dev-reset && make
+  dev && make migrate` takes an empty disk to a migrated schema with no manual
+  step, which also proves `initdb` still does its half.
+- `\d assertion` shows `valid_from` / `valid_to` / `recorded_at` /
+  `retracted_at` / `superseded_by` / `embedding`.
+- A DELETE as `guardmem_app` raises `permission denied for table assertion`,
+  while the retirement path - `UPDATE ... SET valid_to = now()` - succeeds.
+
+All three are assertions in `tests/integration/`, along with the append-only
+audit chain, the unsourced-write trigger, the empty-span constraint, and four
+tenant-isolation cases.
+
+**Still open**
+
+- **The dev stack needs its port overrides on every `make dev`.** The old
+  checkout's containers hold 5432 / 6379 / 7687 and restart with Docker, so the
+  incantation is `POSTGRES_PORT=5433 REDIS_PORT=6380 NEO4J_HTTP_PORT=7475
+  NEO4J_BOLT_PORT=7688 make dev`. `.env` now matches those. A `--env-file` for
+  compose would make it durable; that is a decision about a machine-local quirk,
+  not a project default.
+- `requirements.lock.txt` is behind what `uv pip compile` resolves today by
+  seventeen packages. Refreshing it is a deliberate change with its own commit.
+- Temporal extraction (S4.3), the two Layer-1 seams (S5.6), coverage to 90%
+  (S7.2), branch protection on `main` (S0.3).
+
+**Tomorrow's first step**
+
+`S3.2` — the pgvector store. It is the step that puts `sqlalchemy`, `asyncpg`
+and `pgvector` into `packages/guardmem-core/pyproject.toml` (they are on the
+workspace root today, for the migration), and the step where `Any` from an
+untyped asyncpg stops being acceptable. Its own DONE WHEN is a testcontainers
+integration test: write, search, supersede, with the superseded row absent from
+search and present in a point-in-time query. `StoredAssertion.provenance` is a
+list, so `upsert` writes the provenance rows too - inside the same transaction,
+or the deferred trigger rejects the assertion at COMMIT.
+
+---
+
 <!--
 Template for the next entry:
 

@@ -265,16 +265,41 @@ CREATE TABLE assertion (
   recorded_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   retracted_at  TIMESTAMPTZ,
   superseded_by UUID REFERENCES assertion(id),
-  -- provenance
-  source_hash   TEXT NOT NULL,
-  source_span   INT4RANGE NOT NULL,
+  -- provenance lives in its own table; see below
+  corroboration_count INT NOT NULL DEFAULT 1,
   trace_id      TEXT NOT NULL,
   visible       BOOLEAN NOT NULL DEFAULT false,   -- set true after dual-write lands
   embedding     VECTOR(1024)
 );
+
+-- One row per citation, not a column pair on `assertion`. Settled at S3.1.
+-- MEMORY_ENGINE 2.4 resolves a duplicate by *appending* a Provenance and
+-- bumping corroboration_count, and 3.2's S_cor term is a function of how many
+-- independent sources a fact has - so a single pair of columns cannot represent
+-- a corroborated fact at all. `alignment` is ADR-0007's.
+CREATE TABLE provenance (
+  id            UUID PRIMARY KEY,
+  assertion_id  UUID NOT NULL REFERENCES assertion(id) ON DELETE CASCADE,
+  source_hash   TEXT NOT NULL,
+  source_span   INT4RANGE NOT NULL,
+  source_tier   TEXT NOT NULL,
+  verbatim      TEXT NOT NULL,
+  alignment     REAL NOT NULL DEFAULT 1.0,
+  captured_at   TIMESTAMPTZ NOT NULL,
+  CHECK (NOT isempty(source_span))                -- an empty range cites nothing
+);
 CREATE INDEX ON assertion USING hnsw (embedding vector_cosine_ops)
   WHERE valid_to IS NULL AND visible;
 ALTER TABLE assertion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assertion FORCE ROW LEVEL SECURITY;   -- the owner is exempt without this
+
+-- RULES.md 1.1 ("no unsourced write") was a NOT NULL column before provenance
+-- moved to its own table. It is now a DEFERRED constraint trigger, checked at
+-- COMMIT because the assertion and its citations are written in one
+-- transaction - which the outbox pattern in 2.4 already requires.
+CREATE CONSTRAINT TRIGGER assertion_requires_provenance
+  AFTER INSERT ON assertion DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION assert_provenance_exists();
 
 CREATE TABLE audit_event (
   seq         BIGSERIAL PRIMARY KEY,

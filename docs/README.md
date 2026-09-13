@@ -13,8 +13,10 @@ GitHub Actions all run today - and so is the typed foundation of `guardmem_core`
 settings, domain ids, the error hierarchy, the Pydantic schema layer, the store
 and LLM protocols with in-memory fakes, the versioned prompt loader, and the
 noise filter, K-sample extractor and span linker that make up Layer 1. Nothing
-downstream exists: nothing validates, scores or decides. The next step is S3.1,
-the initial migration.
+downstream exists yet. S3.1 adds the initial migration - bitemporal assertions,
+provenance, the audit chain, the outbox and row-level security - so four of
+`RULES.md`'s non-negotiables are enforced by Postgres rather than by convention.
+The next step is S3.2, the pgvector store.
 
 Everything in this directory remains specification. Nothing here is evidence of
 an implemented feature; see "How to use this baseline" below.

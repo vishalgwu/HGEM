@@ -180,8 +180,15 @@ from, and an invented sentence is not in the source. It is enforced by
 construction rather than by policy: a candidate requires provenance, provenance
 requires a span, and the linker is the only thing that makes one.
 
-Nothing downstream exists yet: nothing validates, scores or decides. The next
-step is S3.1, the initial migration — the first code that touches a database.
+S3.1 adds the schema underneath all of it: bitemporal assertions, provenance as
+its own table, an append-only audit chain, the dual-write outbox, and row-level
+security. Four of `RULES.md`'s non-negotiables are now properties of the
+database rather than promises of the application — `DELETE` on an assertion is
+revoked at the role level, the audit chain refuses UPDATE and DELETE, an
+assertion without a citation cannot commit, and a session with no tenant set
+sees nothing.
+
+Nothing reads or writes it yet. The next step is S3.2, the pgvector store.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

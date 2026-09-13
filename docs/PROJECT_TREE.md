@@ -14,6 +14,7 @@ guardmem-ai/
 ├── CONTRIBUTING.md
 ├── Makefile                             # make dev / test / eval / bench / migrate / seed
 ├── pyproject.toml                       # uv workspace root
+├── alembic.ini                          # S3.1; script_location only, URL comes from Settings
 ├── uv.lock
 ├── .python-version                      # 3.12 - keeps lock, venv and ruff target in agreement
 ├── requirements.txt                     # runtime aggregate over requirements/
@@ -201,7 +202,8 @@ guardmem-ai/
 ├── infra/
 │   ├── docker/
 │   │   ├── docker-compose.dev.yml       # postgres+pgvector, redis, neo4j, phoenix
-│   │   ├── initdb/                      # Postgres first-boot SQL: vector, pgcrypto, pg_trgm
+│   │   ├── initdb/                      # Postgres first-boot SQL: extensions (01),
+│   │   │                                #   the guardmem_app role (02, S3.1)
 │   │   ├── docker-compose.test.yml
 │   │   └── docker-compose.observability.yml   # otel-collector, prometheus, grafana, tempo
 │   │                                    # + langfuse, which needs clickhouse/minio from v3 on
@@ -211,7 +213,9 @@ guardmem-ai/
 │   ├── k8s/                             # optional helm chart for self-hosted enterprise
 │   │   └── helm/guardmem/{Chart.yaml,values.yaml,templates/}
 │   └── migrations/                      # alembic + neo4j cypher migrations
+│       ├── alembic/env.py               # S3.1; URL from Settings, no autogenerate
 │       ├── alembic/versions/
+│       │   └── 0001_initial.py          # S3.1; bitemporal assertions, provenance, RLS
 │       └── cypher/
 │
 ├── evals/
@@ -238,7 +242,8 @@ guardmem-ai/
 │   │                                    #   RULES 2.4 size caps enforced by
 │   │                                    #   unit/test_source_limits.py (S2.2)
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
-│   ├── integration/                     # testcontainers: pg, neo4j, redis
+│   ├── integration/                     # a live Postgres today; testcontainers at S3.2
+│   │   └── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
