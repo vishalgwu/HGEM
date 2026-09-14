@@ -13,19 +13,19 @@ many for `mypy`. Nothing here runs until a test asks for a fixture.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Final
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
+from fixtures.assertions import NS, WHEN, citation, stored_assertion
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.memory.vector.pool import create_pool
 from guardmem_core.schemas.entity import StoredAssertion
-from guardmem_core.schemas.receipt import Provenance, SourceTier
-from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
+from guardmem_core.types import TenantId
 
 __all__ = [
     "LATER",
@@ -38,8 +38,8 @@ __all__ = [
     "write_and_reveal",
 ]
 
-NS: Final = Namespace("patient:8812")
-WHEN: Final = datetime(2026, 3, 14, 9, 30, tzinfo=UTC)
+# `NS` and `WHEN` are re-exported from `fixtures.assertions`, which is where the
+# builder that uses them lives; this module owns only the times derived from it.
 LATER: Final = WHEN + timedelta(days=30)
 TIMEOUT_S: Final = 10.0
 
@@ -162,29 +162,24 @@ def assertion(
     obj: str = "penicillin",
     valid_from: datetime = WHEN,
 ) -> StoredAssertion:
-    """A well-formed, sourced assertion in this test's tenant."""
-    return StoredAssertion(
-        assertion_id=AssertionId(str(uuid4())),
+    """A well-formed, sourced assertion in this test's tenant.
+
+    A thin wrapper over `fixtures.assertions.stored_assertion`, kept because the
+    integration suite addresses tenants through the `tenancy` dict its fixture
+    hands out - the shared builder takes ids, and translating them at every call
+    site would be the duplication this wrapper removes.
+    """
+    return stored_assertion(
         tenant_id=TenantId(tenancy["tenant"]),
         namespace=NS,
-        subject_id=EntityId(tenancy["entity"]),
+        subject=tenancy["entity"],
         predicate=predicate,
-        object=obj,
+        obj=obj,
         confidence=0.94,
         risk=0.82,
         valid_from=valid_from,
-        recorded_at=WHEN,
-        provenance=[
-            Provenance(
-                source_hash="sha256:abc",
-                source_span=(13, 35),
-                source_tier=SourceTier.VERIFIED_USER,
-                verbatim=f"allergic to {obj}",
-                alignment=0.97,
-                captured_at=WHEN,
-            )
-        ],
-        trace_id=TraceId("tr_s32"),
+        provenance=[citation(verbatim=f"allergic to {obj}")],
+        trace_id="tr_s32",
     )
 
 

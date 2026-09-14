@@ -15,54 +15,33 @@ the mismatch at all.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 
+from fixtures.assertions import NS, TENANT, stored_assertion
 from fixtures.fakes import FakeVectorStore
 from guardmem_core.errors import ValidationRejected
 from guardmem_core.memory.router import GRAPH, VECTOR, StoreRouter
 from guardmem_core.schemas.entity import StoredAssertion
-from guardmem_core.schemas.receipt import Provenance, SourceTier
-from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
+from guardmem_core.types import TenantId
 
-# Local rather than imported from `fixtures.pgvector`: this suite is the unit
-# one, and borrowing the integration scaffolding's constants would couple it to
-# a module that exists to start a database.
-NS = Namespace("patient:8812")
-WHEN = datetime(2026, 3, 14, 9, 30, tzinfo=UTC)
-
-TENANT = TenantId("11111111-1111-1111-1111-111111111111")
 OTHER = TenantId("22222222-2222-2222-2222-222222222222")
 
 
 def assertion(
     *, tenant_id: TenantId = TENANT, visible: bool = False, obj: str = "penicillin"
 ) -> StoredAssertion:
-    """A well-formed, sourced assertion, invisible unless a test says otherwise."""
-    return StoredAssertion(
-        assertion_id=AssertionId(f"a-{obj}-{tenant_id[:8]}"),
+    """A sourced assertion, invisible unless a test says otherwise.
+
+    Over `fixtures.assertions.stored_assertion`, which owns the other eleven
+    fields. The id is derived from the two axes this module varies so a mixed
+    batch has two distinguishable members.
+    """
+    return stored_assertion(
+        assertion_id=f"a-{obj}-{tenant_id[:8]}",
         tenant_id=tenant_id,
-        namespace=NS,
-        subject_id=EntityId("e-1"),
-        predicate="allergy",
-        object=obj,
-        confidence=0.9,
-        risk=0.5,
-        valid_from=WHEN,
-        recorded_at=WHEN,
-        provenance=[
-            Provenance(
-                source_hash="sha256:abc",
-                source_span=(0, 10),
-                source_tier=SourceTier.VERIFIED_USER,
-                verbatim=f"allergic to {obj}",
-                alignment=0.99,
-                captured_at=WHEN,
-            )
-        ],
-        trace_id=TraceId("tr_s33"),
         visible=visible,
+        obj=obj,
+        trace_id="tr_s33",
     )
 
 

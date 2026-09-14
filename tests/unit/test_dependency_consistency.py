@@ -299,3 +299,97 @@ def test_the_marker_environment_matches_the_pinned_interpreter() -> None:
     assert _applies("python_full_version != '3.13.*'", environment) is True
     assert _applies("python_full_version == '3.13.*'", environment) is False
     assert _applies(None, environment) is True
+
+
+# ---------------------------------------------------------------------------
+# The third invariant, added by the cleanup pass to S4.1: every dependency
+# `guardmem-core` declares is either imported by it, or annotated with the step
+# that will import it.
+#
+# Four of them are unused today - httpx, structlog, anyio, numpy - and all four
+# are genuinely coming: RULES.md 2.2 and 6 name three of them and S5.1 needs the
+# fourth. Keeping them is right. Keeping them *silently* is not, because the
+# next person to run a dependency audit finds four unimported packages and
+# cannot tell "not needed yet" from "no longer needed" - and removing the wrong
+# one breaks a step that has not been written yet, which is the worst moment to
+# discover it.
+#
+# So the comment block in `packages/guardmem-core/pyproject.toml` is the record,
+# and this is what stops it rotting. It checks both directions: an undocumented
+# unused dependency fails, and so does a documented one that has since started
+# being imported, which is the half that goes stale on its own.
+# ---------------------------------------------------------------------------
+
+CORE_PYPROJECT = REPO_ROOT / "packages" / "guardmem-core" / "pyproject.toml"
+CORE_SOURCE = REPO_ROOT / "packages" / "guardmem-core" / "src" / "guardmem_core"
+
+# Distribution name -> the module it is imported as, where the two differ.
+_IMPORT_NAME: Final = {"pydantic-settings": "pydantic_settings", "pyyaml": "yaml"}
+
+# The heading that opens the annotated block in the core manifest.
+_DEFERRED_HEADING: Final = "DECLARED AND NOT YET IMPORTED"
+
+
+def _core_dependencies() -> list[str]:
+    """Every distribution `guardmem-core` declares, normalised."""
+    declared = tomllib.loads(CORE_PYPROJECT.read_text(encoding="utf-8"))["project"]["dependencies"]
+    return [_normalise(re.split(r"[><=!\[;]", spec)[0].strip()) for spec in declared]
+
+
+def _imported_by_core() -> set[str]:
+    """The subset of those distributions the package actually imports."""
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in CORE_SOURCE.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    found: set[str] = set()
+    for name in _core_dependencies():
+        module = _IMPORT_NAME.get(name, name.replace("-", "_"))
+        if re.search(rf"^\s*(?:import {module}\b|from {module}[\s.])", source, re.M):
+            found.add(name)
+    return found
+
+
+def _documented_as_deferred() -> set[str]:
+    """Distributions named in the manifest's annotated block, with a step id.
+
+    Read from the comment rather than from a second list, because a second list
+    is one more thing to keep in step - and the comment is what a person
+    actually reads when they wonder why `numpy` is there.
+    """
+    text = CORE_PYPROJECT.read_text(encoding="utf-8")
+    block = text[text.index(_DEFERRED_HEADING) :].split('"httpx')[0]
+    return {
+        _normalise(match.group(1))
+        for match in re.finditer(r"^\s*#\s+`([a-zA-Z0-9._-]+)`\s+S\d+\.\d+\s", block, re.M)
+    }
+
+
+def test_every_unused_core_dependency_is_documented_with_its_step() -> None:
+    """An unimported dependency must say which step will import it."""
+    undocumented = sorted(
+        set(_core_dependencies()) - _imported_by_core() - _documented_as_deferred()
+    )
+
+    assert not undocumented, (
+        f"guardmem-core declares {undocumented} and imports none of them. Either "
+        "drop them, or add each to the 'DECLARED AND NOT YET IMPORTED' block in "
+        "packages/guardmem-core/pyproject.toml with the step that will use it."
+    )
+
+
+def test_no_dependency_is_documented_as_deferred_once_it_is_used() -> None:
+    """The half that goes stale on its own.
+
+    A package listed as "arriving at S9.1" that S9.1 has since imported is a
+    comment describing the past. Left alone it teaches the next reader that the
+    block is unreliable, which is how the whole record stops being read.
+    """
+    stale = sorted(_documented_as_deferred() & _imported_by_core())
+
+    assert not stale, (
+        f"{stale} are imported now but still listed as deferred. Move them out "
+        "of the 'DECLARED AND NOT YET IMPORTED' block in "
+        "packages/guardmem-core/pyproject.toml."
+    )

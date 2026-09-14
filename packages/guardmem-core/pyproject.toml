@@ -17,13 +17,30 @@ requires-python = ">=3.12"
 # step `prompts/loader.py` named when it explained why its frontmatter parser
 # is hand-rolled rather than a YAML call.
 dependencies = [
+  # --- imported today ------------------------------------------------------
   "pydantic>=2.9",
   "pydantic-settings>=2.5",
+  "rapidfuzz>=3.10",
+  # --- DECLARED AND NOT YET IMPORTED ---------------------------------------
+  # These four are S1.1's list and every one of them is unused by the package
+  # as it stands. They are kept deliberately, each annotated with the step that
+  # makes it real, because an audit that finds an unimported dependency and
+  # cannot tell "not needed yet" from "no longer needed" removes the wrong one.
+  # Re-check this block whenever one of those steps lands: a dependency that is
+  # still unused two steps after its owner shipped is genuinely dead.
+  #
+  # `httpx`     S9.1  provider adapters. RULES.md 2.2: one AsyncClient per
+  #                   provider, created in lifespan, never per-request.
+  # `structlog` S13.1 observability. RULES.md 6: structured JSON logging only,
+  #                   every line carrying trace_id, tenant_id and namespace.
+  # `anyio`     S4.3  the conflict checks. RULES.md 2.2 sends CPU-bound work -
+  #                   NLI on CPU, embedding math - through anyio.to_thread.
+  # `numpy`     S5.1  semantic entropy over meaning clusters.
   "httpx>=0.27",
   "structlog>=24.4",
   "anyio>=4.6",
   "numpy>=2.1",
-  "rapidfuzz>=3.10",
+  # --- store drivers, imported today ---------------------------------------
   # S3.2. PROJECT_TREE's ownership table lets this layer import "store
   # drivers", and `memory/vector/pgvector_store.py` is the first module that
   # does. Not sqlalchemy: the store speaks asyncpg directly, and sqlalchemy

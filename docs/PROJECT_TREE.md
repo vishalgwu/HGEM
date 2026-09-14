@@ -275,6 +275,9 @@ guardmem-ai/
 │   │   ├── graph_faults.py              # S3.3; GraphStore doubles, one failure mode each
 │   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
+│   │   ├── assertions.py                # cleanup-to-S4.1; the ONE StoredAssertion builder.
+│   │   │                                #   Five modules had a near-identical copy of a
+│   │   │                                #   fourteen-field model
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates

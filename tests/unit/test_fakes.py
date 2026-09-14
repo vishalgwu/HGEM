@@ -20,18 +20,18 @@ bindings and `make typecheck` is what verifies them.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
+from fixtures.assertions import NS as _NS
+from fixtures.assertions import WHEN as _WHEN
+from fixtures.assertions import stored_assertion
 from fixtures.fakes import FakeGraphStore, FakeLLM, FakeVectorStore
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.llm.base import LLMResponse, Tier
 from guardmem_core.schemas import Provenance, SourceTier, StoredAssertion
-from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
-
-_WHEN = datetime(2026, 3, 12, 14, 31, 2, tzinfo=UTC)
-_NS = Namespace("patient:8812")
+from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId
 
 _PROVENANCE = Provenance(
     source_hash="sha256:9c1",
@@ -52,22 +52,27 @@ def _assertion(
     valid_to: datetime | None = None,
     namespace: Namespace = _NS,
 ) -> StoredAssertion:
-    """A live, visible assertion unless a keyword says otherwise."""
-    return StoredAssertion(
-        assertion_id=AssertionId(assertion_id),
+    """A live, VISIBLE assertion unless a keyword says otherwise.
+
+    Over `fixtures.assertions.stored_assertion`, which owns the other nine
+    fields. `visible` inverts that builder's default on purpose: these tests are
+    about what `FakeVectorStore.search` returns, and search filters on
+    `visible`, so an invisible row would make every one of them assert on an
+    empty list for the wrong reason.
+    """
+    return stored_assertion(
+        assertion_id=assertion_id,
         tenant_id=TenantId("t_acme"),
         namespace=namespace,
-        subject_id=EntityId(subject),
+        subject=subject,
         predicate=predicate,
-        object=obj,
+        obj=obj,
         confidence=0.94,
         risk=0.21,
-        valid_from=_WHEN,
         valid_to=valid_to,
-        recorded_at=_WHEN,
-        provenance=[_PROVENANCE],
-        trace_id=TraceId("tr_9f2a3c"),
         visible=visible,
+        provenance=[_PROVENANCE],
+        trace_id="tr_9f2a3c",
     )
 
 

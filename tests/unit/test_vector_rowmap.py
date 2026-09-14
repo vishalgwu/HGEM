@@ -16,11 +16,12 @@ reads them back from Postgres, which is the only place the question is real.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Final
 
 import pytest
 
+from fixtures.assertions import WHEN as _WHEN
+from fixtures.assertions import stored_assertion
 from guardmem_core.memory.vector.rowmap import (
     ASSERTION_COLUMNS,
     EMBEDDING_DIM,
@@ -32,9 +33,8 @@ from guardmem_core.memory.vector.rowmap import (
 from guardmem_core.schemas.base import ObjectValue
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.receipt import Provenance, SourceTier
-from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
+from guardmem_core.types import TenantId
 
-_WHEN: Final = datetime(2026, 3, 14, 9, 30, tzinfo=UTC)
 _TENANT: Final = TenantId("t_acme")
 
 
@@ -56,20 +56,21 @@ def _assertion(
     obj: ObjectValue = "penicillin",
     provenance: list[Provenance] | None = None,
 ) -> StoredAssertion:
-    """A minimal well-formed assertion."""
-    return StoredAssertion(
-        assertion_id=AssertionId(assertion_id),
+    """A minimal well-formed assertion, in a tenant the store does not hold.
+
+    Over `fixtures.assertions.stored_assertion`. `t_other` is deliberate and is
+    the point of two tests below: `assertion_params` takes the *store's* tenant
+    as authoritative and overwrites the model's, so a builder that used the same
+    tenant as the store could not tell the two apart.
+    """
+    return stored_assertion(
+        assertion_id=assertion_id,
         tenant_id=TenantId("t_other"),
-        namespace=Namespace("patient:8812"),
-        subject_id=EntityId("e_8812"),
+        subject="e_8812",
         predicate=predicate,
-        object=obj,
-        confidence=0.9,
-        risk=0.5,
-        valid_from=_WHEN,
-        recorded_at=_WHEN,
+        obj=obj,
         provenance=provenance or [_citation()],
-        trace_id=TraceId("tr_1"),
+        trace_id="tr_1",
     )
 
 

@@ -17,6 +17,30 @@ repository; the log records what happened while changing it.
 
 ### Changed
 
+- **Cleanup to S4.1 — the last of the repeated logic, and the unused
+  dependencies made honest.**
+  - **One `StoredAssertion` builder.** Five test modules had a near-identical
+    copy of a fourteen-field model with `min_length=1` provenance: the pgvector
+    fixtures and the unit tests for the store router, the graph store, the fakes
+    and the row map. A schema change meant five edits and nothing would have
+    failed if one had been missed, because each module only exercised its own
+    copy. `tests/fixtures/assertions.py` is the single source now; each module
+    keeps a thin wrapper for the two or three axes it actually varies.
+    `test_schema_models.py::_assertion` deliberately stays separate — it takes
+    `**overrides` over a plain dict because its job is to build models that are
+    *invalid*, which typed keyword arguments cannot express.
+  - **`guardmem-core` declares four dependencies it does not import** — `httpx`,
+    `structlog`, `anyio`, `numpy` — and all four are genuinely coming (S9.1,
+    S13.1, S4.3, S5.1). They are kept, not removed, and each is now annotated in
+    `packages/guardmem-core/pyproject.toml` with the step that will import it:
+    an audit that finds an unimported dependency and cannot tell "not needed
+    yet" from "no longer needed" removes the wrong one, and that breaks a step
+    nobody has written yet.
+  - **Two tests keep that record honest**, because a comment nobody checks is a
+    suggestion (`RULES.md` §0). One fails if an unimported dependency has no
+    step annotation; the other fails if an annotated one has since started being
+    imported — the half that goes stale on its own. Both verified by mutation.
+
 - **Audit after S3.6 — four facts that had been written twice.** Each was stated
   in the document that owns it and restated as a literal in a caller, with
   nothing comparing the two. None was failing; three were one edit from being

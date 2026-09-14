@@ -28,30 +28,25 @@ will be handed counts live edges, in both directions, exactly once.
 from __future__ import annotations
 
 import tomllib
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
 from conftest import REPO_ROOT
+from fixtures.assertions import TENANT, WHEN, stored_assertion
 from fixtures.fakes import FakeGraphStore
 from guardmem_core.errors import ValidationRejected
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.schemas.base import ObjectValue
 from guardmem_core.schemas.entity import Edge, StoredAssertion
-from guardmem_core.schemas.receipt import Provenance, SourceTier
-from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
+from guardmem_core.types import EntityId, TenantId
 
 if TYPE_CHECKING:
     from guardmem_core.memory.graph.base import GraphStore
 
-NS = Namespace("patient:8812")
-WHEN = datetime(2026, 3, 14, 9, 30, tzinfo=UTC)
 LATER = WHEN + timedelta(days=30)
-TENANT = TenantId("11111111-1111-1111-1111-111111111111")
 OTHER = TenantId("22222222-2222-2222-2222-222222222222")
-
-_counter = iter(range(1_000_000))
 
 
 def fact(
@@ -65,35 +60,18 @@ def fact(
 ) -> StoredAssertion:
     """A sourced assertion, with the graph-relevant fields exposed.
 
-    Local rather than shared with `test_store_router.py`'s builder on purpose:
-    that one varies tenant and visibility, this one varies subject, object and
-    validity, and a single builder with every axis would be harder to read than
-    either. The id auto-increments so two calls are two edges unless a test
-    asks for the same one.
+    Over `fixtures.assertions.stored_assertion`. The axes here are the ones a
+    graph cares about - who the subject is, what the object is, and whether the
+    edge is still live - and everything else takes that builder's defaults.
     """
-    return StoredAssertion(
-        assertion_id=AssertionId(assertion_id or f"a-{next(_counter)}"),
+    return stored_assertion(
+        assertion_id=assertion_id,
         tenant_id=tenant,
-        namespace=NS,
-        subject_id=EntityId(subject),
+        subject=subject,
         predicate=predicate,
-        object=obj,
-        confidence=0.9,
-        risk=0.5,
-        valid_from=WHEN,
+        obj=obj,
         valid_to=valid_to,
-        recorded_at=WHEN,
-        provenance=[
-            Provenance(
-                source_hash="sha256:abc",
-                source_span=(0, 10),
-                source_tier=SourceTier.VERIFIED_USER,
-                verbatim=f"{predicate} {obj}",
-                alignment=0.99,
-                captured_at=WHEN,
-            )
-        ],
-        trace_id=TraceId("tr_s34"),
+        trace_id="tr_s34",
     )
 
 

@@ -2536,6 +2536,83 @@ them.
 
 ---
 
+## 2026-09-13 — Cleanup to S4.1: the last repeated builder, and four honest dependencies
+
+A second pass over everything up to S4.1 — which is the whole codebase, since
+S4.1 is the next step and does not exist. The first audit took the duplicated
+*facts*; this one took the duplicated *code* and the dependencies nobody could
+account for.
+
+**Shipped**
+
+- `tests/fixtures/assertions.py` — one `StoredAssertion` builder, replacing five.
+- The four unimported `guardmem-core` dependencies annotated with the step that
+  will import them, plus two tests that keep the annotation honest.
+- 660 tests, 100% coverage, no public API removed.
+
+**What broke / what I learned**
+
+- **The dead-code scan came back clean, and proving that was most of the work.**
+  I wrote a reachability pass over every module-level name in the package, the
+  tests and the scripts. It printed about 170 names — and nearly all of them
+  were pytest classes and test functions, which are referenced by collection
+  rather than by code. The four that were not were the `_llm: LLMClient =
+  FakeLLM()` conformance assignments, which exist precisely so `mypy` checks
+  structural Protocol conformance and would take that checking with them if
+  deleted. **A scan whose output is 98% false positives is a scan you have to
+  read all of**, and the temptation to delete something to justify the exercise
+  is exactly the risk.
+
+- **Five copies of the same builder, not three.** The first audit found three
+  and I fixed those. A scan for module-level function names defined in more than
+  one file found two more - `_assertion` in `test_fakes.py` and in
+  `test_vector_rowmap.py`. I had missed them because they are spelled with a
+  leading underscore and I had grepped for the public name. The lesson is about
+  method, not about those two files: **grep finds what you already suspect; a
+  structural scan finds what you do not.**
+
+- **I consolidated five and deliberately left two.** `test_schema_models.py`'s
+  builder takes `**overrides` over a dict because its job is to construct models
+  that are *invalid* - a backwards interval, a span pointing at nothing - and a
+  builder with typed keyword arguments cannot express that. And the three
+  `_turn` helpers are one-line wrappers over a four-field model with three
+  different parameter orders tuned to their call sites; merging them would make
+  eighty call sites worse to remove a drift risk that is approximately zero.
+  Consolidation is not a goal in itself.
+
+- **The builder's `provenance` parameter took a single citation and had to take
+  a list.** Caught immediately by `test_vector_rowmap`, which builds a
+  corroborated fact with two. I had reached for the common case and made the
+  model's own field shape wrong; the field is a `list` because §2.4 resolves a
+  duplicate by appending, and the fixture should not be the one place that
+  forgets it.
+
+- **Four declared dependencies that nothing imports.** `httpx`, `structlog`,
+  `anyio`, `numpy` - and every one of them is genuinely coming: RULES §2.2 and
+  §6 name three, S5.1 needs the fourth. The right move is not to remove them and
+  not to leave them silent. An audit that finds an unimported dependency and
+  cannot tell "not needed yet" from "no longer needed" removes the wrong one,
+  and the failure lands on a step nobody has written yet. They are annotated in
+  the manifest with their step - and, because a comment nobody checks is a
+  suggestion, **two tests enforce the annotation in both directions**: an
+  unimported dependency must carry a step, and an annotated one must stop
+  carrying it once it is actually imported. I mutated both to confirm they bite.
+
+**Still open**
+
+- Nothing new. The sweep found no dead code, no unused imports, no debug
+  leftovers, no float equality, no `is` on literals, no bare excepts, no
+  unbounded fan-out, no untimed outbound call, and `uv lock` is current.
+- Carried from the audit: `schemas/ontology.py` sits at 393 lines against the
+  400 cap, and `scripts/` has no `__init__.py`.
+
+**Tomorrow's first step**
+
+`S4.1` — the schema gate, on a codebase with one assertion builder, one
+deterministic embedder, and a dependency list that can explain itself.
+
+---
+
 ---
 
 <!--
