@@ -153,8 +153,16 @@ class ExtractionResult(GMModel):
             does not make it immutable, see `schemas/base.py`.
         samples: What every sample extracted, in **draw order**, sample 0 first
             and canonical. Ungrouped on purpose: §3.1 clusters by
-            `(subject, predicate)` and S5.1 owns that grouping, so freezing one
-            reading of it into Layer 1 would settle a Layer 3 question early.
+            `(subject, predicate)`, so freezing one reading of it into Layer 1
+            would settle a Layer 3 question early.
+
+            This said "S5.1 owns that grouping" until S5.1 built the clustering
+            and did not take it. Grouping these into §3.1's K samples needs an
+            answer to a question no document asks: when three of five samples
+            propose a fact, is `K` three or five? Three discards real evidence
+            of uncertainty; five needs a rule for what an absence clusters *as*.
+            Either choice silently recalibrates `C`, so it belongs with **S5.6**,
+            which composes the pipeline and can see both ends.
             Note this is not redundant with `candidates` - it includes facts
             that were dropped for want of a span, which is what makes the
             funnel's drop sample possible.

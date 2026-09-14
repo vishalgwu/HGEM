@@ -33,12 +33,8 @@ from guardmem_core.prompts.loader import PromptSpec, RenderedPrompt
 from guardmem_core.schemas import (
     AuditEvent,
     Cardinality,
-    ConfidenceReport,
-    ConflictKind,
-    ConflictReport,
     DecidedBy,
     Decision,
-    DecisionRecord,
     Diff,
     DroppedTurn,
     Edge,
@@ -57,7 +53,6 @@ from guardmem_core.schemas import (
     ReviewDecision,
     ReviewStatus,
     ReviewTask,
-    RiskVerdict,
     SourceTier,
     StoredAssertion,
     Turn,
@@ -68,9 +63,9 @@ from guardmem_core.schemas import (
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
 from fixtures.strategy_l2 import l2_strategies
+from fixtures.strategy_l3 import L3_STRATEGIES
 from fixtures.strategy_ontology import ONTOLOGY_STRATEGIES
 from fixtures.strategy_primitives import (
-    _ANY_FLOAT,
     _ASSERTION_IDS,
     _CANDIDATE_IDS,
     _COSINE,
@@ -90,6 +85,7 @@ from fixtures.strategy_primitives import (
     _WHEN,
     _ordered_datetimes,
 )
+from fixtures.strategy_verdict import VERDICT_STRATEGIES
 
 _SPAN_MATCHES = st.builds(SpanMatch, span=_SPAN, text=_TEXT, alignment=_UNIT)
 
@@ -165,35 +161,6 @@ def _edges(draw: st.DrawFn) -> Edge:
     )
 
 
-_CONFIDENCE = st.builds(
-    ConfidenceReport,
-    semantic_entropy=_UNIT,
-    grounding=_UNIT,
-    schema_fit=_UNIT,
-    corroboration=_UNIT,
-    consistency=_UNIT,
-    confidence=_UNIT,
-    weights_version=_ID,
-)
-
-_RISK = st.builds(
-    RiskVerdict,
-    impact_level=st.sampled_from(ImpactLevel),
-    risk=_UNIT,
-    features=st.dictionaries(st.text(max_size=16), _ANY_FLOAT, max_size=4),
-    obligations=st.lists(st.sampled_from([k.value for k in ObligationKind]), max_size=3),
-)
-
-_CONFLICT = st.builds(
-    ConflictReport,
-    kind=st.sampled_from(ConflictKind),
-    incumbent_assertion_id=st.none() | _ASSERTION_IDS,
-    entailment=_UNIT,
-    contradiction=_UNIT,
-    cosine=_COSINE,
-    resolution_hint=st.sampled_from(["merge", "supersede", "coexist", "escalate"]),
-)
-
 # S2.1. Layer 1's input vocabulary, and the two models that carry a prompt's
 # reply and a prompt file's frontmatter. The last three live outside
 # `guardmem_core.schemas` for the reason `LLMResponse` does, noted below.
@@ -266,6 +233,12 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # Layer 2, likewise. It takes the candidate generator as an argument so the
     # two modules do not import each other.
     **l2_strategies(_memory_candidates(), _SCORED, _edges()),
+    # Layer 3 (S5.1). Drawn coherently rather than field-by-field - see
+    # `strategy_l3.py` for why that one cannot be loose.
+    **L3_STRATEGIES,
+    # `schemas/verdict.py`, likewise - the four models that carry a decision
+    # and everything it was taken from.
+    **VERDICT_STRATEGIES,
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(
@@ -299,20 +272,6 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     StoredAssertion: _stored_assertions(),
     ScoredAssertion: st.builds(ScoredAssertion, assertion=_stored_assertions(), cosine=_COSINE),
     Edge: _edges(),
-    ConfidenceReport: _CONFIDENCE,
-    RiskVerdict: _RISK,
-    ConflictReport: _CONFLICT,
-    DecisionRecord: st.builds(
-        DecisionRecord,
-        decision=st.sampled_from(Decision),
-        reason_codes=st.lists(_TEXT, max_size=4),
-        confidence=_CONFIDENCE,
-        risk=_RISK,
-        conflict=_CONFLICT,
-        thresholds_version=_ID,
-        policy_version=_ID,
-        escalated_from=st.none() | st.sampled_from(Decision),
-    ),
     Obligation: st.builds(Obligation, kind=st.sampled_from(ObligationKind), reason_code=_ID),
     WriteReceipt: st.builds(
         WriteReceipt,

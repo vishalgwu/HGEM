@@ -2162,11 +2162,55 @@ def semantic_entropy(samples: list[str], entail: EntailFn) -> float:
     return h / math.log(len(samples)) if len(samples) > 1 else 0.0
 ```
 
+**Three corrections to this step, found by building it.**
+
+1. **`H / log K` overshoots 1.0 in float64, and `MeaningClusters.entropy` is
+   declared `le=1.0`.** When every sample is its own cluster, `H` equals `log K`
+   in arithmetic and `log K` plus or minus an ulp in floating point - measured
+   at up to 8e-16 across K = 2..199, and strictly *above* 1.0 for 51 of them,
+   **K = 5 among them**. Five is §1.2's largest sample count, so "five samples
+   that all disagree" would raise a `ValidationError`: the commonest
+   maximum-uncertainty case, and exactly the one this term exists to detect.
+   Clamped, with the measurement in the docstring so the clamp is not read later
+   as defensive noise.
+2. **K = 0 is refused rather than scored.** §3.1 defines `H_norm` from K = 1
+   upward and says nothing about zero. The arithmetic happily returns 0.0 there,
+   which is *maximum* confidence on §3.2's `w_H(1 - H_norm)` term - a full 0.35
+   weight derived from no evidence at all. It raises.
+3. **The minority-cluster drop is built and cannot fire today.** The "Do NOT"
+   list says not to skip it for being fiddly, so it is `MeaningClusters.minority`
+   - but `ExtractionResult.candidates` is drawn from the canonical sample alone,
+   so every candidate is sample 0's and is in sample 0's cluster by
+   construction. There is no candidate the rule could drop until candidates are
+   pooled across samples. Recorded rather than left to be discovered from a
+   counter that never increments.
+
+**The pseudocode's `numpy` is kept.** For K <= 5 it buys nothing over `math.log`
+in a loop, and the argument for dropping it was real - but CHECKPOINT B needs
+numpy anyway for the AUROC over 200 labelled candidates, so the dependency stays
+either way and spec fidelity is the cheaper tie-break. It moved out of
+`pyproject.toml`'s "DECLARED AND NOT YET IMPORTED" block the moment it was
+imported; `test_dependency_consistency.py` is what noticed.
+
 DONE WHEN: the worked example in MEMORY_ENGINE.md 3.1 reproduces `H_norm = 0.590` to 3 decimals.
 That exact assertion goes in the test file.
 
+**Reproduced.** Clusters land as §3.1 says - {Alvarez: 3}, {Chen: 1},
+{unclear: 1}, so `p = (0.6, 0.2, 0.2)` - and that is asserted alongside the
+number, because several wrong partitions round to 0.590 from a different `p`
+and the step's assertion alone would not tell them apart. The unnormalised
+`H = 0.950` is pinned too, since that figure is only reproducible in nats and
+is what fixes the log base.
+
 Also drop a candidate that lands in zero clusters containing sample 0's meaning: that is a
 minority hallucination, and it is worth the fiddly code because it removes a real failure class.
+
+**Two mutants, two kills** - removing the clamp raises on five disagreeing
+samples, and dropping the reverse-entailment check fails the bidirectional
+tests. The second mutant also caught a test of mine that was passing
+vacuously: `test_one_way_entailment_does_not_merge` had its two samples in the
+order that fails the *forward* comparison, so the reverse direction it claimed
+to test was never reached. Reordered.
 
 NOTE: this is the same machinery as LID's semantic-entropy detector. Keep `EntailFn` as an injected
 callable so LID can back it later without touching this module.

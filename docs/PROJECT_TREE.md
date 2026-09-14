@@ -106,7 +106,8 @@ guardmem-ai/
 │   │       │   │   └── dedupe.py        # S4.4; §2.3's resolution table and §2.4's merge.
 │   │       │   │                        #   classify() is pure; merge() adds no row
 │   │       │   └── l3_score/
-│   │       │       ├── entropy.py       # semantic entropy over K samples
+│   │       │       ├── entropy.py       # S5.1; §3.1 bidirectional-entailment clusters,
+│   │       │       │                    #   H_norm, and the minority-hallucination drop
 │   │       │       ├── confidence.py    # weighted confidence composite C
 │   │       │       ├── impact.py        # blast-radius risk R
 │   │       │       └── decision.py      # DecisionMatrix → AUTO_WRITE|HITL|REJECT|ESCALATE
@@ -305,6 +306,10 @@ guardmem-ai/
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates
 │   │   ├── strategy_l2.py               # S4.1/S4.2/S4.4; the Layer 2 result models
+│   │   ├── strategy_l3.py               # S5.1; MeaningClusters, drawn coherently -
+│   │   │                                #   `minority` is derived, not independent
+│   │   ├── strategy_verdict.py          # S5.1; schemas/verdict.py's four models, split
+│   │   │                                #   out when strategies.py crossed the cap
 │   │   ├── seed.py                      # S4.2; the seeded demo tenant, as a plugin
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.

@@ -2952,6 +2952,82 @@ stored alongside." Then `S5.1` — semantic entropy, and the worked example in
 
 ---
 
+## 2026-09-14 — Day 5 · S5.1 (semantic entropy)
+
+**Shipped**
+
+- **`pipeline/l3_score/entropy.py`** — §3.1's bidirectional-entailment
+  clustering, `H_norm = H / log K`, and the minority-hallucination drop. The
+  first Layer 3 module.
+- **The DONE WHEN**: §3.1's worked example reproduces `H_norm = 0.590` to three
+  decimals, with the clusters and the unnormalised `H = 0.950` pinned beside it.
+- **`EntailFn` injected**, so LID's detector can back it later without touching
+  this module. 793 unit and property tests passing; `entropy.py` at 100%
+  statement and branch coverage.
+
+**What broke / what I learned**
+
+- **The formula overshoots its own bound, and the case it breaks on is the one
+  that matters most.** `MeaningClusters.entropy` is declared `le=1.0`. When
+  every sample is its own cluster, `H` equals `log K` exactly in arithmetic —
+  and in float64 it is `log K` give or take an ulp. I measured it across
+  K = 2..199: the error never exceeds 8e-16, but it lands strictly *above* 1.0
+  for 51 of those values, and **K = 5 is one of them**. Five is §1.2's largest
+  sample count, so "five samples that all disagree" raised a `ValidationError`.
+  That is the commonest maximum-uncertainty case in the system and precisely
+  what the entropy term exists to detect — the module would have crashed exactly
+  when it had something to say. A test asserting `== 1.0` is what surfaced it,
+  and the honest fix was to go and measure the range rather than reach for
+  `approx` and move on.
+- **A mutant caught a test of mine that was passing for the wrong reason.**
+  Deleting the reverse-entailment check killed only one test, and it was not the
+  one named `test_one_way_entailment_does_not_merge`. I had ordered its two
+  samples so the *forward* comparison failed, which meant the reverse check the
+  test was written to exercise was never reached. It passed, it was green all
+  along, and it was measuring nothing. Reordered; it now kills that mutant.
+  Worth noting the mutation run is the only thing that could have told me.
+- **I nearly dropped `numpy` and talked myself back.** For K <= 5 the vectorised
+  `-(p * log p).sum()` buys nothing over a loop, and I had a clean precedent for
+  retagging an unused dependency (`anyio`, at S4.3). But CHECKPOINT B computes
+  AUROC over 200 labelled candidates, so numpy stays in the manifest either way
+  — which makes spec fidelity the cheaper tie-break and the retag pure churn.
+  The deferred-dependency guard then made the bookkeeping automatic: the moment
+  the import landed, it told me to move the entry out of the block.
+- **The 400-line cap moved a file for the third time, and again it improved
+  things.** Registering Layer 3 took `strategies.py` to 404. Rather than shave,
+  `schemas/verdict.py`'s four generators went to `strategy_verdict.py` — the
+  seam this directory already draws, one strategy module per source module.
+- **My first `MeaningClusters` strategy was a repair pass and it was wrong.** I
+  drew arbitrary label lists and tried to fix them into valid union-find roots,
+  which is a second implementation of `_find` living in the fixtures. Replaced
+  with a construction that cannot produce an invalid partition: each sample
+  either starts a cluster or joins one that already has a root.
+
+**Still open**
+
+- **The grouping from `ExtractionResult.samples` is not built, and its docstring
+  said S5.1 owned it.** §3.1 clusters "the K samples for a given
+  `(subject, predicate)`", and turning `list[list[ExtractedFact]]` into that
+  needs an answer to a question no document asks: if three of five samples
+  proposed a fact, is K three or five? Treating it as three discards real
+  evidence of uncertainty; treating it as five needs a rule for what absence
+  clusters *as*. Both are defensible and both silently recalibrate `C`, so I did
+  not invent one — the docstring now points at S5.6, which composes the pipeline
+  and has the whole picture.
+- **The minority drop cannot fire.** Candidates come from the canonical sample,
+  so every candidate is in sample 0's cluster by construction.
+- **Entity resolution.** Unchanged.
+- **No applier.** Unchanged from S4.4 — S5.6.
+
+**Tomorrow's first step**
+
+`S5.2` — the confidence composite: `C = w_H(1-H) + w_g S_src + w_s S_sch +
+w_c S_cor + w_k S_con` with the v1 weights, the weights version string on every
+report, and `S_cor = 1 - exp(-0.8(n-1))` checked against 0.0 / 0.55 / 0.80 /
+0.91 for one to four sources.
+
+---
+
 ---
 
 ---

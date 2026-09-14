@@ -167,9 +167,9 @@ stack it actually requires.
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
-– S3.6**), and **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
+– S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it.
+it — and **Layer 3 has begun (S5.1)** with semantic entropy.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -327,6 +327,20 @@ nothing is ever deleted, and a fact restated is corroborated rather than
 duplicated. Building that test is what found a real hole — an incumbent holding
 the identical value did not trip any check, because sameness was being inferred
 from similarity scores rather than read off the values themselves.
+
+S5.1 starts the scoring layer with the uncertainty term. A model asked the same
+question several times may word its answer differently every time without being
+any less sure, so counting distinct strings measures vocabulary rather than
+doubt. The samples are grouped by meaning instead — two answers are the same
+answer only when each one implies the other, in both directions — and the
+uncertainty is the spread across those groups. "Dr. Alvarez" and "Alvarez, MD"
+are one answer; "Dr. Chen" is a second; "unclear" is a third.
+
+Both directions matter, and that is not a detail. A narrower claim always
+implies a broader one — "allergic to penicillin and amoxicillin" implies
+"allergic to penicillin" — so a one-way test would fold a specific answer into a
+vague one and report agreement where the model had actually given two different
+answers.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

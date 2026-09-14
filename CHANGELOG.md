@@ -17,6 +17,68 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.1 — semantic entropy over meaning clusters.**
+  `pipeline/l3_score/entropy.py` implements `MEMORY_ENGINE.md` §3.1: the K
+  samples are partitioned by **bidirectional** entailment and the entropy is
+  taken over meanings rather than over words. One-way entailment is satisfied by
+  any claim narrower than another — "allergic to penicillin and amoxicillin"
+  entails "allergic to penicillin" — so a one-way test would merge a specific
+  answer into a vague one and report agreement where the samples differ.
+- **§3.1's worked example reproduces to three decimals**, which is S5.1's DONE
+  WHEN. The clusters are asserted alongside the number, because several wrong
+  partitions round to 0.590 from a different `p`; the unnormalised `H = 0.950`
+  is pinned too, since it is only reproducible in nats and is what fixes the log
+  base.
+- **`EntailFn` is an injected callable**, as the step asks, so LID's
+  semantic-entropy detector can back it without touching this module. The tests
+  bind a dictionary rather than a model: §3.1's arithmetic is what this module
+  owns, and a real entailment model would make every assertion a measurement of
+  the model instead.
+- **The minority-cluster drop is built** — `MeaningClusters.minority`, the
+  indices whose meaning is not sample 0's. It **cannot fire today**, because
+  `ExtractionResult.candidates` is drawn from the canonical sample alone, so
+  every candidate is sample 0's and is in sample 0's cluster by construction. It
+  becomes live when candidates are pooled across samples, and it is the signal
+  CHECKPOINT B's first diagnostic asks for either way.
+- **`numpy` moved out of the "DECLARED AND NOT YET IMPORTED" block**, which is
+  the rule that block states about itself. `test_dependency_consistency.py`
+  flagged it on the first run after the import landed.
+
+### Fixed
+
+- **`H / log K` overshoots 1.0 in float64 and would have raised on five
+  disagreeing samples.** `MeaningClusters.entropy` is declared `le=1.0`; when
+  every sample is its own cluster `H` equals `log K` in arithmetic and `log K`
+  ± an ulp in floating point — measured at up to 8e-16 across K = 2..199, and
+  strictly above 1.0 for 51 of them, **K = 5 among them**. Five is §1.2's
+  largest sample count, so this was the commonest maximum-uncertainty case and
+  precisely the one the term exists to detect. Clamped, with the measurement in
+  the docstring so it is not read later as defensive noise.
+- **K = 0 is refused rather than scored.** §3.1 defines `H_norm` from K = 1 up
+  and says nothing about zero; the arithmetic returns 0.0 there, which is
+  *maximum* confidence on §3.2's `w_H(1 - H_norm)` term — a full 0.35 weight
+  from no evidence.
+- **A test of mine was passing vacuously**, and the mutation run found it.
+  `test_one_way_entailment_does_not_merge` had its two samples ordered so the
+  *forward* comparison failed, which meant the reverse-direction check it was
+  named for was never reached. Reordered; it now kills the mutant that deletes
+  that check.
+
+### Changed
+
+- **`strategies.py` split along the seam this directory already draws** — one
+  strategy module per source module. Registering Layer 3 took it to 404 lines
+  against `RULES.md` §2.4's cap, and `schemas/verdict.py`'s four models moved to
+  `strategy_verdict.py`. They travel together because `DecisionRecord` composes
+  the other three.
+- **`MeaningClusters` is drawn coherently, not field-by-field**, which is the
+  opposite of what `strategy_l2.py` does and for a reason stated in both. There,
+  looseness cannot contradict a field's own declaration. Here it can: `minority`
+  is *defined* as the indices whose label is not `labels[0]`, so an independent
+  draw yields objects the module cannot emit and no property can be stated over.
+  793 unit and property tests passing locally; `entropy.py` at 100% statement
+  and branch coverage.
+
 - **S4.4 — the resolution matrix and semantic dedupe.**
   `pipeline/l2_validate/dedupe.py` implements `MEMORY_ENGINE.md` §2.3's six-row
   table and §2.4's merge. `conflict.py` decides *whether to ask a model*; this
