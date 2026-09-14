@@ -2002,8 +2002,60 @@ async def detect(cand, incumbents, ontology, nli) -> ConflictReport:
     ...
 ```
 
+**Five corrections to this step, found by building it.**
+
+1. **The sketch omits (c), and §2.2 puts it before the judge.** The pseudocode
+   above short-circuits on `ONE` and then goes straight to `nli.compare`;
+   `MEMORY_ENGINE.md` §2.2(c) has `ONE_PER_TIME` fire on intersecting validity
+   intervals, and like (b) it is arithmetic that needs no model. Implemented in
+   the order the spec gives - (b), (c), then (a) - so a `weight_kg` restatement
+   costs no BALANCED call either.
+2. **§2.2(b) and §2.3 disagree about which check wins, and (b) says so itself.**
+   §2.2(b) reads "a second live value with a different object is a CARDINALITY
+   conflict *regardless of NLI*", while §2.3's table would have a high
+   contradiction score escalate. Followed (b): its "regardless" is explicit, and
+   nothing is lost by it, because both paths resolve by supersession. What is
+   saved is the call.
+3. **CONTRADICTION cannot resolve to `supersede` yet.** §2.3 decides between
+   supersession and escalation using `C`, the Layer 3 confidence score, which
+   does not exist until S5. Emitting `supersede` today would be guessing with a
+   fact's life; the hint is `escalate` until the number it depends on is real.
+   Recorded here because it is a deliberate deviation from the table, not an
+   oversight, and S4.4 owns closing it.
+4. **The judge takes the whole incumbent set in one call.** §2.2 retrieves up to
+   ten and every one has to be scored. Ten BALANCED completions per candidate
+   would be the largest single cost in the pipeline against §3.5's budget, so
+   `adjudicate_conflict@v1` numbers the incumbents and returns one judgement per
+   entry. That makes the count a safety check rather than a formality: the
+   caller pairs judgements back positionally, so a reply one entry short would
+   read one incumbent's contradiction as another's and retire the wrong fact.
+   `LLMJudge` raises on a mismatch instead.
+5. **`detect` is split from the S4.2 half it was sharing a module with.**
+   `conflict.py` reached 409 lines, over `RULES.md` §2.4's cap, and the cap's own
+   message asks for a real seam. S4.2's retrieval is now `incumbents.py` and
+   S4.3's decision is `conflict.py`; `nli.py` is separate again, because *how we
+   get these numbers* has a replacement already scheduled ("a local
+   cross-encoder in week 2") and *what the numbers mean* does not change when
+   the model does.
+
 DONE WHEN: the 60-pair contradiction probe set classifies >= 90% correctly. Build that set by hand
 today — it is the fastest quality signal you will have all month.
+
+**60/60, against a floor of 90%.** What that number is and is not: eleven of the
+sixty are settled by (b) or (c) before any judge is asked, and those measure
+`detect` end to end. The other forty-nine carry hand-set NLI numbers - there is
+no model to run, `RULES.md` §5 bans live calls from the unit suite - so for
+those the probe measures **`detect`'s reading** of §2.2(a)'s thresholds, not a
+judge's accuracy. That distinction is written into the corpus module rather than
+left implied. The judge's accuracy against these same pairs is the nightly eval
+gate's question (S27.1), and this corpus is the input it will use.
+
+A 100% score invites the question of whether the probe is measuring anything, so
+five mutants: raising the contradiction threshold to 0.99 drops it to 78% and
+names all thirteen misses; making the cardinality check test `MANY` drops it to
+72%; lowering the ambiguous floor to 0.0 kills the escalation tests; and in
+`nli.py`, deleting either the positional count check or the canary check kills
+its own test. Five for five.
 
 COMMIT: `feat(s4.3): conflict detection - nli, cardinality, temporal`
 

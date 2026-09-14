@@ -17,6 +17,74 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S4.3 — the three conflict checks.** `pipeline/l2_validate/conflict.py`
+  answers `MEMORY_ENGINE.md` §2.2's question — can this candidate and what is
+  already on record both be true — and the order of the three checks is the
+  design. (b) cardinality and (c) temporal overlap are arithmetic over the
+  ontology and the clock, so they short-circuit; only (a) asks a model, and it
+  asks last.
+- **The step's pseudocode omits (c), and §2.2 puts it before the judge.**
+  `ONE_PER_TIME` predicates conflict on intersecting validity intervals. An
+  undated candidate — which is every candidate today, because
+  `extract_memories/v1.md` does not ask for world time — is read as unbounded in
+  the past, the conservative reading: it raises the conflict rather than missing
+  it.
+- **§2.2(b) wins over §2.3 where they disagree.** (b) says a second live value
+  with a different object is a CARDINALITY conflict *"regardless of NLI"*, while
+  §2.3's table would escalate on a high contradiction score. Followed (b) — its
+  "regardless" is explicit, both paths resolve by supersession, and the saving
+  is one BALANCED call per cardinality violation.
+- **CONTRADICTION resolves to `escalate`, not `supersede`, and that is
+  deliberate.** §2.3 chooses between them using `C`, the Layer 3 confidence
+  score, which does not exist until S5. Emitting `supersede` today would be
+  guessing with a fact's life. S4.4 owns closing this.
+- **`nli.py` — `NLIJudge` and `LLMJudge`.** One BALANCED call for the whole
+  incumbent set, not one per pair: §2.2 retrieves up to ten and ten completions
+  per candidate would be the largest single cost against §3.5's budget. The
+  reply carries one judgement per numbered incumbent, and the count is checked
+  because the caller pairs them back positionally — a reply one entry short
+  would read one incumbent's contradiction as another's and retire the wrong
+  fact. Separate from `conflict.py` because S4.3 already schedules its
+  replacement ("a local cross-encoder in week 2") and what the numbers *mean*
+  does not change when the model does.
+- **`VectorStore.search` returns `ScoredAssertion`, carrying the cosine the
+  store measured.** §2.3's thresholds need it and it was being thrown away.
+  Recomputing it above the store would be subtly wrong: the stored vector came
+  from whatever embedder was configured at *write* time.
+- **`adjudicate_conflict/v1.md`** — bidirectional entailment plus contradiction
+  over `(incumbent, candidate)` verbatim pairs. Both directions because
+  entailment is not symmetric and §2.3 reads the asymmetry: a REFINEMENT is
+  exactly the case where one entails the other and not the reverse.
+- **The 60-pair contradiction probe, by hand: 60/60 against a floor of 90%.**
+  Eleven pairs are settled by (b) or (c) before any judge is asked, and those
+  measure `detect` end to end; the other forty-nine carry hand-set NLI numbers,
+  so for those the probe measures **`detect`'s reading** of the thresholds, not
+  a judge's accuracy. That distinction is written into the corpus rather than
+  implied — the judge's accuracy against these same pairs is the nightly eval
+  gate's question (S27.1), and this corpus is its input.
+- **Five mutants, five kills**, because a 100% score invites the question of
+  whether the probe measures anything. Raising the contradiction threshold to
+  0.99 drops it to 78%; testing `MANY` instead of `ONE` in the cardinality check
+  drops it to 72%; lowering the ambiguous floor to 0.0, deleting `nli.py`'s
+  positional count check, and deleting its canary check each kill their own
+  tests. 784 tests, 782 passing locally (62 of them against real Postgres),
+  100% coverage of everything the unit suite can reach.
+
+### Changed
+
+- **`conflict.py` split along the S4.2/S4.3 seam.** It reached 409 lines, over
+  `RULES.md` §2.4's cap, and the cap's message asks for a real seam rather than
+  a shave. Retrieval is `incumbents.py`; the decision is `conflict.py`.
+- **The contradiction corpus is three modules, split by which mistake each row
+  guards against** — `corpus_settled` (no judge is asked), `corpus_contradictions`
+  (must be caught), `corpus_coexist` (must not be flagged, plus the 0.3–0.65 band
+  that must escalate instead). Same cap, and the paragraph explaining the corpus
+  had already drawn that line. The grab-bag `_MORE` group went away with it: its
+  ten rows belonged to the three real groups.
+- **`tests/fixtures/conflict.py`** — the scaffolding `test_conflict_detection.py`
+  shares with the probe, split out at the same cap, the same way
+  `fixtures/extraction.py` was at S2.2.
+
 - **S4.2 — incumbent retrieval.** `pipeline/l2_validate/conflict.py` fetches
   `MEMORY_ENGINE.md` §2.2's top-10 by cosine within
   `(namespace, subject, predicate)` plus the 1-hop graph neighbours. It is the

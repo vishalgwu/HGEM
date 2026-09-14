@@ -13,7 +13,8 @@
 > coordinates the dual write, the graph store on the other side of it, and the
 > ontology that says what a predicate is allowed to mean — with `make seed`
 > putting all of it together, and S4.1 starting Layer 2 by enforcing that
-> vocabulary and S4.2 retrieving what it already believes:
+> vocabulary, S4.2 retrieving what it already believes and S4.3 deciding
+> whether the two can both be true:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -166,8 +167,8 @@ stack it actually requires.
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
-– S3.6**), and **Layer 2 is under way (S4.1 – S4.2)** — the schema gate and incumbent
-retrieval.
+– S3.6**), and **Layer 2 is under way (S4.1 – S4.3)** — the schema gate, incumbent
+retrieval and conflict detection.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -287,9 +288,30 @@ not, the cosine distances would still be numbers, would still order the results,
 and would mean nothing at all. So there is one such function and both sides go
 through it.
 
+S4.3 asks the question retrieval was for: can this candidate and what is already
+on record both be true? There are three ways to answer and the order matters.
+Two of them are arithmetic — a predicate the ontology says holds one value at a
+time already has one, or two validity intervals overlap — and neither needs a
+model. Only the third does, and it goes last, so a contradiction that the
+ontology alone can see costs nothing to find.
+
+When a model is needed it is asked once for the whole set rather than once per
+pair, and it returns one judgement per numbered incumbent. That count is
+checked rather than trusted: the judgements are matched back to the incumbents
+by position, so a reply one entry short would read one fact's contradiction as
+another's and retire the wrong one.
+
+The quality signal is a sixty-pair set written by hand — conflicts, duplicates
+that must not be mistaken for conflicts, and cases sitting deliberately in the
+band where the right answer is *ask a human*. It classifies all sixty correctly
+against a bar of ninety percent, and five deliberate mutations of the code were
+each caught by it, which is the part of that claim worth believing. What it
+measures honestly is this repository's reading of the numbers; the judge's own
+accuracy is a later step's question, and this same set is what will ask it.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S4.3, the three conflict checks.
+push. The next step is S4.4, the resolution matrix and dedupe/merge.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

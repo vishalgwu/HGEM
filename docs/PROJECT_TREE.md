@@ -82,7 +82,7 @@ guardmem-ai/
 │   │       │   ├── loader.py            # S2.1; render(name, version, variables), frontmatter
 │   │       │   ├── classify_noise/v1.md # S2.1; the Layer-1 noise classifier
 │   │       │   ├── extract_memories/v1.md   # S2.2; K-sample extraction
-│   │       │   ├── adjudicate_conflict/v1.md
+│   │       │   ├── adjudicate_conflict/v1.md  # S4.3; one call for the whole incumbent set
 │   │       │   └── review_brief/v1.md
 │   │       ├── ontology/                # tenant starter packs, loaded by schemas/ontology.py
 │   │       │   └── clinical.yaml         # S3.5; 15 predicates, 6 entity types. legal/fintech
@@ -97,8 +97,12 @@ guardmem-ai/
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # S4.1; pass / coerce / quarantine / reject against
 │   │       │   │   │                    #   the tenant ontology, carrying S_sch forward
-│   │       │   │   ├── conflict.py      # S4.2 incumbent retrieval; S4.3 adds NLI
-│   │       │   │   │                    #   contradiction + cardinality + temporal
+│   │       │   │   ├── incumbents.py    # S4.2; top-10 by cosine within (namespace,
+│   │       │   │   │                    #   subject, predicate) plus 1-hop graph neighbours
+│   │       │   │   ├── conflict.py      # S4.3; detect() - (b) cardinality and (c) temporal
+│   │       │   │   │                    #   overlap answer without a model, (a) NLI last
+│   │       │   │   ├── nli.py           # S4.3; NLIJudge protocol + LLMJudge. Separate
+│   │       │   │   │                    #   because the cross-encoder swap is scheduled
 │   │       │   │   └── dedupe.py        # cosine + bidirectional entailment merge
 │   │       │   └── l3_score/
 │   │       │       ├── entropy.py       # semantic entropy over K samples
@@ -279,6 +283,16 @@ guardmem-ai/
 │   │   ├── graph_faults.py              # S3.3; GraphStore doubles, one failure mode each
 │   │   ├── extraction.py                # shared extraction scaffolding (S2.2)
 │   │   ├── noise_corpus.py              # 40 hand-labelled turns, the S2.1 gate
+│   │   ├── contradiction_corpus.py      # S4.3; PAIRS - the 60-pair probe, assembled from
+│   │   │                                #   the three modules below. Split by which mistake
+│   │   │                                #   a row guards against, not by size
+│   │   ├── conflict_pair.py             # S4.3; ConflictPair + the pair() shorthand
+│   │   ├── corpus_settled.py            # S4.3; the 20 rows (b)/(c) answer with no judge
+│   │   ├── corpus_contradictions.py     # S4.3; rows a judge has to catch
+│   │   ├── corpus_coexist.py            # S4.3; rows that must NOT be flagged, plus the
+│   │   │                                #   0.3-0.65 band that must escalate instead
+│   │   ├── conflict.py                  # S4.3; shared detect() scaffolding, split from
+│   │   │                                #   test_conflict_detection.py at the 400-line cap
 │   │   ├── assertions.py                # cleanup-to-S4.1; the ONE StoredAssertion builder.
 │   │   │                                #   Five modules had a near-identical copy of a
 │   │   │                                #   fourteen-field model

@@ -21,15 +21,21 @@ from hypothesis import strategies as st
 
 from fixtures.strategy_primitives import _ID, _UNIT
 from guardmem_core.pipeline.l2_validate import (
+    AdjudicationBatch,
     GatedCandidate,
     GateOutcome,
     IncumbentSet,
+    Judgement,
     SchemaGateResult,
 )
 from guardmem_core.schemas import GMModel
 from guardmem_core.types import CandidateId
 
 __all__ = ["l2_strategies"]
+
+
+# One NLI verdict. `_UNIT` is [0, 1], which is what all three fields declare.
+_JUDGEMENTS = st.builds(Judgement, entail_fwd=_UNIT, entail_rev=_UNIT, contradiction=_UNIT)
 
 
 def _gated(candidates: st.SearchStrategy[object]) -> st.SearchStrategy[GatedCandidate]:
@@ -45,7 +51,7 @@ def _gated(candidates: st.SearchStrategy[object]) -> st.SearchStrategy[GatedCand
 
 def l2_strategies(
     candidates: st.SearchStrategy[object],
-    assertions: st.SearchStrategy[object],
+    scored: st.SearchStrategy[object],
     edges: st.SearchStrategy[object],
 ) -> dict[type[GMModel], st.SearchStrategy[GMModel]]:
     """Build the registry entries, given the generators this layer composes.
@@ -63,10 +69,14 @@ def l2_strategies(
             quarantined=st.lists(gated, max_size=2),
             rejected=st.lists(gated, max_size=2),
         ),
+        Judgement: _JUDGEMENTS,
+        AdjudicationBatch: st.builds(
+            AdjudicationBatch, judgements=st.lists(_JUDGEMENTS, max_size=3)
+        ),
         IncumbentSet: st.builds(
             IncumbentSet,
             candidate_id=_ID.map(CandidateId),
-            nearest=st.lists(assertions, max_size=3),
+            nearest=st.lists(scored, max_size=3),
             neighbours=st.lists(edges, max_size=2),
         ),
     }

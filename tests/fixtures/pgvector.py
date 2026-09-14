@@ -221,4 +221,4 @@ async def search(
     found = await store.search(
         namespace=NS, embedding=vector, k=k, filters=filters or {}, as_of=as_of
     )
-    return [assertion.assertion_id for assertion in found]
+    return [hit.assertion.assertion_id for hit in found]

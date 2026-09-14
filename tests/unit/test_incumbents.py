@@ -1,11 +1,11 @@
-"""`conflict.py`'s retrieval half, against the fakes.  BUILD_NOTEBOOK.md S4.2
+"""`incumbents.py`, against the fakes.  BUILD_NOTEBOOK.md S4.2
 
-Named for the module rather than for the function, and deliberately not
-`test_incumbent_retrieval.py` - that name belongs to the integration suite, and
-`tests/` has no `__init__.py`, so two files sharing a basename are two modules
-with the same name. pytest aborts collection for the whole run and `mypy`
-refuses the pair outright. The same trap took the test tree out of
-`make typecheck` at S3.2 with two `conftest.py` files.
+Named for the module it covers. Deliberately not `test_incumbent_retrieval.py`:
+that name belongs to the integration suite, and `tests/` has no `__init__.py`,
+so two files sharing a basename are two modules with the same name - pytest
+aborts collection for the whole run and `mypy` refuses the pair outright. The
+same trap took the test tree out of `make typecheck` at S3.2 with two
+`conftest.py` files.
 
 
 S4.2's DONE WHEN is an integration test - `tests/integration/
@@ -36,7 +36,7 @@ import pytest
 from fixtures.assertions import NS, WHEN, stored_assertion
 from fixtures.fakes import FakeGraphStore, FakeVectorStore
 from guardmem_core.errors import StoreUnavailable
-from guardmem_core.memory.vector.base import embed_text
+from guardmem_core.memory.vector.base import ScoredAssertion, embed_text
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.pipeline.l2_validate import retrieve_incumbents
 from guardmem_core.schemas.candidate import MemoryCandidate
@@ -119,7 +119,7 @@ class RecordingStore(FakeVectorStore):
         k: int,
         filters: dict[str, object],
         as_of: datetime | None = None,
-    ) -> list[StoredAssertion]:
+    ) -> list[ScoredAssertion]:
         """Record the call, then answer it."""
         self.calls.append({"namespace": namespace, "k": k, "filters": filters, "as_of": as_of})
         return await super().search(
@@ -216,7 +216,7 @@ class TestWhatComesBack:
             embedder=HashEmbedder(),
         )
 
-        assert [a.assertion_id for a in found.nearest] == [incumbent.assertion_id]
+        assert [h.assertion.assertion_id for h in found.nearest] == [incumbent.assertion_id]
 
     async def test_another_subjects_fact_is_not_an_incumbent(self) -> None:
         """The filter, observed through the result rather than the call."""
@@ -282,7 +282,7 @@ class TestTheGraphWidensRatherThanRepeats:
             embedder=HashEmbedder(),
         )
 
-        assert [a.assertion_id for a in found.nearest] == [incumbent.assertion_id]
+        assert [h.assertion.assertion_id for h in found.nearest] == [incumbent.assertion_id]
         assert found.neighbours == []
 
     async def test_a_fact_under_another_predicate_does_widen_it(self) -> None:
@@ -335,7 +335,7 @@ class UnreachableStore(FakeVectorStore):
         k: int,
         filters: dict[str, object],
         as_of: datetime | None = None,
-    ) -> list[StoredAssertion]:
+    ) -> list[ScoredAssertion]:
         """Fail the way a dead Postgres does."""
         raise StoreUnavailable("postgres is unreachable")
 

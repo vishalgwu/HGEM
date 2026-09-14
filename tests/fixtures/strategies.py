@@ -22,6 +22,7 @@ from __future__ import annotations
 from hypothesis import strategies as st
 
 from guardmem_core.llm.base import LLMResponse, Tier
+from guardmem_core.memory.vector.base import ScoredAssertion
 from guardmem_core.pipeline.l1_extract.extractor import ExtractionBatch, ExtractionContext
 from guardmem_core.pipeline.l1_extract.noise_filter import (
     NoiseClassification,
@@ -255,13 +256,16 @@ def _extraction_results(draw: st.DrawFn) -> ExtractionResult:
     )
 
 
+# One search hit. Named because `IncumbentSet` draws lists of them too.
+_SCORED = st.builds(ScoredAssertion, assertion=_stored_assertions(), cosine=_COSINE)
+
 SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # The ontology layer, from its own module - see `strategy_ontology.py`
     # for why `Ontology` has to draw its entity types before its predicates.
     **ONTOLOGY_STRATEGIES,
     # Layer 2, likewise. It takes the candidate generator as an argument so the
     # two modules do not import each other.
-    **l2_strategies(_memory_candidates(), _stored_assertions(), _edges()),
+    **l2_strategies(_memory_candidates(), _SCORED, _edges()),
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(
@@ -293,6 +297,7 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
         Entity, entity_id=_ENTITY_IDS, tenant_id=_TENANT_IDS, type=_ID, canonical_name=_TEXT
     ),
     StoredAssertion: _stored_assertions(),
+    ScoredAssertion: st.builds(ScoredAssertion, assertion=_stored_assertions(), cosine=_COSINE),
     Edge: _edges(),
     ConfidenceReport: _CONFIDENCE,
     RiskVerdict: _RISK,

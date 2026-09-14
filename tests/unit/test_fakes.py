@@ -148,7 +148,7 @@ async def test_search_returns_a_live_visible_assertion() -> None:
 
     found = await store.search(namespace=_NS, embedding=[0.1], k=10, filters={})
 
-    assert [a.assertion_id for a in found] == ["a_1"]
+    assert [h.assertion.assertion_id for h in found] == ["a_1"]
 
 
 @pytest.mark.parametrize(
@@ -201,7 +201,7 @@ async def test_search_applies_filters_and_honours_k() -> None:
     )
     capped = await store.search(namespace=_NS, embedding=[0.1], k=1, filters={})
 
-    assert {a.assertion_id for a in allergies} == {"a_1", "a_2"}
+    assert {h.assertion.assertion_id for h in allergies} == {"a_1", "a_2"}
     assert len(capped) == 1
 
 
@@ -215,7 +215,7 @@ async def test_upsert_is_idempotent_by_assertion_id() -> None:
     found = await store.search(namespace=_NS, embedding=[0.1], k=10, filters={})
 
     assert len(found) == 1
-    assert found[0].object == "amoxicillin"
+    assert found[0].assertion.object == "amoxicillin"
 
 
 async def test_supersede_retires_without_deleting() -> None:
@@ -272,7 +272,7 @@ async def test_as_of_recovers_an_assertion_that_has_since_been_superseded() -> N
 
     async def found(as_of: datetime | None) -> list[str]:
         results = await store.search(namespace=_NS, embedding=[0.0], k=10, filters={}, as_of=as_of)
-        return [a.assertion_id for a in results]
+        return [h.assertion.assertion_id for h in results]
 
     assert await found(None) == []
     assert await found(retired_at - timedelta(days=1)) == ["a_old"]

@@ -107,14 +107,14 @@ class TestTheDoneWhen:
             embedder=HashEmbedder(),
         )
 
-        assert "penicillin" in [a.object for a in found.nearest]
+        assert "penicillin" in [h.assertion.object for h in found.nearest]
         # Nearest, not merely present: identical text embeds identically, so the
         # fact the candidate restates must outrank the patient's three other
         # live allergies. `allergy` is `cardinality: many` in the clinical pack,
         # which is why all four are incumbents and why the ordering matters.
-        assert found.nearest[0].object == "penicillin"
-        assert found.nearest[0].predicate == "allergy"
-        assert found.nearest[0].visible is True
+        assert found.nearest[0].assertion.object == "penicillin"
+        assert found.nearest[0].assertion.predicate == "allergy"
+        assert found.nearest[0].assertion.visible is True
 
     async def test_the_incumbent_arrives_with_its_provenance(
         self, pool: asyncpg.Pool, demo: tuple[asyncpg.Connection, str], patient: EntityId
@@ -138,7 +138,7 @@ class TestTheDoneWhen:
             embedder=HashEmbedder(),
         )
 
-        citation = found.nearest[0].provenance[0]
+        citation = found.nearest[0].assertion.provenance[0]
         assert citation.verbatim == "I'm allergic to penicillin"
         assert citation.source_tier is SourceTier.VERIFIED_USER
 
@@ -162,7 +162,7 @@ class TestTheFilterIsReal:
             embedder=HashEmbedder(),
         )
 
-        assert [a.object for a in found.nearest] == ["English"]
+        assert [h.assertion.object for h in found.nearest] == ["English"]
 
     async def test_a_predicate_with_several_live_values_returns_them_all(
         self, pool: asyncpg.Pool, demo: tuple[asyncpg.Connection, str], patient: EntityId
@@ -181,7 +181,7 @@ class TestTheFilterIsReal:
             embedder=HashEmbedder(),
         )
 
-        assert sorted(str(a.object) for a in found.nearest) == [
+        assert sorted(str(h.assertion.object) for h in found.nearest) == [
             "latex",
             "penicillin",
             "shellfish",
@@ -209,7 +209,7 @@ class TestTheFilterIsReal:
             embedder=HashEmbedder(),
         )
 
-        assert found.nearest[0].object == "shellfish"
+        assert found.nearest[0].assertion.object == "shellfish"
 
     async def test_a_retired_fact_is_not_an_incumbent(
         self, pool: asyncpg.Pool, demo: tuple[asyncpg.Connection, str], patient: EntityId
@@ -231,7 +231,7 @@ class TestTheFilterIsReal:
             embedder=HashEmbedder(),
         )
 
-        assert [a.object for a in found.nearest] == ["3 Calder Way, Leeds"]
+        assert [h.assertion.object for h in found.nearest] == ["3 Calder Way, Leeds"]
 
 
 class TestAnUnknownSubject:

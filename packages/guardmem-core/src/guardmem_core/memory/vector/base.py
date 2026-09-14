@@ -23,11 +23,41 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from guardmem_core.schemas.base import ObjectValue
+from pydantic import Field
+
+from guardmem_core.schemas.base import GMModel, ObjectValue
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.types import AssertionId, Namespace
 
-__all__ = ["Claim", "Embedder", "VectorStore", "embed_text"]
+__all__ = ["Claim", "Embedder", "ScoredAssertion", "VectorStore", "embed_text"]
+
+
+class ScoredAssertion(GMModel):
+    """One search hit and how near it was.
+
+    Attributes:
+        assertion: The fact.
+        cosine: Cosine **similarity** in [-1, 1], not pgvector's distance.
+            `1 - (embedding <=> query)`, converted at the edge so nothing above
+            the store has to remember which direction the operator runs in - a
+            threshold compared against the wrong one passes silently and
+            inverts the ranking.
+
+    Added at S4.3, and the reason is a number that was being thrown away.
+    `PgVectorStore.search` has always computed `embedding <=> $n AS distance` to
+    order by it, then dropped it; `MEMORY_ENGINE.md` §2.3's resolution table
+    keys three of its six rows on cosine (DUPLICATE at >= 0.95, REFINEMENT at
+    >= 0.80, NONE below 0.80) and `ConflictReport.cosine` is a required field.
+
+    Recomputing it above the store was the alternative and it is subtly wrong:
+    the stored vector came from whatever embedder was configured *at write
+    time*, so re-embedding an incumbent today compares the query against a
+    vector the database does not hold. The number has to come from the database
+    that measured it.
+    """
+
+    assertion: StoredAssertion
+    cosine: float = Field(ge=-1.0, le=1.0)
 
 
 class Claim(Protocol):
@@ -165,8 +195,8 @@ class VectorStore(Protocol):
         k: int,
         filters: dict[str, object],
         as_of: datetime | None = None,
-    ) -> list[StoredAssertion]:
-        """Return the `k` nearest live assertions in a namespace.
+    ) -> list[ScoredAssertion]:
+        """Return the `k` nearest live assertions in a namespace, with their scores.
 
         Args:
             namespace: Isolation scope. Not a filter among filters - tenant
@@ -199,11 +229,16 @@ class VectorStore(Protocol):
                 axis - is a different query and belongs with `memory.timeline`.
 
         Returns:
-            Up to `k` assertions, nearest first. **Never a tombstoned or
+            Up to `k` `ScoredAssertion`s, nearest first. **Never a tombstoned or
             invisible one** - invariant I6, and the reason it is stated on the
             protocol rather than left to each backend: a store that leaks a
             superseded fact into retrieval breaks the product's central claim
             while every test that does not look for it still passes.
+
+            The score is cosine *similarity*, not distance - see
+            `ScoredAssertion`. Returning it is S4.3's requirement: §2.3's
+            resolution table reads it and the store is the only thing that
+            knows it.
 
         Raises:
             StoreUnavailable: The store is unreachable. Retryable.

@@ -39,7 +39,7 @@ import asyncpg
 
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.outbox import INSERT_OUTBOX, outbox_params
-from guardmem_core.memory.vector.base import embed_text
+from guardmem_core.memory.vector.base import ScoredAssertion, embed_text
 from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.memory.vector.rowmap import (
     ASSERTION_COLUMNS,
@@ -189,7 +189,7 @@ class PgVectorStore:
         k: int,
         filters: dict[str, object],
         as_of: datetime | None = None,
-    ) -> list[StoredAssertion]:
+    ) -> list[ScoredAssertion]:
         """Return the `k` nearest assertions: live now, or valid at `as_of`.
 
         Args:
@@ -203,8 +203,9 @@ class PgVectorStore:
                 recoverable - and the DONE WHEN of this step.
 
         Returns:
-            Up to `k` assertions, nearest first, each hydrated with its full
-            provenance list.
+            Up to `k` scored assertions, nearest first, each hydrated with its
+            full provenance list and carrying the cosine similarity the index
+            ordered it by.
 
         Raises:
             StoreUnavailable: Postgres is unreachable.
@@ -229,7 +230,15 @@ class PgVectorStore:
         async with self._transaction() as connection:
             rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
             citations = await self._citations(connection, [row["id"] for row in rows])
-        return [assertion_from_row(row, citations[row["id"]]) for row in rows]
+        # `<=>` is cosine *distance*; the protocol publishes similarity. Converted
+        # here, at the one place that knows which direction the operator runs in.
+        return [
+            ScoredAssertion(
+                assertion=assertion_from_row(row, citations[row["id"]]),
+                cosine=1.0 - float(row["distance"]),
+            )
+            for row in rows
+        ]
 
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
         """Retire `old_id` in favour of `new_id`. Never deletes.

@@ -33,8 +33,17 @@ dependencies = [
   #                   provider, created in lifespan, never per-request.
   # `structlog` S13.1 observability. RULES.md 6: structured JSON logging only,
   #                   every line carrying trace_id, tenant_id and namespace.
-  # `anyio`     S4.3  the conflict checks. RULES.md 2.2 sends CPU-bound work -
-  #                   NLI on CPU, embedding math - through anyio.to_thread.
+  # `anyio`     S9.1  CPU-bound work off the event loop. RULES.md 2.2 routes it
+  #                   through anyio.to_thread, and S9.1's local embedder is the
+  #                   first such work the package owns.
+  #                   RETAGGED FROM S4.3, per this block's own re-check rule.
+  #                   S4.3 shipped and did not import it: the step chose a
+  #                   BALANCED-tier LLM judge, which is a network call, and
+  #                   deferred the local cross-encoder ("swap in a local
+  #                   cross-encoder in week 2 if latency demands it"). That
+  #                   cross-encoder still needs this, behind the NLIJudge
+  #                   protocol, but "week 2" is not a step id and S9.1 is the
+  #                   nearer honest one. Kept, not removed.
   # `numpy`     S5.1  semantic entropy over meaning clusters.
   "httpx>=0.27",
   "structlog>=24.4",

@@ -103,13 +103,13 @@ class TestWritesAreInvisibleUntilTheRelaySaysSo:
         vector = (await embedder.embed(["allergy: penicillin"]))[0]
         found = await store.search(namespace=NS, embedding=vector, k=10, filters={})
 
-        assert [a.assertion_id for a in found] == [written.assertion_id]
-        citation = found[0].provenance[0]
+        assert [h.assertion.assertion_id for h in found] == [written.assertion_id]
+        citation = found[0].assertion.provenance[0]
         assert citation.source_span == (13, 35)
         assert citation.source_tier is SourceTier.VERIFIED_USER
         assert citation.alignment == pytest.approx(0.97)
-        assert found[0].object == "penicillin"
-        assert found[0].tenant_id == tenancy["tenant"]
+        assert found[0].assertion.object == "penicillin"
+        assert found[0].assertion.tenant_id == tenancy["tenant"]
 
 
 class TestSearch:

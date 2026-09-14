@@ -2771,6 +2771,106 @@ cardinality against the ontology, and temporal overlap.
 
 ---
 
+## 2026-09-13 — Day 4 · S4.3 (the three conflict checks)
+
+**Shipped**
+
+- `pipeline/l2_validate/conflict.py` — `detect()`. §2.2's three checks in §2.2's
+  order: (b) cardinality, (c) temporal overlap, then (a) NLI. The first two are
+  arithmetic and short-circuit.
+- `pipeline/l2_validate/nli.py` — `NLIJudge` protocol and `LLMJudge`, one
+  BALANCED call for the whole incumbent set.
+- `prompts/adjudicate_conflict/v1.md` — bidirectional entailment plus
+  contradiction over verbatim pairs.
+- `VectorStore.search` returns `ScoredAssertion` now, carrying the cosine the
+  store measured.
+- The 60-pair probe, by hand: **60/60 against a floor of 90%.** 784 tests, 782
+  passing locally (62 against real Postgres), 2 skipped.
+
+**What broke / what I learned**
+
+- **The step's own pseudocode omits check (c), and the spec puts it before the
+  judge.** The notebook sketch short-circuits on `ONE` and then calls
+  `nli.compare`; §2.2(c) has `ONE_PER_TIME` fire on intersecting intervals, and
+  it is arithmetic like (b). I built the spec's three, in the spec's order. Had
+  I built the sketch, every `weight_kg` restatement would have cost a BALANCED
+  call to reach an answer the ontology already had.
+
+- **Two clauses of the spec disagree, and one of them says so.** §2.2(b) makes a
+  second live value with a different object a CARDINALITY conflict *"regardless
+  of NLI"*; §2.3's table would escalate the same pair on a high contradiction
+  score. I followed (b) because its "regardless" is explicit and because nothing
+  is lost — both routes end in supersession. Worth writing down that I checked
+  rather than picked.
+
+- **I could not honestly emit `supersede` for a contradiction.** §2.3 chooses
+  between supersede and escalate using `C`, the Layer 3 confidence composite,
+  which does not exist until S5. So CONTRADICTION resolves to `escalate` today.
+  That is a deliberate deviation from a table in the spec of record, which is
+  exactly the kind of thing that looks like a bug in three weeks if it is not
+  recorded here. S4.4 closes it.
+
+- **A 100% probe score is a reason for suspicion, not satisfaction.** Sixty out
+  of sixty on a bar of ninety could mean the corpus is easy, or that the
+  assertions are tautological. So I mutated the code five times: contradiction
+  threshold to 0.99 → 78%, and it named all thirteen misses; cardinality testing
+  `MANY` instead of `ONE` → 72%; ambiguous floor to 0.0, and deleting either of
+  `nli.py`'s two guards → their own tests fail. Five for five. The mutants are
+  the evidence; the score on its own is not.
+
+- **What the probe measures is narrower than the DONE WHEN sounds, and I wrote
+  that into the corpus rather than letting the number speak for itself.** Eleven
+  pairs are settled before any judge is asked — those are `detect` end to end.
+  The other forty-nine carry NLI numbers I set by hand, because there is no
+  model to run (`RULES.md` §5 bans live calls from the unit suite), so for those
+  the probe measures *my code's reading of the thresholds*, not a judge's
+  accuracy. Real measurement of the half this repo owns; fake measurement of the
+  half it does not. The nightly eval gate at S27.1 asks the other question, and
+  this same corpus is its input.
+
+- **The count check in `LLMJudge` is the one thing here that could lose a fact
+  silently.** Judgements are matched back to incumbents by position. A reply one
+  entry short does not raise on its own — it shifts, so incumbent 2's
+  contradiction is read as incumbent 3's, and a fact gets retired for something
+  a different fact said. Nothing downstream could detect that. It raises.
+
+- **Two 400-line caps hit in one step, and both splits improved the code.**
+  `conflict.py` reached 409 and split along the S4.2/S4.3 seam
+  (`incumbents.py` / `conflict.py`) — which also let `nli.py` stand apart, right,
+  since S4.3 already schedules a cross-encoder to replace it. The corpus reached
+  667 and split three ways by *which mistake each row guards against*, a line
+  its own explanatory paragraph had already drawn. That split killed a group
+  called `_MORE` — ten rows appended "when the set was counted and came to
+  fifty" — whose members all belonged to real groups. "More" was never a
+  category.
+
+- **Answering S4.2's open question: the checks do not need the graph
+  neighbours.** Yesterday I left open whether S4.3 would need provenance off the
+  `Edge`s. It does not — all three checks read `nearest`, which carries full
+  `StoredAssertion`s. The `Edge`-vs-assertion asymmetry is still there and still
+  unresolved; it just is not S4.3's problem, so I have moved it forward rather
+  than closed it.
+
+**Still open**
+
+- **Entity resolution.** Unchanged from yesterday, and still the largest gap in
+  the build. No step, no module, no mention in any spec.
+- **CONTRADICTION → `escalate` is a placeholder.** It becomes a real choice at
+  S5 when `C` exists; S4.4 is where the table gets implemented.
+- The graph half still returns `Edge`s rather than assertions. Not needed by the
+  three checks; **S4.4**'s merge is the next step that could care.
+- `detect` judges one candidate at a time. A batch arriving from Layer 1 makes
+  one BALANCED call per candidate with an incumbent, and nothing yet batches
+  across candidates.
+
+**Tomorrow's first step**
+
+`S4.4` — the resolution matrix and dedupe/merge: §2.3's table, and the merge
+that an incumbent already saying what the candidate says should have been all
+along.
+
+---
+
 ---
 
 <!--

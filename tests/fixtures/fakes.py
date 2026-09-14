@@ -44,12 +44,16 @@ from pydantic import BaseModel
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 from guardmem_core.memory.graph.base import GraphStore
-from guardmem_core.memory.vector.base import Embedder, VectorStore
+from guardmem_core.memory.vector.base import Embedder, ScoredAssertion, VectorStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.schemas.entity import Edge, StoredAssertion
 from guardmem_core.types import AssertionId, EntityId, Namespace
 
 __all__ = ["FakeGraphStore", "FakeLLM", "FakeVectorStore", "RecordedCall"]
+
+# See `FakeVectorStore.search`: the fake holds no vectors, so it reports a
+# constant rather than inventing a spread.
+_FAKE_COSINE = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,8 +174,8 @@ class FakeVectorStore:
         k: int,
         filters: dict[str, object],
         as_of: datetime | None = None,
-    ) -> list[StoredAssertion]:
-        """Return up to `k` assertions in `namespace` matching `filters`.
+    ) -> list[ScoredAssertion]:
+        """Return up to `k` scored assertions in `namespace` matching `filters`.
 
         "Live" is the whole point of this method and it is three conditions,
         every one of which a real backend also applies: `visible` is true (the
@@ -189,6 +193,13 @@ class FakeVectorStore:
         `embedding` is accepted and ignored - ordering is by insertion, newest
         first. Tests that need a specific order should write in that order,
         which is more legible than scripting vectors.
+
+        **Every hit scores `1.0`, and that is the same admission.** The fake
+        holds no vectors, so it has no distance to report; a made-up spread
+        would be a number tests could start asserting on and nothing would be
+        measuring. Anything that turns on cosine - §2.3's resolution thresholds
+        - belongs in the integration suite, against a store that actually
+        computed one.
         """
         matches = [
             assertion
@@ -202,7 +213,7 @@ class FakeVectorStore:
                 for attribute, expected in filters.items()
             )
         ]
-        return matches[:k]
+        return [ScoredAssertion(assertion=match, cosine=_FAKE_COSINE) for match in matches[:k]]
 
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
         """Retire `old_id` in favour of `new_id`, without deleting anything.
