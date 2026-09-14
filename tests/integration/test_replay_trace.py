@@ -78,6 +78,7 @@ async def record_a_decision(
             tenant_id=TenantId(tenant),
             trace_id=TRACE,
             created_at=WHEN,
+            timeout_s=TIMEOUT,
         )
     return decided.decision
 
@@ -115,7 +116,7 @@ class TestTheDoneWhen:
         async with tenant_transaction(
             pool, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT
         ) as connection:
-            links = await read_chain(connection, TenantId(tenancy["tenant"]))
+            links = await read_chain(connection, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT)
         recovered = _decisions_in(links, TRACE)
 
         assert len(recovered) == 1

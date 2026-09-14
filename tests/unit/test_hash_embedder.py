@@ -86,9 +86,23 @@ class TestTheShapeTheColumnDeclares:
 
 
 class TestRecording:
+    async def test_it_records_nothing_unless_asked(self) -> None:
+        """The default, and the one that matters in a long-lived process.
+
+        `texts` is a `list[str]` that grows once per embedded text and is never
+        trimmed, so a server wired with this embedder - and until S9.1 there is
+        no other - would accumulate every text it had ever seen. The recording
+        is a test affordance; the default has to be the production-safe one.
+        """
+        embedder = HashEmbedder()
+
+        await embedder.embed(["first", "second"])
+
+        assert embedder.texts == []
+
     async def test_it_records_every_text_it_was_asked_for_in_order(self) -> None:
         """What proves the store embeds the *assertion* and not its id."""
-        embedder = HashEmbedder()
+        embedder = HashEmbedder(record=True)
 
         await embedder.embed(["first", "second"])
         await embedder.embed(["third"])
@@ -99,7 +113,7 @@ class TestRecording:
         """A mutable default on the dataclass field would make every embedder in
         the process append to one list - and the tests that assert on `texts`
         would start passing for the wrong reason."""
-        first, second = HashEmbedder(), HashEmbedder()
+        first, second = HashEmbedder(record=True), HashEmbedder(record=True)
 
         await first.embed(["mine"])
 

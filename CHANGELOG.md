@@ -15,8 +15,78 @@ repository; the log records what happened while changing it.
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI was red on `main` and the cause was one missing line of pytest
+  configuration.** `pythonpath = ["."]` is now set in `pyproject.toml`. Two jobs
+  were failing — `integration` since S5.6 and `gates` since the CHECKPOINT B
+  commit — and both for the same reason: `tests/unit/test_checkpoint_b_harness.py`
+  and `tests/integration/test_replay_trace.py` import the modules they test as
+  `scripts.checkpoint_b` and `scripts.replay_trace`, and nothing put the
+  repository root on `sys.path`. pytest's `prepend` import mode inserts the
+  directory holding `conftest.py` — `tests/` — not the workspace root, so
+  `import scripts` only ever worked by accident: `python -m pytest` prepends the
+  CWD, while the `pytest` console script that the Makefile and CI both run does
+  not. On Windows the failure is worse than a clean one, because the filesystem
+  is case-insensitive and `import scripts` *succeeds* against `.venv\Scripts` as
+  a namespace package, so only the submodule import fails and it reads like a
+  missing file.
+- **`observability/audit_store.py` issued four statements with no timeout**,
+  against `RULES.md` §2.2 and against the convention every other call site in the
+  package follows. The worst of them is `pg_advisory_xact_lock`, which blocks
+  until the holding transaction ends with no bound of its own: one stalled
+  transaction would park every later append on that tenant indefinitely, each
+  holding a pooled connection, until the pool was exhausted and the process
+  stopped serving every *other* tenant too. `append`, `append_decision`,
+  `read_chain` and `verify_tenant_chain` now take a required `timeout_s`.
+- **`HashEmbedder` recorded every text it was ever asked to embed, unbounded.**
+  `texts` is a test affordance and recording it was free for the callers it had
+  — a seed script and a unit suite, both of which exit. It is the only `Embedder`
+  in the package until S9.1, so it is also what a long-lived process is wired
+  with, where the list grows with traffic and is invisible until the container is
+  OOM-killed. Recording is now `record=True`, off by default.
+- **`GM_MAX_CONCURRENT_SCORES` did nothing.** `Settings` declared
+  `max_concurrent_scores` at S1.4 and `pipeline/orchestrator.py` wrote its own
+  `_MAX_CONCURRENT = 8` next to the semaphore, so the setting had no reader
+  anywhere in the package. The bound now comes off `Deps`, and two tests pin it —
+  dead configuration does not stop working, it appears to work, which is why a
+  test rather than a comment.
+- **Four dangling cross-references to `BUILD_NOTEBOOK.md` appendices** that do
+  not exist and never did. `settings.py` sent a reader to "Appendix B" for the
+  environment-variable inventory (it is `.env.example`), `.env.example` cited the
+  same, `docs/README.md` claimed "the notebook's Appendix D is a copy" of
+  `RULES.md`, and `PHASES_AND_ROADMAP.md` cited Appendix A for the step index and
+  Appendix G for the cut order. Three now point at the document that owns the
+  fact. **The cut order is not one of them** — it is a scope decision nobody has
+  made, and the roadmap now says so rather than pointing at a section that would
+  answer it.
+- **README corrections.** "The engine is not implemented yet" contradicted the
+  four sentences after it; "the next step is S4.4" was four steps stale; the
+  dependency lock holds 313 packages, not 311.
+
 ### Added
 
+- **S6.1 — the MCP server skeleton, and the first user-facing surface.**
+  `services/mcp_server/` speaks MCP over stdio, starts a Postgres pool, loads the
+  clinical ontology, advertises tools, resources and prompts, and lists **zero**
+  tools — which is the step's own acceptance criterion rather than a placeholder.
+  `guardmem-mcp` is the console script `MCP_INTEGRATION.md` §1 names.
+- **`lifespan.py` is separate from `server.py` because they fail differently.**
+  A handler bug is a bad response; a lifespan bug is a process that will not
+  start, and the second is the one an operator reads at three in the morning. The
+  pool opens even though no tool uses it yet: without it, "the inspector
+  connects" would pass on a machine where `Settings`, the DSN and the ontology
+  were all wrong.
+- **S6.1's DONE WHEN runs in CI.** `tests/integration/test_mcp_stdio.py` drives a
+  real `ClientSession` against the server over the SDK's in-memory transport and
+  asks for the tool list. The inspector is the right way to *see* it work and the
+  wrong way to keep it working.
+- **Invariant I3 has a property test** — `tests/property/test_i3_supersession_acyclic.py`,
+  500 generated write histories. It also records what I3 does *not* rest on:
+  `supersede` compares nothing about the two ids it is handed, so a caller can
+  drive the store into a two-cycle, and a test drives it there deliberately. The
+  invariant holds because the applier mints its successor, which is a property of
+  the write path rather than of the store.
 - **CHECKPOINT B's harness.** `guardmem_core/eval/discrimination.py` is the
   measurement — AUROC, the per-term diagnostics, the self-agreement check — and
   `scripts/checkpoint_b.py` is the command around it: `verify`, `template`,
@@ -53,10 +123,10 @@ repository; the log records what happened while changing it.
   8/8, automated checks green, AUROC *not measured* — so Day 6 proceeds with the
   gate explicitly open and the assumption that the scoring discriminates
   explicitly unverified.
-- **Invariant I3 has no property test**, which writing that sign-off is what
-  surfaced. The checkpoint's automated-check line reads "I1, I2, I3, I4 must all
-  be green" and only three of the four exist; supersession acyclicity is
-  untested.
+- **Invariant I3 had no property test**, which writing that sign-off is what
+  surfaced: the checkpoint's automated-check line reads "I1, I2, I3, I4 must all
+  be green" and only three of the four existed. **Closed** — see the I3 entry
+  under Added.
 
 - **S5.6 — the pipeline orchestrator and deterministic replay.**
   `pipeline/orchestrator.py` runs one proposal through every layer: noise

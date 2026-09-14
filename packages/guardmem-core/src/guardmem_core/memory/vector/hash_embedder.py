@@ -19,6 +19,18 @@ number measured against these vectors - recall@k, a cosine threshold, a
 reranking win - would be a measurement of SHA-256. Shipped in the package rather
 than hidden in `tests/` precisely so that warning travels with the code the seed
 and the dev stack actually run.
+
+**`record` is off by default, and that default is the whole point of the flag.**
+`texts` exists so a test can prove the store embedded the *assertion* and not,
+say, its id, and the original version kept it unconditionally on the grounds
+that recording is free. It is free in a script that exits, which is every caller
+this had when it was written - the seed and the unit suite. It is not free in a
+process that stays up: this is the only `Embedder` in the package until S9.1, so
+it is also what an MCP server or a gateway would be wired with today, and an
+unbounded `list[str]` holding every text the process has ever embedded is a leak
+that grows with traffic and is invisible until the container is OOM-killed.
+Opt-in keeps the test affordance and makes the long-lived case the one you get
+without asking.
 """
 
 from __future__ import annotations
@@ -53,13 +65,15 @@ class HashEmbedder:
         dim: Vector length. Defaults to the 1024 `assertion.embedding` declares,
             so `PgVectorStore`'s dimension check passes; a test that wants to
             see that check fire sets it to something else.
-        texts: Every text this was asked to embed, flattened, in call order.
-            What a test asserts against to prove the store embeds the
-            *assertion* and not, say, its id. Recording is free and a caller
-            that does not care can ignore it.
+        record: Whether to keep every text in `texts`. **Off by default** - see
+            the module docstring on why a long-lived process must not.
+        texts: Every text this was asked to embed, flattened, in call order,
+            and empty unless `record` is set. What a test asserts against to
+            prove the store embeds the *assertion* and not, say, its id.
     """
 
     dim: int = EMBEDDING_DIM
+    record: bool = False
     texts: list[str] = field(default_factory=list)
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
@@ -76,7 +90,8 @@ class HashEmbedder:
         `anyio.to_thread` as `RULES.md` §2.2 asks for CPU-bound work would cost
         more than the hash does.
         """
-        self.texts.extend(texts)
+        if self.record:
+            self.texts.extend(texts)
         return [self.vector(text) for text in texts]
 
     def vector(self, text: str) -> list[float]:

@@ -5,9 +5,15 @@
 `os.getenv`; if a value is configurable, it is a field here.
 
 Every field is read from a `GM_`-prefixed environment variable, or from `.env`
-in development. The names and their owning build step are listed in
-`BUILD_NOTEBOOK.md` Appendix B; the thresholds are owned by `MEMORY_ENGINE.md`
-§3.4, which is the spec of record for what they mean.
+in development. **`.env.example` is the inventory** - every variable, grouped,
+each annotated with the step that turns it on - and the thresholds are owned by
+`MEMORY_ENGINE.md` §3.4, which is the spec of record for what they mean.
+
+That inventory used to be cited as `BUILD_NOTEBOOK.md` Appendix B, which does
+not exist and never did; the notebook has no appendices. `.env.example` is where
+the fact actually lives, it is checked against this class by
+`tests/unit/test_settings.py`, and a reader following the old pointer found
+nothing.
 
 **`extra="forbid"` is the sharp edge.** Any key in `.env` that is not declared
 below raises at construction - including keys with no `GM_` prefix. That is

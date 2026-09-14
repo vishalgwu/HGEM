@@ -20,7 +20,11 @@ widening the protocol or teaching the store about audit. Both are ADR-sized
 says "bounded by semaphore, TaskGroup" and `RULES.md` §2.2 says the same for any
 fan-out. Each candidate costs up to three model calls - the judge, and `entail`
 twice - so an unbounded batch of forty is forty concurrent completions against
-one provider's rate limit.
+one provider's rate limit. The bound comes off `Deps`, which reads it from
+`settings.max_concurrent_scores`: this module shipped with a module-level
+constant instead, which meant the setting S1.4 declared for exactly this had no
+reader, and `GM_MAX_CONCURRENT_SCORES=2` changed nothing while looking as though
+it had.
 
 **A failure is attributed to its candidate rather than losing the batch.** A
 `TaskGroup` cancels its siblings when a task raises, which is right for a dual
@@ -38,7 +42,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from guardmem_core.llm.base import Tier
 from guardmem_core.pipeline.inputs import (
@@ -79,11 +83,6 @@ if TYPE_CHECKING:
     from guardmem_core.schemas.verdict import ConflictReport
 
 __all__ = ["CandidateFailure", "PipelineResult", "Proposal", "run"]
-
-# S5.6's "bounded by semaphore". Eight is a starting value rather than a
-# measurement: it is what stops a forty-candidate batch opening forty
-# completions at once, and S9.1 is where a real provider gives it a number.
-_MAX_CONCURRENT: Final = 8
 
 
 class Proposal(GMModel):
@@ -203,7 +202,7 @@ async def run(proposal: Proposal, deps: Deps) -> tuple[PipelineResult, list[Cand
     )
     admitted = gate(extracted.candidates, deps.ontology)
 
-    limit = asyncio.Semaphore(_MAX_CONCURRENT)
+    limit = asyncio.Semaphore(deps.max_concurrent_scores)
     scored = await asyncio.gather(
         *(
             _score_one(verdict, extracted.samples, proposal, deps, limit)

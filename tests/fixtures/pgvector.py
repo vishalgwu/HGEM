@@ -153,8 +153,15 @@ async def pool(app_role_dsn: str) -> AsyncIterator[asyncpg.Pool]:
 
 @pytest.fixture
 def embedder() -> HashEmbedder:
-    """Deterministic vectors at the dimension the column declares."""
-    return HashEmbedder()
+    """Deterministic vectors at the dimension the column declares.
+
+    `record=True` because `test_pgvector_store.py` asserts on `texts` to prove
+    the store embeds the assertion's rendered text rather than its id. The flag
+    is off in the package for the reason `HashEmbedder`'s docstring gives - an
+    unbounded recording in a long-lived process - and a test fixture is exactly
+    the short-lived caller it is meant for.
+    """
+    return HashEmbedder(record=True)
 
 
 @pytest.fixture

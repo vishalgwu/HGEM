@@ -183,6 +183,14 @@ class Deps:
         weights: §3.2's confidence weights.
         betas: §3.3's risk coefficients.
         policy_version: Which policy pack produced the obligations.
+        max_concurrent_scores: How many candidates `run()` may score at once,
+            from `settings.max_concurrent_scores`. Here rather than a module
+            constant in `orchestrator.py` because it is configuration and
+            `RULES.md` §2.4 puts configuration in `Settings` - which declared
+            the field from S1.4 and had nothing reading it, so the orchestrator
+            shipped with a hard-coded 8 and the environment variable that was
+            supposed to tune it did nothing. A setting nobody reads is worse
+            than no setting: it is a knob that answers when you turn it.
 
     A frozen dataclass rather than a `GMModel` because half of these are
     Protocols, and pydantic would try to validate them as fields. `RULES.md`
@@ -203,3 +211,4 @@ class Deps:
     weights: ConfidenceWeights
     betas: RiskBetas
     policy_version: str
+    max_concurrent_scores: int

@@ -190,7 +190,9 @@ async def main(argv: list[str] | None = None) -> int:
         async with tenant_transaction(
             pool, TenantId(args.tenant), timeout_s=settings.store_timeout_s
         ) as connection:
-            links = await read_chain(connection, TenantId(args.tenant))
+            links = await read_chain(
+                connection, TenantId(args.tenant), timeout_s=settings.store_timeout_s
+            )
     finally:
         await pool.close()
 

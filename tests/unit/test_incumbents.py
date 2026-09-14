@@ -188,7 +188,7 @@ class TestTheQuery:
         embedded the candidate's `verbatim`, or its subject, or a JSON dump, the
         distances would still be numbers and would still order the results.
         """
-        embedder = HashEmbedder()
+        embedder = HashEmbedder(record=True)
 
         await retrieve_incumbents(
             candidate(predicate="allergy", obj="latex"),

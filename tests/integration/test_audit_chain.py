@@ -71,6 +71,7 @@ async def write_links(pool: asyncpg.Pool, tenant: str, *payloads: dict[str, obje
                 kind="DECISION",
                 payload=payload,
                 created_at=WHEN,
+                timeout_s=TIMEOUT,
             )
             assert link.seq is not None
             written.append(link.seq)
@@ -79,7 +80,7 @@ async def write_links(pool: asyncpg.Pool, tenant: str, *payloads: dict[str, obje
 
 async def verify(pool: asyncpg.Pool, tenant: str) -> ChainVerification:
     async with tenant_transaction(pool, TenantId(tenant), timeout_s=TIMEOUT) as connection:
-        return await verify_tenant_chain(connection, TenantId(tenant))
+        return await verify_tenant_chain(connection, TenantId(tenant), timeout_s=TIMEOUT)
 
 
 class TestTheChainSurvivesPostgres:
@@ -108,7 +109,7 @@ class TestTheChainSurvivesPostgres:
         async with tenant_transaction(
             pool, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT
         ) as connection:
-            links = await read_chain(connection, TenantId(tenancy["tenant"]))
+            links = await read_chain(connection, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT)
 
         assert links[0].payload == RICH
 
@@ -120,7 +121,7 @@ class TestTheChainSurvivesPostgres:
         async with tenant_transaction(
             pool, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT
         ) as connection:
-            links = await read_chain(connection, TenantId(tenancy["tenant"]))
+            links = await read_chain(connection, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT)
 
         assert links[0].prev_digest == GENESIS
 
@@ -192,7 +193,7 @@ class TestTamperingIsCaughtAtTheRightRow:
         async with tenant_transaction(
             pool, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT
         ) as connection:
-            links = await read_chain(connection, TenantId(tenancy["tenant"]))
+            links = await read_chain(connection, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT)
         await owner.execute(
             "UPDATE audit_event SET payload = $1::jsonb, digest = $2 WHERE seq = $3",
             json.dumps(forged),
@@ -270,6 +271,7 @@ class TestItCommitsWithTheStateChange:
                     kind="DECISION",
                     payload={"n": 1},
                     created_at=WHEN,
+                    timeout_s=TIMEOUT,
                 )
                 raise RuntimeError("deliberate: the state change failed after the audit row")
 
@@ -287,7 +289,7 @@ class TestItCommitsWithTheStateChange:
         async with tenant_transaction(
             pool, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT
         ) as connection:
-            links = await read_chain(connection, TenantId(tenancy["tenant"]))
+            links = await read_chain(connection, TenantId(tenancy["tenant"]), timeout_s=TIMEOUT)
 
         assert verify_chain(links).verified
         assert [link.payload["n"] for link in links] == [0, 1, 2, 3]

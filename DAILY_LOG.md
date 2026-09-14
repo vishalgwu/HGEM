@@ -3480,6 +3480,104 @@ belongs to whoever owns the roadmap.
 
 ---
 
+## 2026-09-14 — Day 6 · S6.1 (MCP server skeleton) + a red-CI debug pass
+
+**Shipped**
+
+- **CI is green again.** Two jobs were red on `main` — `integration` since S5.6
+  and `gates` since CHECKPOINT B — and it was one root cause and one line:
+  `pythonpath = ["."]` in `[tool.pytest.ini_options]`.
+- **S6.1** — `services/mcp_server/`, the first deployable. Speaks MCP over
+  stdio, opens the pool, loads the ontology, advertises tools/resources/prompts,
+  lists **zero** tools. `guardmem-mcp` is the console script.
+- **`tests/integration/test_mcp_stdio.py`** runs S6.1's DONE WHEN in CI: a real
+  `ClientSession` over the SDK's in-memory transport, asking for the tool list.
+- **Invariant I3 has a property test**, closing yesterday's gap.
+- Four production defects fixed — see below. 1236 unit and property tests plus
+  87 integration; 99.76% with the integration suite included.
+
+**What broke / what I learned**
+
+- **The CI failure was a lesson about how tests find their own subject.** Both
+  failing tests import the module they test from `scripts/`, and *nothing* put
+  the repo root on `sys.path`. pytest's prepend mode inserts the directory that
+  holds `conftest.py` — `tests/` — not the workspace root. So `import scripts`
+  had been working by accident all along: `python -m pytest` prepends the CWD,
+  and the bare `pytest` console script that the Makefile and CI both run does
+  not. The Windows form is nastier than the Linux one: the filesystem is
+  case-insensitive, so `import scripts` *succeeds* against `.venv\Scripts` as a
+  namespace package and only the submodule import fails — which reads like a
+  missing file rather than a path problem, and I spent the first few minutes
+  looking for a file that was right there.
+- **`audit_store.py` had four statements with no timeout.** Every other call
+  site in the package passes one; these four shipped without. The one that
+  matters is `pg_advisory_xact_lock`, which waits without any bound of its own —
+  one stalled transaction parks every later append on that tenant forever, each
+  holding a pooled connection, until the pool is gone and the process stops
+  serving every *other* tenant too. Found by grepping for `await connection.`
+  with no `timeout`, which is a five-second check I should run every step.
+- **`HashEmbedder.texts` grows forever**, and the docstring said "recording is
+  free". It is free for a script that exits, which was every caller it had. It
+  is not free for a server — and S6.1 is the step that gave it one. Two things
+  I had written days apart turned into a leak the moment they met, which is the
+  argument for doing this sweep at the step that adds the first long-lived
+  process rather than later.
+- **`GM_MAX_CONCURRENT_SCORES` did nothing at all.** Declared at S1.4, and S5.6
+  wrote its own module constant next to the semaphore. Dead configuration is a
+  particular kind of bad: it does not fail, it *answers* — you turn the knob,
+  nothing changes, and you conclude something about the system that is false.
+- **S6.2 is blocked on S9.1, which building S6.1 is what revealed.** I expected
+  the blocker for Day 6 to be tool schemas. It is not: a `memory.propose` tool
+  is a call to `run()`, and `run()` needs an `LLMClient`, an `EntityResolver`
+  and a `CandidateClassifier` — none of which exist. The same wall CHECKPOINT B
+  hit yesterday, met from the other side. **Day 6 is one step long, not four.**
+- **I did not advertise `resources.subscribe`, against the step's instruction.**
+  The other three capabilities say what can be *listed*; `subscribe` promises a
+  notification, and nothing here can send one. A client that subscribed would
+  wait forever and could not tell that from "nothing has changed" — a failure
+  with no symptom. Recorded as correction 2 on S6.1 and pinned by a test.
+- **The notebook has no appendices**, and four documents point at them —
+  `settings.py` at "Appendix B" for the env inventory, `.env.example` at the
+  same, `docs/README.md` at "Appendix D", and the roadmap at A and G. Three now
+  point at the document that actually owns the fact. **Appendix G is the one I
+  left**: it is the cut-order list, i.e. what to sacrifice when behind, and
+  inventing that would be me making a scope decision. The roadmap now says it is
+  unwritten instead of pointing at a section that would answer it.
+- **The dependency guard earned its keep again.** Adding `mcp[cli]` made
+  `uv lock` resolve four transitive packages ahead of `requirements.lock.txt`,
+  and `test_uv_lock_agrees_with_requirements_lock` caught it on the first run.
+  Pinned with `[tool.uv] constraint-dependencies` rather than by recompiling the
+  pip lock — these are nobody's direct dependency, so a constraint is the true
+  statement, and `uv pip compile` would have eaten the lock's hand-written
+  header (open item #24) to move four patch versions nothing asked to move.
+- **An async-generator pytest fixture cannot hold an anyio task group.**
+  `ClientSession.__aenter__` opens one, and pytest-asyncio may run teardown in a
+  different task, so the exit raises `Attempted to exit cancel scope in a
+  different task` — *after* the assertions pass, which makes it read like a
+  framework bug rather than a fixture bug. The connection helper is a plain
+  `@asynccontextmanager` entered inside each test body instead.
+
+**Still open**
+
+- **THE GATE ITSELF.** Unchanged, and now with one more step built on top of it.
+  S9.1 unblocks CHECKPOINT B *and* S6.2 *and* the rest of Day 6 — three reasons
+  to do it next rather than one.
+- **`resources.subscribe` belongs at S6.4**, with the resource and the change
+  feed together.
+- **Appendix G — the cut order — is unwritten.** A scope decision, not mine.
+- **Nothing writes an assertion.** The applier (#44) still needs an ADR.
+- The four spec questions (52, 57, 61, 62), unchanged.
+
+**Tomorrow's first step**
+
+**S9.1 — provider adapters.** Not S6.2. Day 6 cannot continue past the skeleton
+without a model client, and the same client is what lets CHECKPOINT B be run for
+real. Building the gateway on an unverified scorer was already the risk the
+checkpoint exists to prevent; building two more days of Day 6 on it as well
+would compound it for no gain.
+
+---
+
 ---
 
 ---

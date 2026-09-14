@@ -74,7 +74,11 @@ PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
 
 # Workspace members are built from source in this repo, so they never appear in
 # a lock of third-party packages. Comparing them would always fail.
-LOCAL_PACKAGES: Final = frozenset({"guardmem-core", "guardmem-workspace"})
+# It is also the walk's starting frontier, so a member missing from here is one
+# whose dependencies are never visited - the two locks then stop being compared
+# over that subtree and the guard reports agreement it did not check.
+# `guardmem-mcp` joined at S6.1 and brought `mcp` with it.
+LOCAL_PACKAGES: Final = frozenset({"guardmem-core", "guardmem-mcp", "guardmem-workspace"})
 
 # `Foo_Bar` and `foo-bar` are the same distribution to pip; normalise before
 # comparing so a naming style difference is never reported as a drift.

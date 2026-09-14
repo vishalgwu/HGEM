@@ -19,6 +19,18 @@ reports as a break at the second one. `pg_advisory_xact_lock` is held to COMMIT
 and needs no UPDATE privilege, which matters because the migration revokes
 UPDATE on this table: `SELECT ... FOR UPDATE` would be refused outright.
 
+**Every statement here carries an explicit `timeout_s`, and the advisory lock is
+why it is required rather than defaulted.** `RULES.md` §2.2 asks for an explicit
+timeout on every outbound call, and `PgVectorStore` and `OutboxRelay` have taken
+one since S3.2 - these four functions shipped without one, which is the
+difference between a slow append and a hung worker. `pg_advisory_xact_lock`
+blocks until the holder's transaction ends, with no bound of its own: one
+transaction that stalls while holding a tenant's chain lock would otherwise
+park every later append on that tenant *forever*, each holding a pooled
+connection, until the pool is exhausted and the process stops serving every
+other tenant too. A bounded wait turns that into a failed request with a
+retryable error, which is the difference between an incident and a blip.
+
 **`Conn` comes from `memory/vector/pool.py`, which is a wart worth naming.**
 That module is the Postgres connection layer for the whole package - the
 outbox relay uses it too - and it sits under `memory/vector/` only because
@@ -107,6 +119,7 @@ async def append(
     kind: str,
     payload: dict[str, object],
     created_at: datetime,
+    timeout_s: float,
 ) -> AuditEvent:
     """Extend a tenant's chain, inside the caller's transaction.
 
@@ -120,6 +133,10 @@ async def append(
         kind: One of `AuditEvent`'s six.
         payload: The event body. Must be JSON-safe; `canonical_json` says why.
         created_at: System time of the event.
+        timeout_s: Per-statement ceiling, from `settings.store_timeout_s`.
+            Required and not defaulted, for the reason `PgVectorStore` gives -
+            and for the sharper one in the module docstring: the first statement
+            below waits on a lock that has no bound of its own.
 
     Returns:
         The inserted link, with `seq` filled in from the sequence.
@@ -127,13 +144,18 @@ async def append(
     Raises:
         TypeError: the payload is not JSON-safe.
         ValueError: `kind` is not one of the six.
+        asyncio.TimeoutError: the chain lock was held for longer than
+            `timeout_s`. The caller's transaction rolls back, so the state
+            change this event records rolls back with it - which is the correct
+            outcome, since a state change with no audit row is the one thing
+            non-negotiable #4 forbids.
 
     Reads the head and writes the new link in the same round trip pair, under
     the advisory lock, so the `prev_digest` a link claims is still the head when
     it lands.
     """
-    await connection.execute(_LOCK_CHAIN, tenant_id)
-    head = await connection.fetchval(SELECT_HEAD, tenant_id)
+    await connection.execute(_LOCK_CHAIN, tenant_id, timeout=timeout_s)
+    head = await connection.fetchval(SELECT_HEAD, tenant_id, timeout=timeout_s)
     link = next_link(
         tenant_id=tenant_id,
         trace_id=trace_id,
@@ -151,6 +173,7 @@ async def append(
         bytes.fromhex(link.prev_digest),
         bytes.fromhex(link.digest),
         link.created_at,
+        timeout=timeout_s,
     )
     return link.model_copy(update={"seq": seq})
 
@@ -162,6 +185,7 @@ async def append_decision(
     tenant_id: TenantId,
     trace_id: TraceId,
     created_at: datetime,
+    timeout_s: float,
 ) -> AuditEvent:
     """Record one Layer 3 decision on the tenant's chain.
 
@@ -171,6 +195,7 @@ async def append_decision(
         tenant_id: Whose chain.
         trace_id: The proposal.
         created_at: System time of the decision.
+        timeout_s: As `append`.
 
     Returns:
         The inserted link.
@@ -196,10 +221,13 @@ async def append_decision(
         kind="DECISION",
         payload=record.model_dump(mode="json"),
         created_at=created_at,
+        timeout_s=timeout_s,
     )
 
 
-async def read_chain(connection: Conn, tenant_id: TenantId) -> list[AuditEvent]:
+async def read_chain(
+    connection: Conn, tenant_id: TenantId, *, timeout_s: float
+) -> list[AuditEvent]:
     """Every link in one tenant's chain, oldest first.
 
     Args:
@@ -207,6 +235,10 @@ async def read_chain(connection: Conn, tenant_id: TenantId) -> list[AuditEvent]:
             RLS-protected, so one without it reads zero rows rather than
             raising, and an empty chain verifies vacuously.
         tenant_id: Whose chain.
+        timeout_s: Per-statement ceiling, as `append`. It matters more here than
+            anywhere else in this module: the statement reads the *whole* chain,
+            so the one call whose cost grows without bound is also the one a
+            caller is most likely to leave running.
 
     Returns:
         The links, in `seq` order.
@@ -216,16 +248,19 @@ async def read_chain(connection: Conn, tenant_id: TenantId) -> list[AuditEvent]:
     prefix, which needs somewhere to record the checkpoint, and inventing that
     before there is a chain long enough to need it would be a guess.
     """
-    rows = await connection.fetch(SELECT_CHAIN, tenant_id)
+    rows = await connection.fetch(SELECT_CHAIN, tenant_id, timeout=timeout_s)
     return [event_from_row(row) for row in rows]
 
 
-async def verify_tenant_chain(connection: Conn, tenant_id: TenantId) -> ChainVerification:
+async def verify_tenant_chain(
+    connection: Conn, tenant_id: TenantId, *, timeout_s: float
+) -> ChainVerification:
     """`verify_chain(tenant_id)` as S5.5 names it.
 
     Args:
         connection: As `read_chain`.
         tenant_id: Whose chain to verify.
+        timeout_s: As `read_chain`, which this forwards to.
 
     Returns:
         `{verified, broken_at, checked}`.
@@ -233,7 +268,7 @@ async def verify_tenant_chain(connection: Conn, tenant_id: TenantId) -> ChainVer
     The two halves are separate functions because only this one needs a
     database: `verify_chain` is the arithmetic and is unit-tested without one.
     """
-    return verify_chain(await read_chain(connection, tenant_id))
+    return verify_chain(await read_chain(connection, tenant_id, timeout_s=timeout_s))
 
 
 def event_from_row(row: Record) -> AuditEvent:

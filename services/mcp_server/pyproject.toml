@@ -1,0 +1,46 @@
+[project]
+name = "guardmem-mcp"
+version = "0.1.0"
+description = "GuardMem AI MCP server - governed memory as an agent's tool surface."
+requires-python = ">=3.12"
+# `PROJECT_TREE.md`'s ownership table: a service may import `guardmem-core` and
+# its own framework, and nothing else. Two entries, and that is the whole point
+# of the layer - "deployable units are thin; all intelligence lives in
+# packages/guardmem-core".
+#
+# `mcp[cli]` rather than bare `mcp`: S6.1's DONE WHEN drives the server through
+# `@modelcontextprotocol/inspector`, which launches it as a subprocess, and the
+# `cli` extra is what installs the `python-dotenv`/`typer` pair the SDK's own
+# launcher expects. Pinned exactly, matching `requirements/services.txt`, for
+# the reason the dev group gives: a floor here lets `uv lock` resolve a version
+# the requirements files do not pin, and then the installed version depends on
+# which command ran last.
+dependencies = [
+  "guardmem-core",
+  "mcp[cli]==2.2.0",
+]
+
+[project.scripts]
+# S6.1's DONE WHEN names this command verbatim: `npx
+# @modelcontextprotocol/inspector uv run guardmem-mcp`. It is also the `command`
+# an MCP client config points at - `MCP_INTEGRATION.md` §1 - so the name is
+# published interface rather than a convenience alias.
+guardmem-mcp = "mcp_server.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+guardmem-core = { workspace = true }
+
+# The distribution is `guardmem-mcp` and the import package is `mcp_server`, so
+# hatchling's name-based auto-detection cannot find it and fails the build
+# outright. `guardmem-core` needs no such block because its two names match.
+#
+# The mismatch is deliberate and comes from PROJECT_TREE.md, which names the
+# directory `services/mcp_server/src/mcp_server/`: the directory says what the
+# thing is within this repository, and the distribution name says what it is on
+# an index, where `mcp_server` would be an unhelpfully generic claim to make.
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_server"]

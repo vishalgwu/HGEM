@@ -6,7 +6,7 @@
 # failed here. `make lint && make typecheck && make test` is also the literal
 # S1.2 acceptance check.
 #
-# Two jobs, because they answer different questions:
+# Three jobs, because they answer different questions:
 #   gates  - does the code pass lint, types and the fast tests?
 #   integration - do the invariants hold against a real Postgres? Split from
 #            `gates` because it pulls a container image and takes minutes rather

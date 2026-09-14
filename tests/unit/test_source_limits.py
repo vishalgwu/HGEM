@@ -39,8 +39,13 @@ _MAX_FUNCTION_BODY_LINES = 50
 # typecheck` covers it as of S1.7 and the same navigation argument applies -
 # a 900-line test module is no easier to read than a 900-line source one.
 # `infra/` joined at S3.1, when it stopped being YAML and SQL and started
-# holding Python.
-_ROOTS = ("packages", "tests", "scripts", "infra")
+# holding Python. `services/` joined at S6.1, with the first deployable - and
+# that is the root most in need of the cap, because PROJECT_TREE.md's whole
+# claim about this layer is that it stays thin. A service module drifting past
+# 400 lines is the measurable form of intelligence leaking out of
+# `guardmem-core`, which is the architectural failure the table exists to
+# prevent rather than a style complaint.
+_ROOTS = ("packages", "services", "tests", "scripts", "infra")
 
 # Alembic revisions are exempt from both LINE caps. Not from `C901`, which ruff
 # enforces repo-wide and which is the actual complexity gate.

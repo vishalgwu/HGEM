@@ -2778,8 +2778,8 @@ Notes:
 CHECKPOINT B: BLOCKED (discrimination test not runnable until S9.1)
 Date:               2026-09-14
 Manual checks:      8/8 pass (B1-B8, run by `checkpoint_b verify`)
-Automated checks:   lint, typecheck, imports green; 1204 unit and property
-                    tests plus 79 integration; I1/I2/I4/I5 green; replay
+Automated checks:   lint, typecheck, imports green; 1236 unit and property
+                    tests plus 87 integration; I1/I2/I3/I4/I5 green; replay
                     prints "identical"
 AUROC:              not measured - no LLMClient implementation exists
 AUROC entropy-only: not measured, same reason
@@ -2787,8 +2787,15 @@ Coverage:           94% (unit + property), 100% on every Layer 3 module
 Decision:           proceed to Day 6 with the gate explicitly OPEN, and run it
                     the day S9.1 lands. Everything after this point assumes the
                     scoring discriminates and that remains UNVERIFIED.
-Notes:              I3 (supersession acyclic) is also not property-tested yet -
-                    the automated-check list names I1-I4 and only three exist.
+Notes:              I3 (supersession acyclic) was also not property-tested -
+                    the automated-check list names I1-I4 and only three files
+                    existed. Closed on 2026-09-14 by
+                    tests/property/test_i3_supersession_acyclic.py, which also
+                    records what I3 does NOT rest on: `supersede` compares
+                    nothing about the two ids it is handed, so a caller can
+                    drive the store into a two-cycle. The invariant holds
+                    because the applier mints its successor, and that is a
+                    property of the write path rather than of the store.
 ```
 
 ---
@@ -2797,19 +2804,51 @@ Notes:              I3 (supersession acyclic) is also not property-tested yet -
 
 ### S6.1 -- Server skeleton, stdio transport
 
-WHERE: `services/mcp_server/src/mcp_server/server.py`
+WHERE: `services/mcp_server/src/mcp_server/server.py`, and `lifespan.py` beside it
 TIME: 60 min
 
 ```bash
 uv add "mcp[cli]"
 ```
-Wire lifespan: settings, Postgres pool, LLM client, pipeline deps. Advertise capabilities: tools,
-resources, prompts, and `resources.subscribe`.
+Wire lifespan: settings, Postgres pool, graph store, embedder, ontology. Advertise capabilities:
+tools, resources and prompts, each by registering its list handler and returning an empty list.
 
 DONE WHEN: `npx @modelcontextprotocol/inspector uv run guardmem-mcp` connects and lists zero tools
-without error.
+without error. Mechanised as `tests/integration/test_mcp_stdio.py`, which asks the same question
+over the SDK's in-memory transport so it runs in CI on every commit.
 
 COMMIT: `feat(s6.1): mcp server skeleton`
+
+**Four corrections to this step, found by building it.** The version above already includes them.
+
+1. **The lifespan cannot wire an `LLMClient` or `pipeline.Deps`, and the reason is the one that
+   has CHECKPOINT B recorded as BLOCKED.** There is no `LLMClient` implementation in this
+   repository - `llm/base.py` declares the Protocol, `FakeLLM` implements it for the suite, and
+   **S9.1** builds the provider adapters. `Deps` is worse off: `EntityResolver` and
+   `CandidateClassifier` are Protocols nothing implements either, so it cannot be constructed at
+   all. Binding `FakeLLM` to make this step's sentence come true would put a scripted model behind
+   the project's first user-facing surface. **This means S6.2 is blocked on S9.1 plus an entity-
+   resolution decision, not on writing tool handlers** - a `memory.propose` tool is a call to
+   `run()`, and `run()` cannot be called. Worth knowing before Day 6 is planned as four steps.
+2. **`resources.subscribe` must not be advertised yet.** The other three capabilities are claims
+   about what can be *listed* and are true as soon as a handler exists. `subscribe` is a claim
+   about what the server will *send*: a subscribed client is promised
+   `notifications/resources/updated`, and nothing here can produce one - there is no resource until
+   S6.4 and no write path to change the state behind it. A client would wait forever and could not
+   distinguish that from "nothing has changed". It belongs at **S6.4**, with the resource and the
+   change feed together. Pinned by `test_resources_subscribe_is_not_advertised`.
+3. **A capability is advertised by registering its handler, not by asking for it.** The SDK derives
+   `ServerCapabilities` from which methods are served, so "advertise tools and list zero of them"
+   is one decision rather than two: no `tools/list` handler means no tool capability, and a client
+   then reads "this server does not do tools" rather than "this server has none". The three
+   handlers return empty lists for exactly this reason.
+4. **The distribution is `guardmem-mcp` and the import package is `mcp_server`,** which needs
+   `[tool.hatch.build.targets.wheel] packages = ["src/mcp_server"]` or hatchling's name-based
+   detection fails the build outright. `guardmem-core` needs no such block because its two names
+   match. The root `pyproject.toml` also has to *depend* on `guardmem-mcp`, for the same reason
+   correction 1 on S1.1 gives about `guardmem-core`: `[tool.uv.sources]` says where to resolve a
+   workspace member, and nothing installs one until something depends on it - so CI's
+   `uv sync --locked` would lock the service and not install it.
 
 ---
 

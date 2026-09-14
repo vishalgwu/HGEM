@@ -10,8 +10,9 @@ the UI, and the evals before the demo. Anything that can't be measured by day 28
 **What this document owns:** phase goals, the exit gate for each phase, deferred scope, and the
 weekly risk review. **What it does not own:** the step-by-step work. Every step, command, file path
 and per-step "done when" lives in `BUILD_NOTEBOOK.md`, and the one-line-per-day index is its
-Appendix A. Those used to be restated here; they are not, so a plan change has exactly one place
-to be made.
+`BUILD_NOTEBOOK.md`'s own per-day sections. Those used to be restated here; they are not, so a plan
+change has exactly one place to be made. (This line named "Appendix A" until 2026-09-14; the
+notebook has no appendices, and the Day sections are what the pointer was reaching for.)
 
 ---
 
@@ -132,8 +133,11 @@ change belongs there first.
 Each of these is a real feature. None of them changes whether the core claim — *governed memory
 measurably reduces drift* — is true, which is the only thing week 4 needs to establish.
 
-**If you fall behind,** cut in the order given in `BUILD_NOTEBOOK.md` Appendix G, which also names
-what each cut costs and the five things that are never cut.
+**If you fall behind,** the cut order belongs here and **is not yet written**. It was cited as
+`BUILD_NOTEBOOK.md` Appendix G, which does not exist - so the one document that is supposed to say
+what to sacrifice says nothing, and the decision would be made under time pressure with no prior
+agreement, which is the worst moment to make it. §6's deferral list is the nearest thing that does
+exist. Writing the real order is a scope decision and belongs to whoever owns this roadmap.
 
 ---
 

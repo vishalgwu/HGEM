@@ -88,7 +88,7 @@ three documents — that is how a spec rots.
 | Scoring math, schemas, thresholds, the decision matrix | [MEMORY_ENGINE.md](MEMORY_ENGINE.md) | cites it; code that disagrees is wrong until an ADR moves it |
 | Product scope, personas, SLAs, quality targets | [PRD.md](PRD.md) | cites §6.1 for latency and §6.2 for quality |
 | Component boundaries, write/read paths, failure behavior | [ARCHITECTURE.md](ARCHITECTURE.md) | §1 diagrams simplify; MEMORY_ENGINE is normative for the decision box |
-| Coding standards, invariants, testing gates, coverage | [RULES.md](RULES.md) | the notebook's Appendix D is a copy, not a second source |
+| Coding standards, invariants, testing gates, coverage | [RULES.md](RULES.md) | the notebook cites clauses by number; it never restates them |
 | Agent-facing tool, resource and prompt contracts | [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | the notebook copies schemas from it verbatim |
 | Dashboard and review-queue interface requirements | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) | design targets live here; *acceptance gates* live in the PRD |
 | Repository layout and dependency direction | [PROJECT_TREE.md](PROJECT_TREE.md) | a blueprint to build into, not files to pre-create |

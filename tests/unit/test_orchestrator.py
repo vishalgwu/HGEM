@@ -18,6 +18,7 @@ Three of those joins are the reason this file exists at all:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
@@ -140,6 +141,7 @@ def deps(**overrides: object) -> Deps:
         "weights": V1_WEIGHTS,
         "betas": V1_BETAS,
         "policy_version": "test-policy",
+        "max_concurrent_scores": 8,
     }
     return Deps(**(base | overrides))  # type: ignore[arg-type]
 
@@ -313,3 +315,59 @@ class TestWhatItDoesNotDo:
         result, _ = await run(proposal(), deps())
 
         assert all(record.escalated_from is None for record in result.decisions)
+
+
+class _CountingClassifier:
+    """A `CandidateClassifier` that records how many scorings overlapped.
+
+    The classifier is the natural probe: `_decide_one` awaits it once per
+    candidate, inside the semaphore, so the peak depth it observes *is* the
+    number of candidates the bound let run at once. Yielding to the loop with
+    `sleep(0)` is what makes overlap possible at all - without it each coroutine
+    would run to completion before the next was scheduled, and the count would
+    be 1 for every bound.
+    """
+
+    def __init__(self) -> None:
+        self.depth = 0
+        self.peak = 0
+
+    async def classify(self, candidate: MemoryCandidate) -> CandidateRisk:
+        self.depth += 1
+        self.peak = max(self.peak, self.depth)
+        await asyncio.sleep(0)
+        self.depth -= 1
+        return CandidateRisk(
+            scope=scope_of_namespace(Namespace(candidate.namespace)),
+            pii_class=PiiClass.SPECIAL_CATEGORY,
+            irreversibility=Irreversibility.REVERSIBLE,
+        )
+
+
+class TestTheConcurrencyBoundIsTheConfiguredOne:
+    """`settings.max_concurrent_scores` reaches the semaphore.
+
+    It did not until this was written. S1.4 declared the field and S5.6 wrote a
+    module-level `_MAX_CONCURRENT = 8` next to the semaphore, so the environment
+    variable had no reader anywhere in the package and setting it changed
+    nothing - the failure mode of dead configuration, which is not that it stops
+    working but that it appears to.
+    """
+
+    async def test_a_bound_of_one_serialises_the_batch(self) -> None:
+        classifier = _CountingClassifier()
+
+        result, _ = await run(proposal(), deps(classifier=classifier, max_concurrent_scores=1))
+
+        assert len(result.decisions) == 2, "two candidates, so overlap was possible"
+        assert classifier.peak == 1
+
+    async def test_a_wider_bound_lets_them_overlap(self) -> None:
+        """The control. Without it the test above would pass against a pipeline
+        that had lost its concurrency altogether."""
+        classifier = _CountingClassifier()
+
+        result, _ = await run(proposal(), deps(classifier=classifier, max_concurrent_scores=8))
+
+        assert len(result.decisions) == 2
+        assert classifier.peak == 2

@@ -1,0 +1,187 @@
+"""The MCP server's protocol surface, without starting a process.  S6.1
+
+S6.1's DONE WHEN is an inspector session, which needs a database and a
+subprocess, so it is mechanised in `tests/integration/test_mcp_stdio.py`. What
+is here is everything that can be asserted about the server *before* it is run,
+and the split is worth stating because it is the reason `build_server` and
+`main` are separate functions: constructing the server reads no environment,
+opens no socket and allocates nothing, so the handshake it would send is a pure
+function of the code.
+
+Three things are pinned:
+
+- **Zero tools.** The step's own acceptance criterion, and the one that changes
+  at S6.2, where this file's expectations should be updated rather than deleted.
+- **The capability block.** Derived by the SDK from which handlers exist, so it
+  is the one place a handler silently going missing shows up. An MCP client
+  reads it once, at initialize, and never asks again - a server that stops
+  advertising `prompts` mid-build does not fail, it becomes invisible.
+- **`resources.subscribe` is absent**, which is correction 1 on S6.1 in
+  `server.py`. A test rather than a comment, because the comment would be
+  removed by whoever later adds a `subscribe` handler for a different reason,
+  and the point is that the capability must arrive with a change feed.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+import mcp_types as types
+import pytest
+
+from mcp_server.server import (
+    INSTRUCTIONS,
+    SERVER_NAME,
+    SERVER_VERSION,
+    _list_prompts,
+    _list_resources,
+    _list_tools,
+    build_server,
+)
+
+if TYPE_CHECKING:
+    from mcp.server.context import ServerRequestContext
+
+    from mcp_server.lifespan import ServerState
+
+
+# The three handlers take a request context and ignore it - nothing in an empty
+# listing depends on who asked. Building a real one needs a live `ServerSession`,
+# which needs a transport, which is the integration test's job; casting `None`
+# is the honest way to say "this argument is unused" in a test that is about the
+# return value. If a handler ever starts reading its context this cast fails
+# with an `AttributeError`, which is a better failure than a mock that answers.
+_NO_CONTEXT = cast("ServerRequestContext[ServerState]", None)
+
+
+@pytest.fixture
+def capabilities() -> types.ServerCapabilities:
+    """What the server advertises at initialize, derived as the SDK derives it."""
+    return build_server().create_initialization_options().capabilities
+
+
+class TestTheDoneWhen:
+    """ "...connects and lists zero tools without error"."""
+
+    async def test_it_lists_zero_tools(self) -> None:
+        result = await _list_tools(_NO_CONTEXT, None)
+
+        assert result.tools == []
+
+    async def test_it_offers_no_next_page_over_an_empty_listing(self) -> None:
+        """A cursor over nothing is an invitation to ask again for nothing."""
+        result = await _list_tools(_NO_CONTEXT, None)
+
+        assert result.next_cursor is None
+
+    async def test_it_lists_zero_resources(self) -> None:
+        """`MCP_INTEGRATION.md` §3's four arrive at S6.4."""
+        result = await _list_resources(_NO_CONTEXT, None)
+
+        assert result.resources == []
+
+    async def test_it_lists_zero_prompts(self) -> None:
+        """`MCP_INTEGRATION.md` §4's four arrive at S6.4."""
+        result = await _list_prompts(_NO_CONTEXT, None)
+
+        assert result.prompts == []
+
+
+class TestWhatTheHandshakeAdvertises:
+    def test_tools_resources_and_prompts_are_all_advertised(
+        self, capabilities: types.ServerCapabilities
+    ) -> None:
+        """S6.1: "advertise capabilities: tools, resources, prompts".
+
+        Each is present because its list handler is registered. Drop one handler
+        and the corresponding capability becomes `None` - which a client reads as
+        "this server does not do that", silently and permanently for the session.
+        """
+        assert capabilities.tools is not None
+        assert capabilities.resources is not None
+        assert capabilities.prompts is not None
+
+    def test_resources_subscribe_is_not_advertised(
+        self, capabilities: types.ServerCapabilities
+    ) -> None:
+        """Correction 1 on S6.1 - see `server.py`.
+
+        `subscribe` promises `notifications/resources/updated`, and nothing in
+        this system can send one: no resource exists until S6.4, and no write
+        path exists to change the state behind it. A client that subscribed
+        would wait for an event that is never coming, and could not tell that
+        from "nothing has changed yet".
+        """
+        assert capabilities.resources is not None
+        assert capabilities.resources.subscribe is False
+
+    def test_nothing_claims_a_change_notification_it_cannot_send(
+        self, capabilities: types.ServerCapabilities
+    ) -> None:
+        """The same argument as `subscribe`, for the three `listChanged` flags.
+
+        Zero tools is a *fixed* zero at this step - the list changes when a new
+        build ships, not while a session is open - so a client re-listing on
+        notification would be doing it for nothing.
+        """
+        assert capabilities.tools is not None
+        assert capabilities.prompts is not None
+        assert capabilities.resources is not None
+        assert capabilities.tools.list_changed is False
+        assert capabilities.prompts.list_changed is False
+        assert capabilities.resources.list_changed is False
+
+    def test_no_capability_is_claimed_for_a_method_nothing_serves(
+        self, capabilities: types.ServerCapabilities
+    ) -> None:
+        """Logging and completion have no handlers, so neither is advertised."""
+        assert capabilities.logging is None
+        assert capabilities.completions is None
+
+
+class TestServerIdentity:
+    def test_it_reports_a_name_and_a_version(self) -> None:
+        """The SDK substitutes nothing for an omitted version - it reports an
+        empty string - and a client that cannot tell two builds apart cannot
+        report a bug against one."""
+        options = build_server().create_initialization_options()
+
+        assert options.server_name == SERVER_NAME == "guardmem"
+        assert options.server_version == SERVER_VERSION
+        assert options.server_version, "an unversioned server is unreportable"
+
+    def test_the_instructions_say_what_is_not_there_yet(self) -> None:
+        """Read by the model, not only rendered for the human.
+
+        An agent told it has governed memory and then offered no tools should be
+        able to see why from the handshake alone, rather than concluding the
+        server is broken and working around it.
+        """
+        options = build_server().create_initialization_options()
+
+        assert options.instructions == INSTRUCTIONS
+        assert "S6.2" in INSTRUCTIONS
+        assert "memory.search" in INSTRUCTIONS
+
+
+class TestConstructionIsPure:
+    def test_building_a_server_reads_no_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No `Settings`, no pool, no ontology parse until the lifespan runs.
+
+        This is what lets every test above run without a database, and it is
+        also the property that keeps a configuration error at *startup* rather
+        than at import - `main` is where the environment is read, and a misread
+        there fails a process rather than a module.
+        """
+        monkeypatch.delenv("GM_DATABASE_URL", raising=False)
+
+        assert build_server() is not None
+
+    def test_two_servers_are_independent(self) -> None:
+        """`build_server` is a factory rather than a module-level singleton.
+
+        A shared instance would carry one lifespan's state into the next
+        session, which for a stdio server - one process, one client - hides the
+        bug until the first streamable-HTTP deployment serves two.
+        """
+        assert build_server() is not build_server()

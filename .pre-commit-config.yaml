@@ -106,21 +106,24 @@ repos:
   - repo: local
     hooks:
       - id: mypy
-        name: mypy --strict (guardmem-core + tests + scripts)
+        name: mypy --strict (guardmem-core + services + tests + scripts)
         # Same arguments as `make typecheck`, deliberately. S1.7 widened that
         # target to `tests` - Protocol is structural, so the conformance of
         # tests/fixtures/fakes.py is only checkable by mypy - and S3.6 widened
-        # it again to `scripts`, which is where the seed lives. A hook that kept
-        # checking the narrower set would pass locally and fail in CI, which is
-        # the drift deviation 2 in this file's header exists to stop; S1.7
-        # shipped exactly that bug and needed a follow-up commit to fix it.
-        entry: uv run mypy packages/guardmem-core/src tests scripts
+        # it again to `scripts`, which is where the seed lives. S6.1 added
+        # `services/mcp_server/src`, the first deployable, whose handlers satisfy
+        # the MCP SDK's callbacks structurally and are therefore checkable by
+        # nothing else. A hook that kept checking the narrower set would pass
+        # locally and fail in CI, which is the drift deviation 2 in this file's
+        # header exists to stop; S1.7 shipped exactly that bug and needed a
+        # follow-up commit to fix it.
+        entry: uv run mypy packages/guardmem-core/src services/mcp_server/src tests scripts
         language: system
         pass_filenames: false
         require_serial: true
         # Also trigger on pyproject.toml: the strictness settings live there, so
         # a config change can break typing without any .py file changing.
-        files: ^(packages/guardmem-core/src/.*\.py|tests/.*\.py|scripts/.*\.py|pyproject\.toml)$
+        files: ^(packages/guardmem-core/src/.*\.py|services/.*/src/.*\.py|tests/.*\.py|scripts/.*\.py|pyproject\.toml)$
 
       - id: lint-imports
         name: import-linter contracts (RULES.md 2.4)
@@ -128,4 +131,7 @@ repos:
         language: system
         pass_filenames: false
         require_serial: true
-        files: ^(packages/.*\.py|pyproject\.toml)$
+        # `services/` joined at S6.1, when `mcp_server` became a root package in
+        # the import-linter config: a contract over a package the hook never
+        # triggers on is a contract that only CI runs.
+        files: ^(packages/.*\.py|services/.*\.py|pyproject\.toml)$

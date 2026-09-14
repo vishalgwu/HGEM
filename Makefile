@@ -21,6 +21,18 @@ export PYTHONIOENCODING := utf-8
 
 UV        := uv run
 CORE_SRC  := packages/guardmem-core/src
+# Every deployable service's source root. One entry today (S6.1's MCP server);
+# `gateway` and `worker` are added here at S8.1 and S8.4.
+#
+# Spelled out rather than globbed as `services/*/src`, for the PORTABILITY rule
+# at the top of this file: Make does not expand wildcards in a variable itself,
+# it hands the string to the shell - and on Windows that shell is cmd.exe, which
+# does no globbing at all. mypy would receive the literal string and fail with a
+# path error on Windows only, while CI stayed green. A `$(wildcard ...)` call
+# would expand in Make and be portable, but it silently yields nothing when the
+# directory is missing, which is the same gate-quietly-stops-running failure in
+# a different costume.
+SVC_SRC   := services/mcp_server/src
 # Cleared by `make clean`. `.import_linter_cache` is on this list for a reason:
 # it is keyed on file mtime, so restoring a file with an older mtime (a `git
 # checkout`, a restored backup) leaves it serving a stale verdict - a false
@@ -37,7 +49,7 @@ help:
 	@echo   fmt - apply ruff fixes and formatting
 	@echo   lint - ruff check, ruff format --check, import-linter contracts
 	@echo   imports - import-linter contracts only
-	@echo   typecheck - mypy --strict on guardmem-core, tests and scripts
+	@echo   typecheck - mypy --strict on guardmem-core, the services, tests and scripts
 	@echo   test - unit and property suites with coverage
 	@echo   test-all - every suite with coverage
 	@echo   audit - pip-audit over the installed dependency set
@@ -81,8 +93,13 @@ imports:
 # first run: the seed built its turn lookup as an inferred dict[TurnId, Turn]
 # and passed it to a function declared dict[str, Turn], which dict's invariant
 # key type makes an error and NewType's runtime erasure makes invisible.
+# `services/*/src` joined at S6.1, the step that gave this repo its first
+# deployable. It has to be here rather than left to CI: `mypy --strict` is the
+# only thing checking that the MCP handlers satisfy the SDK's callback
+# signatures, which are structural - a handler with the wrong parameter order
+# registers fine, type-checks nowhere else, and fails at the first request.
 typecheck:
-	$(UV) mypy $(CORE_SRC) tests scripts
+	$(UV) mypy $(CORE_SRC) $(SVC_SRC) tests scripts
 
 # Bare `--cov`, not `--cov=guardmem_core`. The package to measure is already
 # declared once as `source_pkgs` in pyproject.toml, and naming it again on the

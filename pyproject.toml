@@ -9,6 +9,14 @@ requires-python = ">=3.12"
 # ModuleNotFoundError.
 dependencies = [
   "guardmem-core",
+  # S6.1. Listed for exactly the reason `guardmem-core` is: `[tool.uv.sources]`
+  # says where to resolve a workspace member from, and nothing installs one
+  # until something depends on it. CI runs `uv sync --locked --dev` at the
+  # workspace root, so without this line `services/mcp_server` is locked and not
+  # installed, and `tests/unit/test_mcp_server.py` fails on import in CI while
+  # passing on any developer machine that ever ran `uv pip install -e` on it.
+  # That is the `types-pyyaml` failure exactly, and it cost six red commits.
+  "guardmem-mcp",
   # Migration toolchain, owned by the workspace rather than by the library.
   # `infra/migrations/` is not a package and nothing under `guardmem_core`
   # imports these yet: S3.2's pgvector store is the step that adds sqlalchemy,
@@ -23,8 +31,37 @@ dependencies = [
 [tool.uv.workspace]
 members = ["packages/*", "services/*"]
 
+# Holds `uv lock` to the versions `requirements.lock.txt` already pins, for the
+# four transitive dependencies S6.1's `mcp[cli]` brought in.
+#
+# `tests/unit/test_dependency_consistency.py` is what found this, on the first
+# `uv lock` after adding the MCP SDK, and it found exactly the failure it was
+# written for: `mcp` pins none of these tightly, so uv resolved the newest
+# compatible of each while `requirements.lock.txt` - compiled earlier, and what
+# the README's install path uses - kept the versions it had. Neither file is
+# wrong; the environment would simply have depended on which command ran last.
+#
+# Constrained here rather than fixed by recompiling the pip lock, for two
+# reasons. These are nobody's *direct* dependency, so a pin in `[project]
+# dependencies` would be a lie about who needs them - a constraint says "if this
+# is resolved at all, at this version", which is the true statement. And
+# `uv pip compile` rewrites `requirements.lock.txt`'s thirty-line hand-written
+# header every time it runs (the file says so itself), which is a real cost to
+# pay for moving four patch versions nothing has asked to move.
+#
+# When one of these genuinely needs to move: bump it here AND in the pip lock,
+# in the same commit, which is the same rule the dev group already follows.
+[tool.uv]
+constraint-dependencies = [
+  "httpx2==2.12.0",
+  "httpcore2==2.12.0",
+  "pyjwt==2.13.0",
+  "uvicorn==0.52.4",
+]
+
 [tool.uv.sources]
 guardmem-core = { workspace = true }
+guardmem-mcp = { workspace = true }
 
 # Dev toolchain (BUILD_NOTEBOOK.md S1.1, extended at S1.2).
 #
@@ -162,7 +199,7 @@ ignore = ["S101"]          # assert is fine in tests
 # Without them here isort groups them with yaml/pytest, which reads as though
 # they came from PyPI - and `fixtures` in particular is a plausible package name
 # on the index, so the misfiling is easy to miss.
-known-first-party = ["guardmem_core", "conftest", "fixtures"]
+known-first-party = ["guardmem_core", "mcp_server", "conftest", "fixtures"]
 
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how
@@ -211,6 +248,30 @@ asyncio_mode = "auto"
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 
+# The repository root, on `sys.path`, for every invocation of pytest.
+#
+# `tests/unit/test_checkpoint_b_harness.py` and
+# `tests/integration/test_replay_trace.py` import `scripts.checkpoint_b` and
+# `scripts.replay_trace` - the modules they test - and nothing else puts the
+# root there. pytest's `prepend` import mode inserts the *rootdir of each test
+# file* (here `tests/`, the directory holding `conftest.py`), not the workspace
+# root, so `import scripts` resolved only by accident:
+#
+#   `python -m pytest`  - works. `-m` prepends the CWD, which is the root.
+#   `pytest` (console script) - fails. sys.path[0] is the console script's own
+#                        directory, `.venv/bin` on Linux and `.venv\Scripts` on
+#                        Windows. On Windows that is worse than a clean failure:
+#                        the filesystem is case-insensitive, so `import scripts`
+#                        *succeeds* as a namespace package over `.venv\Scripts`
+#                        and only the submodule import fails, which reads like a
+#                        missing file rather than a path problem.
+#
+# The Makefile and CI both run the console-script form, so both failed the day a
+# test first imported `scripts.*` - the `gates` job at the CHECKPOINT B commit
+# and `integration` one commit earlier at S5.6. Setting it here fixes every
+# invocation at once, which a `sys.path` edit inside one conftest would not.
+pythonpath = ["."]
+
 # ---------------------------------------------------------------------------
 # coverage
 # ---------------------------------------------------------------------------
@@ -221,7 +282,12 @@ testpaths = ["tests"]
 # memory/router.py, which line coverage alone cannot measure.
 [tool.coverage.run]
 branch = true
-source_pkgs = ["guardmem_core"]
+# S6.1 added `mcp_server`. Measured rather than exempted: RULES.md 5's coverage
+# gate is stated over `guardmem-core`, and a deployable that escaped measurement
+# entirely would be where untested code accumulates - the ownership table calls
+# services "thin", which is an argument for covering them easily, not for not
+# covering them.
+source_pkgs = ["guardmem_core", "mcp_server"]
 
 [tool.coverage.report]
 fail_under = 85
@@ -243,7 +309,7 @@ exclude_also = ["^\\s*\\.\\.\\.$"]
 # are meaningful today are declared - the layered contract (apps -> services ->
 # packages -> stores) arrives when services/ and apps/ do.
 [tool.importlinter]
-root_packages = ["guardmem_core"]
+root_packages = ["guardmem_core", "mcp_server"]
 # Required whenever a contract forbids modules outside the root packages.
 include_external_packages = true
 
@@ -274,6 +340,31 @@ forbidden_modules = [
   "networkx",
   "asyncpg",
 ]
+
+# S6.1, and the direction rule the contract above is the other half of.
+# PROJECT_TREE.md: "deployable units are thin; all intelligence lives in
+# packages/guardmem-core", and dependency flows one way - a service imports the
+# core, the core never imports a service.
+#
+# Worth enforcing rather than assuming, because the tempting violation is
+# plausible: a `guardmem_core` module that wants the MCP tool schema it is
+# serialised into, or a shared constant that "obviously" belongs next to the
+# server. Either one makes `guardmem-core` undeployable without the MCP SDK and
+# breaks ARCHITECTURE.md 2.2's claim that the engine runs identically in the
+# gateway, the worker and the eval harness.
+#
+# Note what is deliberately NOT forbidden here: `mcp_server` importing
+# `networkx_store`, `HashEmbedder` or any other concrete implementation. The
+# contract above forbids exactly that for `guardmem_core.pipeline`, and for a
+# good reason - the pipeline must talk to protocols so a backend swap stays
+# configuration. A service is the composition root. Choosing the concrete
+# implementations is its entire job, and a rule that stopped it would leave
+# nobody able to do it.
+[[tool.importlinter.contracts]]
+name = "guardmem-core never imports a service"
+type = "forbidden"
+source_modules = ["guardmem_core"]
+forbidden_modules = ["mcp_server"]
 
 # ---------------------------------------------------------------------------
 # A note on pyproject vs requirements/

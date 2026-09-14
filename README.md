@@ -80,6 +80,9 @@ Four stances drive the rest of the design:
 ```
 docs/              the design suite - start here
 packages/          guardmem-core, the decision engine
+services/          the deployable units - mcp_server today, gateway and worker later
+scripts/           operational commands - seed, replay, the checkpoint harness
+infra/             the dev datastore stack and the Alembic migrations
 tests/             unit / integration / contract / property / security
 requirements/      layered, pinned Python dependencies
 .github/workflows/ CI gates
@@ -119,8 +122,9 @@ uv venv --python 3.12 --prompt HGEM --seed .venv
 .venv\Scripts\activate                       # PowerShell
 # source .venv/Scripts/activate              # Git Bash / macOS / Linux
 
-uv pip install -r requirements.lock.txt      # third-party deps, 311 packages
-uv pip install -e packages/guardmem-core     # the workspace package itself
+uv pip install -r requirements.lock.txt      # third-party deps, 313 packages
+uv pip install -e packages/guardmem-core     # the decision engine
+uv pip install -e services/mcp_server        # the MCP server (S6.1)
 python -m spacy download en_core_web_lg      # presidio needs this; ~400 MB
 
 cp .env.example .env                         # then paste your API keys into .env
@@ -138,17 +142,19 @@ Windows. `winget install ezwinports.make` gives GNU Make 4.4.1 with no MSYS
 dependency; restart your shell afterwards so the PATH change takes effect. Run
 `make` with no target for the full list.
 
-The second install line is not optional and is easy to skip. `requirements.lock.txt`
-pins only third-party packages; `guardmem_core` lives in this repo and is
-installed from source in editable mode, so your edits take effect without
-reinstalling. Omit it and every import of `guardmem_core` fails with
-`ModuleNotFoundError` on an otherwise perfectly good environment.
+The two editable installs are not optional and are easy to skip.
+`requirements.lock.txt` pins only third-party packages; `guardmem_core` and
+`mcp_server` live in this repo and are installed from source in editable mode, so
+your edits take effect without reinstalling. Omit them and every import of
+`guardmem_core` — or, since S6.1, of `mcp_server` — fails with
+`ModuleNotFoundError` on an otherwise perfectly good environment, and
+`guardmem-mcp` is not on your PATH.
 
 > **Do not run bare `uv sync` here.** It is *exact* — it uninstalls everything
-> not in `uv.lock`, which today means roughly 300 of the 311 packages above.
+> not in `uv.lock`, which today means roughly 300 of the 313 packages above.
 > `uv run` is inexact and safe. See the note at the bottom of `pyproject.toml`.
 
-`requirements.lock.txt` is the fully-resolved transitive set — 311 packages,
+`requirements.lock.txt` is the fully-resolved transitive set — 313 packages,
 verified to reproduce the environment exactly rather than approximately.
 `requirements/ml-local.txt` (torch, transformers) is **excluded on purpose** and
 is only needed if week-2 latency forces a local cross-encoder.
@@ -164,14 +170,23 @@ stack it actually requires.
 
 ## Status
 
-The engine is not implemented yet. The repository was reset to a documentation
-baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
-– S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
-retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Day 5 is complete (S5.1 – S5.6)**: semantic entropy, the confidence
-composite, the impact-risk score, the decision matrix, the hash-chained audit
-log, and the orchestrator that runs a proposal through all of it.
+The decision engine is built and the write path is not. The repository was reset
+to a documentation baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete
+(S1.1 – S1.7), Layer 1 is complete (S2.1 – S2.3), the storage layer is complete
+(**Day 3, S3.1 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema
+gate, incumbent retrieval, conflict detection, and the resolution matrix with the
+merge behind it — **Day 5 is complete (S5.1 – S5.6)**: semantic entropy, the
+confidence composite, the impact-risk score, the decision matrix, the
+hash-chained audit log, and the orchestrator that runs a proposal through all of
+it — and **S6.1** adds the MCP server skeleton, the first user-facing surface.
+
+Two things that sound like they are built and are not, stated here because
+everything below assumes you know: **nothing has ever called a real model**
+(every LLM path is a test double, and the provider adapters are S9.1), and
+**nothing writes an assertion** (the pipeline returns decisions and applies
+none). Checkpoint B, the gate that would say whether the scoring works at all,
+is blocked on the first of those — see "The gate that has not run yet".
+
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -450,7 +465,20 @@ this section is here so that it is not mistaken for one that does.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S4.4, the resolution matrix and dedupe/merge.
+push.
+
+S6.1 is the newest step: a process that speaks MCP over stdio, starts its pool,
+loads the ontology, advertises what it can serve, and offers **zero tools** —
+which is the step's own acceptance criterion rather than a placeholder. The four
+tools in `MCP_INTEGRATION.md` §2 are S6.2, and building this surface is what made
+plain that S6.2 is blocked on S9.1: a `memory.propose` tool is a call into the
+pipeline, and the pipeline cannot run without a model client, an entity resolver
+and a candidate classifier — none of which exist. That is recorded as correction
+1 on S6.1 in the notebook.
+
+The next step is **S9.1**, out of order and deliberately: it unblocks Checkpoint
+B, S6.2 and Day 6 together, and running the gate before building further on the
+assumption that it passes is the whole reason the gate is placed where it is.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and
