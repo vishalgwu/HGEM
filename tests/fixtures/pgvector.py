@@ -107,6 +107,13 @@ async def _drop_tenant(owner: asyncpg.Connection, ids: dict[str, str]) -> None:
     refused access to - but the relay is not tenant-bound, so its tests write
     under both.
 
+    `audit_event` joined at S5.5 for the same reason `outbox` did: it carries a
+    foreign key to `tenant`, so leaving its rows behind made the final
+    `DELETE FROM tenant` fail and every later test inherit this one's tenant.
+    Note it is *only* deletable here - `0001_initial` revokes both UPDATE and
+    DELETE on it from `guardmem_app`, which is what makes the chain worth
+    verifying.
+
     That `DELETE` is available here at all and nowhere in the store is the
     point: this connection is the *owner*, and `RULES.md` non-negotiable #2
     revokes the same statement from `guardmem_app`, which is the role everything
@@ -130,6 +137,7 @@ async def _drop_tenant(owner: asyncpg.Connection, ids: dict[str, str]) -> None:
         )
         await owner.execute("DELETE FROM assertion WHERE tenant_id = $1::uuid", tenant)
         await owner.execute("DELETE FROM entity WHERE tenant_id = $1::uuid", tenant)
+        await owner.execute("DELETE FROM audit_event WHERE tenant_id = $1::uuid", tenant)
     await owner.execute("DELETE FROM tenant WHERE id = ANY($1::uuid[])", owned)
 
 

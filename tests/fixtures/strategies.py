@@ -64,6 +64,7 @@ __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
 from fixtures.strategy_l2 import l2_strategies
 from fixtures.strategy_l3 import L3_STRATEGIES
+from fixtures.strategy_observability import OBSERVABILITY_STRATEGIES
 from fixtures.strategy_ontology import ONTOLOGY_STRATEGIES
 from fixtures.strategy_primitives import (
     _ASSERTION_IDS,
@@ -239,6 +240,9 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # `schemas/verdict.py`, likewise - the four models that carry a decision
     # and everything it was taken from.
     **VERDICT_STRATEGIES,
+    # `observability/` (S5.5). Coherent, because `broken_at` and `verified`
+    # are one fact wearing two names.
+    **OBSERVABILITY_STRATEGIES,
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

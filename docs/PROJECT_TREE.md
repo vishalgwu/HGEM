@@ -161,7 +161,11 @@ guardmem-ai/
 │   │       │   ├── tracing.py           # OTel spans, trace_id propagation
 │   │       │   ├── exporters/           # langfuse.py phoenix.py otlp.py
 │   │       │   ├── metrics.py           # prometheus counters/histograms
-│   │       │   ├── audit.py             # append-only, hash-chained audit log
+│   │       │   ├── audit.py             # S5.5; I5's digest, canonical JSON and
+│   │       │   │                        #   verify_chain. PURE - no connection here
+│   │       │   ├── audit_store.py       # S5.5; the audit_event table. `append` takes a
+│   │       │   │                        #   CONNECTION, so the row commits with the state
+│   │       │   │                        #   change (RULES non-negotiable #4)
 │   │       │   └── SPANS.md             # span registry - RULES 6 needs an entry per span
 │   │       └── hitl/
 │   │           ├── queue.py             # priority queue, SLA timers, escalation
@@ -280,7 +284,9 @@ guardmem-ai/
 │   │   ├── test_outbox_enqueue.py       #   S3.3; the assertion and its event, one transaction
 │   │   ├── test_outbox_relay.py         #   S3.3 DONE WHEN: killed mid-flight, visible once
 │   │   ├── test_seed_demo_tenant.py     #   S3.6 DONE WHEN: `make seed` twice, same row count
-│   │   └── test_incumbent_retrieval.py  #   S4.2 DONE WHEN: the seeded incumbent comes back
+│   │   ├── test_incumbent_retrieval.py  #   S4.2 DONE WHEN: the seeded incumbent comes back
+│   │   └── test_audit_chain.py   #   S5.5 DONE WHEN: a real UPDATE on a real row,
+│   │                         #   and verify_chain names that exact seq
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   │                                    #   test_i4_decision_totality.py (S5.4): the bands
@@ -316,6 +322,7 @@ guardmem-ai/
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates
 │   │   ├── strategy_l2.py               # S4.1/S4.2/S4.4; the Layer 2 result models
+│   │   ├── strategy_observability.py    # S5.5; ChainVerification, drawn coherently
 │   │   ├── strategy_l3.py               # S5.1; MeaningClusters, drawn coherently -
 │   │   │                                #   `minority` is derived, not independent
 │   │   ├── strategy_verdict.py          # S5.1/S5.4; verdict.py's models, split

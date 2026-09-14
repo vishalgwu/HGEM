@@ -2468,8 +2468,69 @@ digest = sha256(canonical_json(payload).encode() + prev_digest).hexdigest()
 Written in the **same transaction** as the state change (RULES non-negotiable #4). Add
 `verify_chain(tenant_id)` returning `{verified, broken_at}`.
 
+**Four corrections to this step, found by building it.**
+
+1. **`canonical_json` has to survive `JSONB`, not just `json.loads`.** The digest
+   is taken over the payload and *re-taken over what Postgres hands back*.
+   `JSONB` does not store an object as text - it normalises key order and
+   whitespace - so the canonical form is sorted keys, no separators padding,
+   ASCII-escaped. Anything that does not round-trip through a `numeric` is
+   refused rather than coerced: a caller reaching for `default=str` on a
+   `datetime` would get a digest over the *string*, which `JSONB` returns
+   unchanged, so the chain verifies while the record disagrees with the object
+   it was taken from.
+2. **`verify_chain` needs two checks per link, not one.** The digest check
+   catches an edited payload. It does not catch an edited payload whose digest
+   was recomputed to match - that link is now self-consistent. What that
+   tamperer cannot fix without rewriting the rest is the *next* link's
+   `prev_digest`, so the linkage check is what surfaces it, one row later.
+3. **`append` takes a connection, never a pool.** `RULES.md` non-negotiable #4
+   says the audit event is written "in the same transaction as the state change
+   - not after, not best-effort", and a function that acquired its own
+   connection could not honour that however carefully it was called. An
+   integration test rolls a transaction back and asserts the link did not
+   survive it.
+4. **Concurrent appends to one chain would fork it.** Two transactions read the
+   same head, both claim it as `prev_digest`, both insert - and `verify_chain`
+   reports a break at the second. Serialised per tenant with
+   `pg_advisory_xact_lock`, which is held to COMMIT and needs no UPDATE
+   privilege: `SELECT ... FOR UPDATE` would be refused outright, because
+   `0001_initial` revokes UPDATE on this table.
+
+`GENESIS` is thirty-two zero bytes. The column is `BYTEA NOT NULL`, so the first
+link needs *something*, and a fixed-width zero digest keeps every row the same
+shape.
+
 DONE WHEN: invariant I5 test passes, and tampering with one payload row makes `verify_chain`
 report the exact break point.
+
+**Both, and the tamper is a real `UPDATE` on a real row.** Editing a model in
+memory only shows that `verify_chain` compares digests; editing the row shows
+that what it compares them to is what the database holds. The statement is
+issued as the table *owner*, because the application role cannot do it at all -
+which is the threat model: somebody with more access than the app has. Two
+further integration tests assert that `guardmem_app` is refused both UPDATE and
+DELETE, so the grant is a belt and the chain is the braces.
+
+**Running the integration suite found two bugs the unit tests could not.**
+`event_from_row` did not convert `tenant_id` back to `str` - asyncpg returns
+`uuid.UUID` for a UUID column, which pydantic's `strict=True` refused outright.
+`rowmap.py` has a comment warning about exactly that and I still wrote it. And
+the `_drop_tenant` fixture did not clear `audit_event`, whose foreign key to
+`tenant` then made every teardown fail and leaked one test's tenant into the
+next. Both are the kind of thing that only appears against a real column.
+
+**Six mutants, six kills**: unsorting the canonical keys, leaving non-ASCII
+unescaped, dropping either of the two verification checks, omitting the
+predecessor from the hash, and removing the JSON-safety guard each fail their
+own tests.
+
+**What a hash chain does not do, recorded so nobody assumes otherwise.**
+Truncating the chain from the head leaves a shorter, internally consistent
+chain that verifies. Detecting that needs an external witness - a published
+head, a countersignature - and neither is specified anywhere. `ChainVerification
+.checked` is what a caller compares against its own expectation, and that is why
+it exists.
 
 COMMIT: `feat(s5.5): hash-chained audit log`
 

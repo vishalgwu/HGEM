@@ -17,6 +17,56 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.5 — the hash-chained audit log.** `observability/audit.py` is the
+  arithmetic — `canonical_json`, `digest_for`, `next_link`, `verify_chain` — and
+  `audit_store.py` is the table. Invariant I5 is
+  `digest_n == sha256(payload_n || digest_{n-1})`, and a hash chain does not
+  prevent tampering: it makes tampering *visible*.
+- **The chain logic is pure**, so all of I5 is unit-tested without Docker. A
+  chain that only verifies against Postgres is a chain nobody can reason about.
+- **`verify_chain` runs two checks per link, and both are needed.** The digest
+  check catches an edited payload; the linkage check catches an edited payload
+  whose digest was recomputed to match, because the *next* link still names the
+  digest the old payload had. Together the only undetectable tamper is a rewrite
+  of every link from the break to the head — which is what the migration's
+  revoked UPDATE and DELETE grants are for, asserted by two integration tests.
+- **`append` takes a connection, never a pool**, which makes `RULES.md`
+  non-negotiable #4 structural rather than a convention. An integration test
+  rolls the transaction back and asserts the link did not outlive it.
+- **Concurrent appends are serialised per tenant** with `pg_advisory_xact_lock`
+  — two transactions reading the same head would both claim it and fork the
+  chain. The advisory lock is held to COMMIT and needs no UPDATE privilege,
+  which matters because UPDATE on this table is revoked.
+- **Six mutants, six kills.** 1088 unit and property tests plus 74 integration
+  tests passing locally; `audit.py` at 100% statement and branch coverage.
+
+### Fixed
+
+- **Two bugs the unit tests could not see, found by running the integration
+  suite.** `event_from_row` did not convert `tenant_id` back to `str` — asyncpg
+  returns `uuid.UUID` for a UUID column, and pydantic's `strict=True` refused
+  it. `rowmap.py` carries a comment warning about exactly that. And the
+  `_drop_tenant` fixture did not clear `audit_event`, whose foreign key to
+  `tenant` made every teardown fail and leaked one test's tenant into the next.
+
+### Changed
+
+- **`canonical_json` refuses anything that will not survive `JSONB`.** The
+  digest is taken over the payload and re-taken over what Postgres hands back,
+  so the canonical form is sorted keys, no padding, ASCII-escaped — and a
+  `datetime` raises rather than being stringified. A caller reaching for
+  `default=str` would get a digest over the string form, which `JSONB` returns
+  unchanged: the chain would verify while the record disagreed with the object
+  it was taken from. The error names the *path*, because a `DecisionRecord`
+  payload has thirty-odd fields and the type alone does not say which.
+- **What a hash chain cannot do, written down.** Truncating from the head leaves
+  a shorter, internally consistent chain that verifies. Detecting that needs an
+  external witness — a published head, a countersignature — and neither is
+  specified anywhere. `ChainVerification.checked` exists so a caller can compare
+  against its own expectation.
+- **`tests/unit/test_i5_audit.py` is named as CHECKPOINT B names it**, since the
+  checkpoint's automated checks run that exact path.
+
 - **S5.4 — the decision matrix.** `pipeline/l3_score/decision.py` implements
   `MEMORY_ENGINE.md` §3.4's twelve cells; `overrides.py` implements its seven
   hard overrides. Pure, total and deterministic — invariant I4 — with a static

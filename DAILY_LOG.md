@@ -3251,6 +3251,83 @@ rather than merely recorded.
 
 ---
 
+## 2026-09-14 — Day 5 · S5.5 (hash-chained audit log)
+
+**Shipped**
+
+- **`observability/audit.py`** — I5's digest, canonical JSON, `next_link` and
+  `verify_chain`. Pure, so the whole invariant is unit-testable without Docker.
+- **`observability/audit_store.py`** — the `audit_event` table, with `append`
+  taking a *connection* so the row commits with the state change it records,
+  and a per-tenant advisory lock so concurrent appends cannot fork the chain.
+- **The DONE WHEN against a real database**: a real `UPDATE` on a real row, and
+  `verify_chain` naming that exact `seq`. 1088 unit and property tests plus 74
+  integration tests; `audit.py` at 100% statement and branch coverage.
+
+**What broke / what I learned**
+
+- **Running the integration suite found two bugs, and one of them had a comment
+  warning me about it.** `event_from_row` passed `row["tenant_id"]` straight to
+  the model. asyncpg returns `uuid.UUID` for a UUID column, and `TenantId` is a
+  `NewType` over `str` — `rowmap.py` has a paragraph explaining that exact trap,
+  which I had read three steps earlier. Pydantic's `strict=True` refused it
+  outright, which is the good outcome: the alternative is a `UUID` object that
+  compares unequal to every tenant id in the pipeline and fails somewhere else
+  entirely. The second was mine too: `_drop_tenant` did not clear `audit_event`,
+  whose foreign key to `tenant` made every teardown fail and leaked one test's
+  tenant into the next.
+- **I nearly shipped a one-check `verify_chain`.** Comparing each link's digest
+  against a recomputation catches an edited payload, and I wrote the test for
+  that and it passed. The case it misses is the one an actual attacker would
+  use: recompute the digest too, and that link is now internally consistent.
+  What they cannot fix without rewriting the whole tail is the *next* link's
+  `prev_digest`. Writing the tamper tests as "each specific way of editing
+  history" rather than "tampering is caught" is what surfaced it.
+- **The digest has to survive `JSONB`, which is not the same as surviving
+  `json.dumps`.** Postgres does not store an object as text; it normalises key
+  order and whitespace. So canonical JSON is sorted, unpadded and ASCII-escaped,
+  and the integration suite asserts a rich payload comes back *byte-identical*
+  rather than merely verifying — because if a number's formatting had moved, the
+  failure would surface as an unexplainable digest mismatch.
+- **A `datetime` in a payload is refused rather than stringified**, and the
+  reason is subtle enough to be worth the paragraph in the docstring: reaching
+  for `default=str` produces a digest over the *string*, which `JSONB` hands
+  back unchanged. It would verify forever while the audit record quietly
+  disagreed with the object it was taken from.
+- **Concurrency would fork the chain and nothing would say so until a
+  verification ran.** Two transactions read the same head, both claim it. The
+  fix is an advisory lock rather than `SELECT ... FOR UPDATE`, because that
+  statement needs UPDATE privilege and `0001_initial` revokes it on this table —
+  the append-only grant and the obvious locking primitive are in direct
+  conflict, which took a minute to see.
+
+**Still open**
+
+- **A truncated chain verifies.** Dropping links from the head leaves a shorter,
+  internally consistent chain. Detecting it needs an external witness — a
+  published head, a countersignature — and neither is specified anywhere.
+  `ChainVerification.checked` is what a caller compares against its own
+  expectation, and that is the whole of the mitigation today.
+- **`read_chain` reads the whole chain.** Honest now, not for a busy tenant. The
+  incremental form needs a verified-prefix checkpoint, which needs somewhere to
+  record it.
+- **`memory/vector/pool.py` is the Postgres layer for the whole package** and
+  sits under `memory/vector/` because that is where S3.2 first needed it. The
+  audit store is the second caller saying so. A rename across three steps'
+  code; its own commit.
+- **Nothing calls `append` yet.** S5.6's orchestrator is what puts an audit
+  event in the same transaction as a write — open item 18 finally has its step.
+- The four spec questions (52, 57, 61, 62) are unchanged.
+
+**Tomorrow's first step**
+
+`S5.6` — the orchestrator and deterministic replay. It is the step every
+"nothing joins the stages yet" note has been pointing at: Layer 1 to Layer 3 in
+one call, the applier that carries out a resolution, and
+`scripts/replay_trace.py` printing "identical" for a fresh trace.
+
+---
+
 ---
 
 ---

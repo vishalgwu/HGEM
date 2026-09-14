@@ -169,8 +169,9 @@ baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Layer 3 is under way (S5.1 – S5.4)** with semantic entropy, the
-confidence composite, the impact-risk score and the decision matrix.
+it — and **Layer 3 is under way (S5.1 – S5.5)** with semantic entropy, the
+confidence composite, the impact-risk score, the decision matrix and the
+hash-chained audit log.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -393,6 +394,19 @@ sent for a second opinion from a larger model, while a slightly better one goes
 straight to a person, because more compute only helps where the model is
 genuinely unsure. And the rules never soften an outcome — a policy asking for
 human review cannot reopen something already rejected.
+
+S5.5 makes those decisions provable. Every one is written to an append-only log
+where each entry's fingerprint is computed over its own contents *and* the
+previous entry's fingerprint. That does not stop someone editing history — it
+makes editing it visible. Change an entry and its own fingerprint stops
+matching; fix the fingerprint too and the next entry no longer points at it. The
+check reports the exact row where the arithmetic first fails.
+
+The database refuses the application any way to update or delete those rows at
+all, so the chain is the second line rather than the only one. The honest limit
+is worth stating: lopping entries off the *end* leaves a shorter log that still
+adds up, and catching that needs something outside the system to remember how
+long it should have been.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
