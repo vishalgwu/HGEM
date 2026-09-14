@@ -3416,6 +3416,70 @@ where Day 25 is not.
 
 ---
 
+## 2026-09-14 — CHECKPOINT B (the harness; the gate itself is blocked)
+
+**Shipped**
+
+- **`guardmem_core/eval/discrimination.py`** — AUROC by ranks with tie
+  correction, the per-term diagnostics, the self-agreement check, and the
+  PASS/MARGINAL/FAIL bands.
+- **`scripts/checkpoint_b.py`** — `verify`, `template`, `score`, `agreement`.
+- **B1-B8 all pass**, run through `verify` rather than read. 1204 unit and
+  property tests plus 79 integration; `discrimination.py` at 100% statement and
+  branch coverage.
+
+**What broke / what I learned**
+
+- **The gate cannot be run, and it is not a matter of effort.** Step 3 is "run
+  the pipeline, collect `C` for each". There is no `LLMClient` implementation -
+  only the Protocol and `FakeLLM`. I checked before building anything, which
+  was the right order: the alternative was building a generator that could never
+  be honestly executed.
+  What I briefly considered and rejected was hand-authoring the 200 candidates.
+  It would have produced a number, and the number would have measured whether
+  `C` separates *my* idea of a plausible bad extraction from my idea of a good
+  one. That is the checkpoint's own "no model grading" rule broken by a
+  different route, and it would have been worse than no measurement because it
+  would have looked like one.
+- **So CHECKPOINT B is gated on S9.1, not on Day 5**, and the notebook's
+  placement does not say that. Recorded in the notebook and in the sign-off,
+  because the risk here is specific: Day 6 onward assumes the scoring
+  discriminates, and proceeding without noticing the gate never ran is exactly
+  the three-wasted-weeks failure the checkpoint exists to prevent.
+- **Writing the sign-off block honestly found a gap I had not looked for.** The
+  automated-check line reads "I1, I2, I3, I4 must all be green" and
+  `tests/property/` holds three files. **I3 - supersession is acyclic - has no
+  property test.** I would not have noticed by running the suite, because a
+  missing test passes.
+- **Ties are the substance of the AUROC implementation, not an edge case.**
+  `S_cor` is 0.0 for every single-sourced candidate, and every candidate is
+  single-sourced today - so the per-term diagnostic over corroboration is
+  *entirely* ties. A threshold-sweep or tie-blind implementation would have
+  reported something between 0 and 1 depending on extraction order. The rank
+  form with average ranks returns exactly 0.5, and a test asserts it.
+- **`auroc` raises on a one-sided corpus rather than returning 0.5**, which took
+  a moment to see as the right call. 0.5 reads as "no discriminative power"; the
+  truth is "there was no question here". One of those sends you back to the
+  labels and the other sends you back to the scorer.
+
+**Still open**
+
+- **THE GATE ITSELF.** Not run. Everything after Day 5 assumes the scoring
+  discriminates and that is unverified. Run it the day S9.1 lands.
+- **I3 has no property test.** Supersession acyclicity.
+- **No `LLMClient` implementation** - S9.1. This also means nothing in the repo
+  has ever made a real model call.
+- The applier (#44), and the four spec questions (52, 57, 61, 62), unchanged.
+
+**Tomorrow's first step**
+
+Day 6 - but with the gate recorded as open. The honest alternative is to jump to
+`S9.1` (provider adapters), run CHECKPOINT B for real, and only then build the
+gateway. That is a sequencing decision rather than a technical one, and it
+belongs to whoever owns the roadmap.
+
+---
+
 ---
 
 ---

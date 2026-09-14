@@ -341,6 +341,8 @@ guardmem-ai/
 │   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths
 │   ├── seed_demo_tenant.py              # S3.6; `make seed` - the END OF DAY 3 CHECK, executable
 │   ├── demo_tenant_data.py              # S3.6; the 40-turn transcript and the facts it sources
+│   ├── checkpoint_b.py                  # CHECKPOINT B; verify/template/score/agreement.
+│   │                                    #   The gate itself is BLOCKED on S9.1 - no LLMClient
 │   ├── replay_trace.py                  # S5.6; re-runs decide() from the audit chain and
 │   │                                    #   diffs. NOT the model calls - see its docstring
 │   ├── __init__.py                      # S5.6; a package, so mypy sees one module name

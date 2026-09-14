@@ -62,6 +62,7 @@ from guardmem_core.schemas import (
 
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
+from fixtures.strategy_eval import EVAL_STRATEGIES
 from fixtures.strategy_l2 import l2_strategies
 from fixtures.strategy_l3 import L3_STRATEGIES
 from fixtures.strategy_observability import OBSERVABILITY_STRATEGIES
@@ -244,6 +245,9 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # `observability/` (S5.5). Coherent, because `broken_at` and `verified`
     # are one fact wearing two names.
     **OBSERVABILITY_STRATEGIES,
+    # `eval/` (CHECKPOINT B). The report is coherent - its verdict, AUROC
+    # and counts are one fact stated three ways.
+    **EVAL_STRATEGIES,
     # The orchestrator's own models (S5.6), which compose two of the
     # generators below - hence the call rather than a dict.
     **pipeline_strategies(_TURNS, DECISION_RECORDS),

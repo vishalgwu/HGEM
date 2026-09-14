@@ -17,6 +17,47 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **CHECKPOINT B's harness.** `guardmem_core/eval/discrimination.py` is the
+  measurement — AUROC, the per-term diagnostics, the self-agreement check — and
+  `scripts/checkpoint_b.py` is the command around it: `verify`, `template`,
+  `score`, `agreement`.
+- **`verify` runs B1–B8 by running the tests that establish them**, which beats
+  reading: the table says "read the function; no awaits, no settings reads" for
+  B3, and the test parses the module and checks. **8/8 pass**, including the
+  three that need real Postgres.
+- **AUROC is computed by ranks with a tie correction**, not by sweeping
+  thresholds. `S_cor` is 0.0 for every single-sourced candidate, so a per-term
+  AUROC over that term is *mostly* ties — a tie-blind implementation would
+  return whatever the extraction order happened to produce.
+- **`auroc` raises on a one-sided corpus rather than returning 0.5.** That is
+  the difference between "this scorer is useless" and "this question was not
+  asked", and one says re-label while the other says rewrite the scorer.
+- **`score` refuses a partly-labelled corpus** rather than scoring the labelled
+  subset, and `template` refuses to overwrite an existing file — two hours of
+  labelling is not something a typo should destroy. Exit codes are 0/1/2, since
+  MARGINAL means "proceed, but record it" and a boolean cannot carry that.
+  1204 unit and property tests plus 79 integration; `discrimination.py` at 100%
+  statement and branch coverage.
+
+### Changed
+
+- **CHECKPOINT B is gated on S9.1, not on Day 5, and the notebook now says so.**
+  Its step 3 is "run the pipeline, collect `C` for each", and no `LLMClient`
+  implementation exists — `llm/base.py` declares the Protocol, `FakeLLM`
+  implements it for tests, and S9.1 builds the provider adapters. Scoring
+  against `FakeLLM` would measure scripted responses, and hand-authoring the
+  corpus would grade the scorer against the author's idea of a plausible
+  mistake, which breaks the checkpoint's own "no model grading" rule in a
+  different costume.
+- **The sign-off is recorded as BLOCKED rather than left blank.** Manual checks
+  8/8, automated checks green, AUROC *not measured* — so Day 6 proceeds with the
+  gate explicitly open and the assumption that the scoring discriminates
+  explicitly unverified.
+- **Invariant I3 has no property test**, which writing that sign-off is what
+  surfaced. The checkpoint's automated-check line reads "I1, I2, I3, I4 must all
+  be green" and only three of the four exist; supersession acyclicity is
+  untested.
+
 - **S5.6 — the pipeline orchestrator and deterministic replay.**
   `pipeline/orchestrator.py` runs one proposal through every layer: noise
   filter, extractor, schema gate, incumbent retrieval, conflict detection,

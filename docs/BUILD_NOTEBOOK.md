@@ -2715,6 +2715,51 @@ single-signal scorer beats an elegant composite that does not separate.
 - Audit written after the commit, which makes the chain unfalsifiable.
 - Overrides applied in the wrong order, so a stricter obligation gets relaxed by a later one.
 
+### The harness
+
+    uv run python -m scripts.checkpoint_b verify
+    uv run python -m scripts.checkpoint_b template corpus.jsonl
+    uv run python -m scripts.checkpoint_b score corpus.jsonl
+    uv run python -m scripts.checkpoint_b agreement first.jsonl second.jsonl
+
+**The discrimination test cannot be run yet, and the reason is structural.**
+Step 3 is "run the pipeline, collect `C` for each", and the pipeline needs a
+real `LLMClient` to extract candidates and judge conflicts. There is no
+implementation: `llm/base.py` declares the Protocol, `FakeLLM` implements it for
+tests, and **S9.1 builds the provider adapters**. Scoring against `FakeLLM`
+would measure scripted responses.
+
+Nor can the corpus be hand-written around that. The candidates have to come from
+real extraction, because what the gate measures is whether `C` separates the
+facts a model *actually proposes* - hand-authoring 200 of them grades the scorer
+against the author's idea of a plausible mistake, which is the "no model
+grading" rule broken in a different costume. **This checkpoint is therefore
+gated on S9.1 rather than on Day 5**, which the notebook's placement does not
+say and which is worth knowing before Day 6 is started on the strength of it.
+
+Everything except generation ships and is tested:
+
+- `verify` runs B1-B8 by running the tests that establish them - which beats
+  reading, since the table says "read the function; no awaits, no settings
+  reads" for B3 and `test_neither_module_imports_settings_at_all` parses the
+  module and checks. **8/8 pass today.**
+- `template` writes the corpus format: one JSON object per line, `keep` null
+  until a human sets it. `score` refuses a corpus with any row unlabelled
+  rather than scoring the labelled subset, which would report an AUROC over
+  whatever the labeller happened to reach first.
+- `score` is the gate. AUROC by ranks with the tie correction - `S_cor` is 0.0
+  for every single-sourced candidate, so a per-term AUROC over it is *mostly*
+  ties and a tie-blind implementation returns whatever the extraction order
+  produced. Exit 0/1/2 for PASS/MARGINAL/FAIL, because "proceed, but record it"
+  is a third thing and a boolean cannot carry it.
+- `agreement` is diagnostic 3. Run it *first* when the AUROC disappoints: a
+  scorer measured against inconsistent labels says nothing about the scorer, and
+  the checkpoint's own ordering is that the ontology gets fixed before it.
+
+`auroc` raises on a one-sided corpus rather than returning 0.5. That is the
+distinction between "this scorer is useless" and "this question was not asked",
+and one of them says re-label while the other says rewrite the scorer.
+
 ### Sign-off
 
 ```
@@ -2725,6 +2770,25 @@ AUROC entropy-only:
 Coverage:           %
 Decision:
 Notes:
+```
+
+**Recorded 2026-09-14: BLOCKED, not yet attempted.**
+
+```
+CHECKPOINT B: BLOCKED (discrimination test not runnable until S9.1)
+Date:               2026-09-14
+Manual checks:      8/8 pass (B1-B8, run by `checkpoint_b verify`)
+Automated checks:   lint, typecheck, imports green; 1204 unit and property
+                    tests plus 79 integration; I1/I2/I4/I5 green; replay
+                    prints "identical"
+AUROC:              not measured - no LLMClient implementation exists
+AUROC entropy-only: not measured, same reason
+Coverage:           94% (unit + property), 100% on every Layer 3 module
+Decision:           proceed to Day 6 with the gate explicitly OPEN, and run it
+                    the day S9.1 lands. Everything after this point assumes the
+                    scoring discriminates and that remains UNVERIFIED.
+Notes:              I3 (supersession acyclic) is also not property-tested yet -
+                    the automated-check list names I1-I4 and only three exist.
 ```
 
 ---

@@ -428,6 +428,26 @@ reproducible, and pretending otherwise would make the check meaningless. What it
 proves is narrower and more useful: that the rules which decided whether a fact
 was believed have not silently moved.
 
+### The gate that has not run yet
+
+The build notebook puts a make-or-break checkpoint after Day 5: take 200
+candidates, have a human label each one keep-or-discard, and measure whether the
+confidence score actually separates the two. Everything after that point —
+gateway, guardrails, dashboard, review queue — assumes it does.
+
+**It has not been run.** The measurement needs candidates from real extraction,
+and no adapter to a real model provider is built yet; the only implementation of
+that interface is the test double. Scoring against a test double would measure
+scripted answers, and hand-writing the 200 candidates would measure the author's
+idea of a plausible mistake — which is the same problem the "no model grading"
+rule exists to prevent.
+
+So what is built is everything except the generation step: the metric, the
+diagnostics, the label format, the self-consistency check on the labels, and a
+command that runs the eight manual verifications by running the tests that
+establish them. Those eight pass. The discrimination number does not exist, and
+this section is here so that it is not mistaken for one that does.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
 push. The next step is S4.4, the resolution matrix and dedupe/merge.
