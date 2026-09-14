@@ -24,12 +24,17 @@ Three things are pinned:
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, cast
 
 import mcp_types as types
 import pytest
+from pydantic import ValidationError
 
+from guardmem_core.settings import get_settings
+from mcp_server.lifespan import ConfigurationError, preflight
 from mcp_server.server import (
+    EXIT_CONFIG,
     INSTRUCTIONS,
     SERVER_NAME,
     SERVER_VERSION,
@@ -37,9 +42,13 @@ from mcp_server.server import (
     _list_resources,
     _list_tools,
     build_server,
+    main,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
     from mcp.server.context import ServerRequestContext
 
     from mcp_server.lifespan import ServerState
@@ -185,3 +194,131 @@ class TestConstructionIsPure:
         bug until the first streamable-HTTP deployment serves two.
         """
         assert build_server() is not build_server()
+
+
+class TestPreflightRefusesABadEnvironmentBeforeTheTransportOpens:
+    """What a misconfigured launch looks like, which for a stdio server is the
+    failure most users will actually meet.
+
+    Measured before this existed: running the console script from a directory
+    with no `.env` produced **78 lines** of `BaseExceptionGroup`, anyio and
+    contextlib frames with `9 validation errors for Settings` in the middle, exit
+    code 1, and the transport already open - so the client saw a pipe that
+    accepted a connection and died mid-handshake. It is now one line and exit
+    code 2, and the pipe is never opened.
+
+    An MCP client reports all of that identically ("server disconnected") and
+    buries the log, so the difference between the two is the difference between a
+    user fixing their config and a user filing a bug.
+    """
+
+    @pytest.fixture
+    def _no_configuration(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+        """A process launched somewhere with no `.env` and no `GM_` variables.
+
+        `chdir` because that is the real mechanism: `Settings` resolves `.env`
+        against the working directory, and a client chooses that directory -
+        Claude Desktop does not use the repository. `delenv` over every `GM_` key
+        because a developer with them exported would otherwise see this test fail
+        for a reason that has nothing to do with the code.
+        """
+        monkeypatch.chdir(tmp_path)
+        for key in [name for name in os.environ if name.startswith("GM_")]:
+            monkeypatch.delenv(key, raising=False)
+        get_settings.cache_clear()
+        yield
+        get_settings.cache_clear()
+
+    def test_it_names_every_field_that_is_missing(self, _no_configuration: None) -> None:
+        with pytest.raises(ConfigurationError) as caught:
+            preflight()
+
+        message = str(caught.value)
+        assert "database_url" in message
+        assert "neo4j_uri" in message
+        assert "model_fast" in message
+
+    def test_it_names_the_directory_it_looked_in(
+        self, _no_configuration: None, tmp_path: Path
+    ) -> None:
+        """The part that actually diagnoses it. "9 validation errors" sends
+        someone to check their variables; naming a directory they did not expect
+        tells them what really happened."""
+        with pytest.raises(ConfigurationError) as caught:
+            preflight()
+
+        message = str(caught.value)
+        assert str(tmp_path) in message
+        assert "no .env there" in message
+
+    def test_it_explains_that_a_spawned_server_inherits_almost_nothing(
+        self, _no_configuration: None
+    ) -> None:
+        """The second-order cause, and the one nobody guesses.
+
+        The MCP SDK spawns a server with `get_default_environment()`, which
+        returns only `DEFAULT_INHERITED_ENV_VARS` - so `GM_DATABASE_URL` exported
+        in a shell does **not** reach a server launched by a client. Someone who
+        exported it and watched the server fail has no way to reach that fact
+        from a pydantic error.
+        """
+        with pytest.raises(ConfigurationError) as caught:
+            preflight()
+
+        assert "`env` block" in str(caught.value)
+
+    def test_it_keeps_the_pydantic_error_as_the_cause(self, _no_configuration: None) -> None:
+        """Replaced for the human, preserved for the debugger. The message is
+        what a user reads; `__cause__` is what a bug report should carry."""
+        with pytest.raises(ConfigurationError) as caught:
+            preflight()
+
+        assert isinstance(caught.value.__cause__, ValidationError)
+
+    def test_main_exits_with_the_configuration_code_and_never_serves(
+        self, _no_configuration: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole point: no transport is opened on a bad environment.
+
+        `serve_stdio` is replaced with something that fails loudly rather than
+        asserted about afterwards - a test that only checked the exit code would
+        pass against a `main` that opened the pipe, failed, and returned 2 anyway.
+
+        That `EXIT_CONFIG` and `EXIT_OK` differ is not asserted here: both are
+        `Final` literals, so `mypy` rejects the comparison as non-overlapping -
+        which is the guarantee, checked statically and for every caller rather
+        than at runtime in one test.
+        """
+
+        def _must_not_run() -> None:  # pragma: no cover - the assertion is that this never runs
+            raise AssertionError("main opened the transport despite a bad environment")
+
+        monkeypatch.setattr("mcp_server.server.serve_stdio", _must_not_run)
+
+        assert main() == EXIT_CONFIG
+
+
+class TestPreflightAcceptsAGoodEnvironment:
+    def test_it_returns_the_settings_the_lifespan_will_use(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One instance, not two reads.
+
+        `get_settings` is `lru_cache`d, so the lifespan's own call a moment later
+        returns this same object. If that ever stopped being true the server
+        could validate one configuration and run on another.
+        """
+        monkeypatch.setenv("GM_DATABASE_URL", "postgresql+asyncpg://u:p@localhost:5432/db")
+        monkeypatch.setenv("GM_REDIS_URL", "redis://localhost:6379/0")
+        monkeypatch.setenv("GM_NEO4J_URI", "bolt://localhost:7687")
+        monkeypatch.setenv("GM_NEO4J_USER", "neo4j")
+        monkeypatch.setenv("GM_NEO4J_PASSWORD", "password")
+        monkeypatch.setenv("GM_MODEL_FAST", "claude-haiku-4-5")
+        monkeypatch.setenv("GM_MODEL_BALANCED", "claude-sonnet-5")
+        monkeypatch.setenv("GM_MODEL_FRONTIER", "claude-opus-5")
+        monkeypatch.setenv("GM_EMBED_MODEL", "text-embedding-3-large")
+        get_settings.cache_clear()
+        try:
+            assert preflight() is get_settings()
+        finally:
+            get_settings.cache_clear()

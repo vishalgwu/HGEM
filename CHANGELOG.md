@@ -80,7 +80,24 @@ repository; the log records what happened while changing it.
 - **S6.1's DONE WHEN runs in CI.** `tests/integration/test_mcp_stdio.py` drives a
   real `ClientSession` against the server over the SDK's in-memory transport and
   asks for the tool list. The inspector is the right way to *see* it work and the
-  wrong way to keep it working.
+  wrong way to keep it working. Also verified by hand against the live dev stack
+  as a real subprocess over a real pipe — `guardmem-mcp` spawned, initialize at
+  protocol `2025-11-25`, zero tools, zero resources, zero prompts, pool closed on
+  disconnect.
+- **`preflight()` validates configuration before the transport is opened**, and
+  `main` returns a distinct exit code when it fails. Running the console script
+  from a directory with no `.env` produced **78 lines** of `BaseExceptionGroup`,
+  anyio and contextlib frames with `9 validation errors for Settings` buried in
+  the middle, exit code 1, and the pipe already accepted — because the `Settings`
+  read sat in the lifespan, which runs inside `stdio_server()`. It is now **one
+  line** and exit code **2**, and the transport is never opened.
+
+  The message names what a pydantic error cannot: the directory `.env` was
+  resolved against (a client chooses it — Claude Desktop does not use the
+  repository), whether one was there, and that an MCP-spawned server inherits
+  only `DEFAULT_INHERITED_ENV_VARS`, so `GM_*` exported in a shell never reaches
+  it. A GUI client renders every one of those failures as "server disconnected",
+  so this line may be all a user ever sees. **Prerequisite for S6.3.**
 - **Invariant I3 has a property test** — `tests/property/test_i3_supersession_acyclic.py`,
   500 generated write histories. It also records what I3 does *not* rest on:
   `supersede` compares nothing about the two ids it is handed, so a caller can

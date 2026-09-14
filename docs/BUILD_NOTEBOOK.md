@@ -2819,7 +2819,7 @@ over the SDK's in-memory transport so it runs in CI on every commit.
 
 COMMIT: `feat(s6.1): mcp server skeleton`
 
-**Four corrections to this step, found by building it.** The version above already includes them.
+**Five corrections to this step, found by building it.** The version above already includes them.
 
 1. **The lifespan cannot wire an `LLMClient` or `pipeline.Deps`, and the reason is the one that
    has CHECKPOINT B recorded as BLOCKED.** There is no `LLMClient` implementation in this
@@ -2849,6 +2849,25 @@ COMMIT: `feat(s6.1): mcp server skeleton`
    correction 1 on S1.1 gives about `guardmem-core`: `[tool.uv.sources]` says where to resolve a
    workspace member, and nothing installs one until something depends on it - so CI's
    `uv sync --locked` would lock the service and not install it.
+5. **Validate configuration BEFORE opening the transport, and this is the correction with the
+   most operational value in the step.** The obvious shape puts the `Settings` read in the
+   lifespan, where it looks like startup. But the lifespan runs inside `Server.run`, which runs
+   inside `stdio_server()` — so a bad environment escapes through anyio as a `BaseExceptionGroup`
+   and reaches the operator as **78 lines** of asyncio and contextlib frames with `9 validation
+   errors for Settings` buried in the middle, exit code 1, and the pipe already accepted. Measured,
+   by running the console script from a directory with no `.env`.
+
+   That directory is the point. `Settings` resolves `.env` against the **working directory**, and
+   an MCP client chooses it — Claude Desktop does not use the repository. The MCP SDK compounds it:
+   a spawned server inherits only `DEFAULT_INHERITED_ENV_VARS`, so `GM_*` exported in a shell does
+   **not** reach it and the values must come from the client config's own `env` block. Neither fact
+   is reachable from a pydantic traceback, and a GUI client renders all of it identically as
+   "server disconnected".
+
+   `preflight()` in `lifespan.py` now runs first and raises `ConfigurationError` naming the missing
+   fields, the directory it looked in, whether a `.env` was there, and the inheritance rule — one
+   line, exit code **2** (distinct from a crash, so a supervisor does not restart a misconfigured
+   server forever). **This is a prerequisite for S6.3**, which is where a user meets it.
 
 ---
 

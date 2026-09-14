@@ -45,14 +45,22 @@ import mcp_types as types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
-from mcp_server.lifespan import ServerState, lifespan
+from mcp_server.lifespan import ConfigurationError, ServerState, lifespan, preflight
 
 if TYPE_CHECKING:
     from mcp.server.context import ServerRequestContext
 
-__all__ = ["SERVER_NAME", "build_server", "main"]
+__all__ = ["EXIT_CONFIG", "EXIT_OK", "SERVER_NAME", "build_server", "main"]
 
 _LOGGER: Final = logging.getLogger(__name__)
+
+# A session that ran and ended, including one the client interrupted.
+EXIT_OK: Final = 0
+
+# The environment is wrong. Distinct from a crash because the correct response
+# differs: a crashed server is worth restarting and a misconfigured one is not,
+# and a supervisor that cannot tell them apart restarts this one forever.
+EXIT_CONFIG: Final = 2
 
 # The name a client sees in its server list, and the one `MCP_INTEGRATION.md` §1
 # uses as the `mcpServers` key. Not the package name (`guardmem-mcp`), which is
@@ -150,23 +158,39 @@ async def serve_stdio() -> None:
     (`MCP_INTEGRATION.md` §1), and it has one hard rule this module obeys by
     construction: **stdout belongs to the protocol.** A stray `print` is a
     malformed JSON-RPC frame. That is why `main` sends logging to stderr, and
-    why nothing in this package writes to stdout at all.
+    why nothing in this package writes to stdout at all - enforced rather than
+    intended, since ruff's `T201` covers `services/` and fails `make lint` on a
+    `print` anywhere in this package.
     """
     server = build_server()
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
-def main() -> None:
+def main() -> int:
     """The `guardmem-mcp` console script.
+
+    Returns:
+        `EXIT_OK` when a session ended normally or was interrupted, and
+        `EXIT_CONFIG` when the environment is wrong. Two codes rather than a
+        bool, for the reason `scripts/checkpoint_b.py` gives about its three: a
+        supervisor restarting a crashed server and a supervisor restarting a
+        *misconfigured* one are different behaviours, and the second one is a
+        loop that never converges.
 
     Synchronous because a `[project.scripts]` entry point is called as a plain
     function, and it owns the event loop for the same reason `lifespan` owns the
     pool: one process, one loop, created at the top and not by a library.
 
-    `KeyboardInterrupt` exits quietly. A client shutting the server down is the
-    normal end of a session, and a traceback on a normal exit trains whoever
-    reads the log to ignore tracebacks.
+    **Configuration is validated before the transport is opened.** `preflight`
+    explains why at length; in short, a `Settings` failure inside the lifespan
+    escapes through anyio as a 78-line `BaseExceptionGroup` with the cause buried
+    in the middle, after the pipe has already been accepted. Asking first turns
+    that into one line and a clean exit.
+
+    `KeyboardInterrupt` exits quietly, and as a success. A client shutting the
+    server down is the normal end of a session, and a traceback on a normal exit
+    trains whoever reads the log to ignore tracebacks.
     """
     logging.basicConfig(
         stream=sys.stderr,
@@ -174,6 +198,15 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     try:
+        preflight()
+    except ConfigurationError as exc:
+        # `exception()` would attach the pydantic traceback, which is the
+        # 78-line wall this exists to replace. The chained cause is still on the
+        # exception for anything that wants it.
+        _LOGGER.error("guardmem-mcp cannot start: %s", exc)
+        return EXIT_CONFIG
+    try:
         asyncio.run(serve_stdio())
     except KeyboardInterrupt:  # pragma: no cover - needs a signal, not a test.
         _LOGGER.info("guardmem-mcp interrupted")
+    return EXIT_OK

@@ -18,7 +18,14 @@ bad response and a lifespan bug is a process that will not start, and the second
 is the one an operator reads at three in the morning.
 """
 
-from mcp_server.lifespan import ServerState, lifespan
+from mcp_server.lifespan import ConfigurationError, ServerState, lifespan, preflight
 from mcp_server.server import build_server, main
 
-__all__ = ["ServerState", "build_server", "lifespan", "main"]
+__all__ = [
+    "ConfigurationError",
+    "ServerState",
+    "build_server",
+    "lifespan",
+    "main",
+    "preflight",
+]

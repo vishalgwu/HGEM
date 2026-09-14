@@ -3557,11 +3557,47 @@ belongs to whoever owns the roadmap.
   framework bug rather than a fixture bug. The connection helper is a plain
   `@asynccontextmanager` entered inside each test body instead.
 
+**S6.1, second pass — running it for real**
+
+- **Drove `guardmem-mcp` as an actual subprocess over an actual pipe**, against
+  the live dev stack, which is the half of the DONE WHEN the in-memory test
+  deliberately does not cover. Works: initialize at protocol `2025-11-25`, zero
+  tools/resources/prompts, `subscribe=False`, pool closed on disconnect.
+- **Then ran it from a different directory, and that is where the real bug was.**
+  78 lines of `BaseExceptionGroup` and asyncio frames, with `9 validation errors
+  for Settings` in the middle, exit 1, and the pipe already accepted. The cause
+  is structural rather than cosmetic: the `Settings` read was in the lifespan,
+  the lifespan runs inside `Server.run`, and `Server.run` runs inside
+  `stdio_server()` — so the error had to come back out through anyio.
+- **Two facts a pydantic traceback cannot convey, and both are the actual cause.**
+  `Settings` resolves `.env` against the **working directory**, and an MCP client
+  picks that directory — Claude Desktop does not use the repo. And the SDK spawns
+  a server with `get_default_environment()`, which returns only
+  `DEFAULT_INHERITED_ENV_VARS`, so `GM_DATABASE_URL` exported in my shell would
+  never have reached it either. I would have spent an hour on that at S6.3.
+- **`preflight()` now runs before the transport opens.** One line, exit code 2
+  rather than 1 — a supervisor restarting a crashed server and a supervisor
+  restarting a *misconfigured* one are different behaviours, and the second is a
+  loop that never converges.
+- **mypy caught a tautological assertion** — `EXIT_CONFIG != EXIT_OK` over two
+  `Final` literals is non-overlapping, so it rejected the comparison. It was
+  right, and the static check is the better guarantee: it holds for every caller
+  rather than in one test.
+- **A 107-second unit run scared me and was nothing.** `--durations` put every
+  slow test in the pre-existing property suite; the new ones are ~10 ms each. The
+  machine was busy with the containers and the subprocess runs. Worth the two
+  minutes to check rather than assume.
+
 **Still open**
 
 - **THE GATE ITSELF.** Unchanged, and now with one more step built on top of it.
   S9.1 unblocks CHECKPOINT B *and* S6.2 *and* the rest of Day 6 — three reasons
   to do it next rather than one.
+- **S6.3 has to reconcile two environment schemes.** `MCP_INTEGRATION.md` §1's
+  config block passes `GUARDMEM_API_KEY` / `GUARDMEM_BASE_URL` /
+  `GUARDMEM_DEFAULT_NAMESPACE`; `Settings` wants `GM_`-prefixed names and nine
+  required fields. Those are two different contracts and the doc is the spec of
+  record, so the reconciliation belongs there first.
 - **`resources.subscribe` belongs at S6.4**, with the resource and the change
   feed together.
 - **Appendix G — the cut order — is unwritten.** A scope decision, not mine.
