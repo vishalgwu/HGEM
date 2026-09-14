@@ -66,6 +66,7 @@ from guardmem_core.schemas import (
 
 __all__ = ["ANY_SCHEMA", "SCHEMA_STRATEGIES"]
 
+from fixtures.strategy_l2 import l2_strategies
 from fixtures.strategy_ontology import ONTOLOGY_STRATEGIES
 from fixtures.strategy_primitives import (
     _ANY_FLOAT,
@@ -258,6 +259,9 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # The ontology layer, from its own module - see `strategy_ontology.py`
     # for why `Ontology` has to draw its entity types before its predicates.
     **ONTOLOGY_STRATEGIES,
+    # Layer 2, likewise. It takes the candidate generator as an argument so the
+    # two modules do not import each other.
+    **l2_strategies(_memory_candidates()),
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

@@ -15,6 +15,38 @@ repository; the log records what happened while changing it.
 
 ## [Unreleased]
 
+### Added
+
+- **S4.1 — the ontology schema gate, and the start of Layer 2.**
+  `pipeline/l2_validate/schema_gate.py` is the first thing in the pipeline to
+  read the ontology S3.5 built. Every candidate Layer 1 produced arrives
+  claiming a predicate and a value; the gate decides whether the tenant's
+  vocabulary admits it, and carries `MEMORY_ENGINE.md` §3.2's `S_sch` forward
+  for Layer 3.
+- **Four outcomes, not the three the step names.** §3.2's scale settles it —
+  `PASS` (1.0), `COERCED` (0.7), `QUARANTINED` (0.4), `REJECTED` (0). Quarantine
+  and reject are different numbers and different fates: a quarantined candidate
+  stays retrievable and flagged, a rejected one goes no further. Collapsing them
+  would have discarded the 0.4 the confidence composite is specified to receive.
+- **Nothing raises.** A stage that threw on the third candidate in a batch would
+  lose the other nine, and `DecisionRecord` is built to record a `REJECT` with a
+  reason rather than to catch one.
+- **Quarantine is isolated twice.** `admitted` excludes it — the guarantee a
+  caller obeys — and the namespace is rewritten to `quarantine:<tenant>`, the
+  one that holds when a caller does not. A flag would have to be checked by
+  every read path; a namespace simply is not the one a primary read asks for.
+- **Coercion refuses more than it accepts.** `bool("no")` is `True`, so a
+  boolean predicate takes a small closed vocabulary rather than a truthiness
+  test — recording a declined consent as a given one is the one place this
+  module could do real harm. `True == 1` is an accident of `bool` subclassing
+  `int`, so a `number` refuses a bool and a `boolean` refuses a number. `coded`
+  and `entity_ref` refuse anything not already a string: stringifying `71.5`
+  into an RxNorm slot produces a code that does not exist.
+- Two of §2.1's checks deliberately do **not** live here: the `subject` entity
+  type cannot be checked until entity resolution runs at S4.2, and
+  `min_source_tier` is a cap on what may *auto-write*, which belongs with the
+  decision matrix. 700 tests, 100% coverage. Four mutants, four kills.
+
 ### Changed
 
 - **Cleanup to S4.1 — the last of the repeated logic, and the unused

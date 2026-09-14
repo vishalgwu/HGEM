@@ -1873,7 +1873,54 @@ TIME: 45 min
 Three outcomes only: pass, coerce (record `schema_fit=0.7`), or quarantine/reject. Unknown
 predicate goes to the `quarantine` namespace, never to primary.
 
+**Five corrections to this step, found by building it.**
+
+1. **There are four outcomes, not three, and §3.2 already said so.** The step
+   groups "quarantine/reject", but `S_sch` is a four-value scale - "1.0 exact
+   ontology fit; 0.7 coerced; 0.4 unknown-but-plausible; 0 reject (never
+   reaches scoring)". Quarantine and reject are *different numbers* and
+   different fates: a quarantined candidate stays retrievable and flagged
+   (§2.1), a rejected one goes no further. Collapsing them would have thrown
+   away the 0.4 the confidence composite is specified to receive.
+2. **The gate returns verdicts; it never raises.** A stage that threw on the
+   third candidate in a batch would lose the other nine, and `DecisionRecord`
+   is built to *record* a `REJECT` with a reason rather than to catch one.
+   `ValidationRejected` stays for a caller that hands the gate an incoherent
+   request - a candidate that fails the vocabulary is data, and data gets a
+   verdict.
+3. **"Never reaches the store router" is two guarantees, and one of them is not
+   enough.** The grouping (`admitted` excludes it) is the one a caller obeys;
+   the namespace rewrite to `quarantine:<tenant>` is the one that holds when a
+   caller does not. A flag would have to be checked by every read path; a
+   namespace simply is not the one a primary read asks for. Both are tested.
+4. **Two of §2.1's checks cannot live here yet, and saying which matters.** The
+   ontology declares each predicate's `subject` entity type and the gate cannot
+   check it - `MemoryCandidate.subject` is still a surface form because entity
+   resolution has not run, and **S4.2** is where it does. `min_source_tier` is
+   also not checked here: `RULES.md` §4 makes the tier a *cap on what may
+   auto-write*, which is a decision-matrix question, and answering it in the
+   gate would move a safety rule away from the table that composes it.
+5. **Coercion must refuse more than it accepts, and the refusals are the
+   design.** `bool("no")` is `True`, so a boolean predicate takes a small closed
+   vocabulary rather than a truthiness test - the one place this module could do
+   real harm is recording a declined consent as a given one. `True == 1` is an
+   accident of `bool` subclassing `int`, so a `number` refuses a bool and a
+   `boolean` refuses a number. And `coded` and `entity_ref` refuse anything that
+   is not already a string: stringifying `71.5` into an RxNorm slot produces a
+   code that does not exist, and a reviewer reading it back cannot tell.
+
 DONE WHEN: unit tests cover all three paths and the quarantine path never reaches the store router.
+
+Run the gate against the **shipped** `clinical.yaml`, not a fixture ontology.
+That is what S3.5 existing first buys, and the S3.6 audit had just finished
+paying for the alternative: a hand-written ontology in the tests drifts from the
+one production loads and nothing compares them.
+
+Four mutants, four kills: dropping the namespace rewrite kills the isolation
+test, letting quarantined verdicts fall through to `admitted` kills the DONE
+WHEN, accepting a `bool` as a number kills the `True is not 1.0` case, and
+reading a boolean by truthiness kills `consent_flag: "NO"` - which is the one
+worth having evidence for.
 
 COMMIT: `feat(s4.1): ontology schema gate`
 

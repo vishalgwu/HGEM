@@ -2613,6 +2613,79 @@ deterministic embedder, and a dependency list that can explain itself.
 
 ---
 
+## 2026-09-13 — Day 4 · S4.1 (ontology schema gate)
+
+**Shipped**
+
+- `pipeline/l2_validate/schema_gate.py` — four outcomes against the tenant
+  ontology, carrying `S_sch` forward. The first pipeline consumer of S3.5.
+- `tests/unit/test_schema_gate.py` (32 cases) and `tests/fixtures/strategy_l2.py`.
+  700 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **The step says three outcomes and the spec of record says four.** "pass,
+  coerce, or quarantine/reject" groups the last two; §3.2's `S_sch` scale gives
+  them different numbers — 0.4 unknown-but-plausible, 0 reject — and different
+  fates. A quarantined candidate stays retrievable and flagged; a rejected one
+  stops. Collapsing them would have thrown away the 0.4 the confidence
+  composite is specified to receive, and nothing downstream would have noticed
+  because nothing downstream exists yet. **Two documents disagreeing is the
+  cheapest kind of bug to find and the most expensive kind to find late.**
+
+- **"Never reaches the store router" needed two answers.** The obvious one is
+  the grouping: `admitted` excludes quarantined candidates, so a caller
+  forwarding `admitted` cannot write one. That guarantee only holds while the
+  caller obeys it. The second is the namespace rewrite to
+  `quarantine:<tenant>`, which holds when the caller does not — a flag has to be
+  checked by every read path, a namespace simply is not the one a primary read
+  asks for. Same shape as binding the store's tenant at construction rather than
+  filtering, which is becoming this codebase's house move.
+
+- **Coercion is mostly a list of refusals, and Python supplied two of them.**
+  `bool("no")` is `True` — so a boolean predicate reading its value by
+  truthiness would record a patient declining consent as having given it. And
+  `True == 1`, because `bool` subclasses `int`, so a numeric predicate that did
+  not check `bool` first would store `1.0` for `True`. Both are accidents of the
+  language that would read as decisions once they were in a database. The
+  boolean vocabulary is a closed set of six words, and the test that asserts
+  `consent_flag: "NO"` becomes `False` is the one I most wanted a mutant for.
+
+- **The eager-coercion trap is subtler than the wrong-coercion one.** My first
+  `_as_boolean` ran `False` through the word vocabulary and came back with
+  `(False, True)` — correct value, `COERCED` outcome, 0.3 of confidence lost for
+  doing nothing at all. Caught by writing the "already the right type" test for
+  each declared type rather than only for the string ones.
+
+- **Gating against the shipped `clinical.yaml` rather than a fixture** was free
+  this time and would not have been a week ago. The S3.6 audit had just finished
+  paying for the alternative in the extraction fixture, where a hand-written
+  ontology had drifted so far it failed its own loader.
+
+**Still open**
+
+- The gate cannot check a predicate's declared `subject` entity type:
+  `MemoryCandidate.subject` is a surface form until entity resolution runs at
+  **S4.2**. §2.1 lists it as the gate's job, and it will be once there is a
+  resolved entity to check.
+- `min_source_tier` is not checked here either. `RULES.md` §4 makes the tier a
+  cap on what may *auto-write*, so it belongs with the decision matrix at
+  **S5.4** — putting it in the gate would move a safety rule away from the table
+  that composes it. The S3.6 seed checks it for its own data; that is data
+  validation, not the gate.
+- `schema_fit` is carried on `GatedCandidate` and nothing reads it yet.
+  `ConfidenceReport.schema_fit` is filled at **S5.2**.
+- Nothing joins the stages. Layer 1's output is not piped into the gate by any
+  code; `orchestrator.py` is **S5.6**.
+
+**Tomorrow's first step**
+
+`S4.2` — incumbent retrieval. Top-k within `(namespace, subject, predicate)`
+plus a one-hop graph expansion, which is the first caller of both stores at
+once and of `assertion_live_idx`.
+
+---
+
 ---
 
 <!--

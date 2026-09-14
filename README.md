@@ -11,8 +11,9 @@
 > (noise filter, K-sample extractor, span linker), and from S3.1–S3.5 the
 > bitemporal Postgres schema, the pgvector store over it, the outbox that
 > coordinates the dual write, the graph store on the other side of it, and the
-> ontology that says what a predicate is allowed to mean, with `make seed`
-> putting all of it together:
+> ontology that says what a predicate is allowed to mean — with `make seed`
+> putting all of it together, and S4.1 starting Layer 2 by enforcing that
+> vocabulary:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -164,8 +165,8 @@ stack it actually requires.
 
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), and the storage layer is complete — **Day 3
-is done, S3.1 – S3.6**.
+Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
+– S3.6**), and **Layer 2 has started at S4.1** with the schema gate.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -254,8 +255,28 @@ is real, and only because it is the impact floor the ontology declares.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S4.1, the schema gate — the first component of Layer 2,
-and the first real consumer of the ontology.
+S4.1 is the first component of Layer 2 and the first thing in the pipeline to
+read the ontology. Every candidate Layer 1 produced arrives claiming a predicate
+and a value; the gate decides whether the tenant's vocabulary admits it, and
+there are four answers rather than three. A predicate the ontology declares and
+a value already of the right type passes. A value that can become the right type
+without inventing meaning is coerced, and pays for it in the confidence score. A
+predicate the ontology has never heard of is *quarantined* — rewritten into a
+`quarantine:<tenant>` namespace where it stays retrievable and flagged, because
+an unknown predicate is a gap in the ontology as often as a bad extraction. And
+a value the declared type cannot hold is rejected outright.
+
+Most of that module is refusals, deliberately. A gate that coerces too eagerly
+is worse than one that rejects too readily: a rejection shows up in the funnel,
+while a wrong coercion is a stored fact that reads as though somebody meant it.
+`bool("no")` is `True` in Python, so a boolean predicate takes a small closed
+vocabulary rather than a truthiness test — recording a declined consent as a
+given one is the one place this code could do real harm.
+
+That Postgres is a testcontainer, started by the suite from the repository's own
+`initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
+push. The next step is S4.2, incumbent retrieval — the first caller of both
+stores at once.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

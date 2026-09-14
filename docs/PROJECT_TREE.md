@@ -95,7 +95,8 @@ guardmem-ai/
 │   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
 │   │       │   │   └── span_linker.py   # S2.3; SpanMatch, exact then fuzzy >= 92, snapped
 │   │       │   ├── l2_validate/
-│   │       │   │   ├── schema_gate.py   # entity/predicate ontology validation
+│   │       │   │   ├── schema_gate.py   # S4.1; pass / coerce / quarantine / reject against
+│   │       │   │   │                    #   the tenant ontology, carrying S_sch forward
 │   │       │   │   ├── conflict.py      # NLI contradiction + cardinality + temporal
 │   │       │   │   └── dedupe.py        # cosine + bidirectional entailment merge
 │   │       │   └── l3_score/
@@ -281,6 +282,7 @@ guardmem-ai/
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates
+│   │   ├── strategy_l2.py               # S4.1; the schema gate's verdict models
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.
 │                                        #   The ONLY conftest: a second one is a duplicate
