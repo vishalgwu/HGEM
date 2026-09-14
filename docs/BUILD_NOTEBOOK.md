@@ -2375,10 +2375,83 @@ order. The matrix reads five thresholds - `tau_lo`, `tau_mid`, `tau_hi`, `rho_lo
 passed in as a `Thresholds` value, never read from settings inside the function. Bands are
 half-open: a `C` exactly on a boundary belongs to the higher band.
 
+**Five corrections to this step, found by building it.**
+
+1. **§3.4's own table and prose disagree about `R`.** The prose says "a band's
+   lower bound is inclusive, its upper bound exclusive" and then, of confidence
+   specifically, "`C` exactly at a threshold falls in the higher band". The
+   column headers are drawn `<= rho_lo` and `> rho_hi` - the opposite reading
+   for risk. Applied uniformly here, so `R = rho_lo` is the middle column and
+   `R = rho_hi` the right-hand one: the general sentence is the one stated as a
+   rule, and every disagreement lands on the stricter cell.
+2. **Override 1 names an outcome `Decision` does not have.** "injection_detected
+   -> QUARANTINE" - but `MEMORY_ENGINE.md` §0 declares four outcomes and
+   `PRD.md` FR-3.2 says exactly one per candidate. The quarantine is a
+   *namespace* (§2.1), so the decision is REJECT: `RULES.md` §3 treats a canary
+   echo as confirmed injection rather than a heuristic, and confirmed-hostile
+   content does not need a human to adjudicate it.
+3. **Four of the seven overrides cannot be evaluated from §3.4's own
+   signature.** `decide(conf, risk, conflict, thresholds, already_escalated)`
+   knows nothing about a canary, a source tier, an ontology flag or a circuit
+   breaker - so overrides 1, 2, 3 and 5 would have been silently absent.
+   `OverrideSignals` is a sixth parameter carrying exactly those, all of it
+   data, so `decide()` stays pure. Adding fields to `ConfidenceReport` or
+   `RiskVerdict` instead would have been a spec-of-record change (`RULES.md`
+   §8) for the same result.
+4. **"corroboration >= 2" is a count and the report carries a score.**
+   `ConfidenceReport.corroboration` is §3.2's `S_cor`. They are recoverable from
+   each other - `S_cor` is exactly 0.0 at one source and positive above - so the
+   test is `S_cor >= corroboration(2)`, written against S5.2's own function so
+   a change to lambda moves both together rather than leaving a literal behind.
+5. **`Thresholds` went into `schemas/verdict.py`, not here.** That module's
+   docstring said it would not, and settling its shape is what changed the
+   answer: `Settings` already enforced `tau_lo < tau_mid < tau_hi`, so a copy of
+   that rule beside `decide()` would be two homes for one invariant.
+   `Settings.thresholds()` is now the only construction path and its validator
+   the only enforcement, so a bad `.env` still fails at startup.
+
+The asterisk and the dagger both needed a reading. The starred cell is
+HITL_REVIEW when corroboration is unmet, since the cell beside it is
+HITL_REVIEW and nothing in §3.4 rejects on risk alone. The dagger - "CRITICAL
+impact: a human sees even the rejections" - reads as a gloss on why that cell is
+HITL_REVIEW rather than REJECT, not as a condition, so it holds at every impact
+level.
+
 DONE WHEN:
 - hypothesis property test: `decide()` is total over C,R in [0,1]^2 and deterministic (invariant I4)
 - a table-driven test with one case per matrix cell plus one per override
 - escalation cannot recurse: `already_escalated=True` never returns ESCALATE
+
+**All three.** Totality is driven in the form worth having - not "returns
+without raising", which a matrix with a hole would also satisfy, but that the
+bands *tile* the unit square, checked against band indices recomputed
+independently of the module under test. Thresholds are generated too, not only
+scores: §3.4 makes them per-namespace and `threshold_tuner.py` refits them, so
+a `decide()` that was total under the defaults and not under a tenant's own set
+would be a production failure nothing would have seen.
+
+**The matrix is deliberately not monotone, and hypothesis taught me that.** I
+wrote a property saying more confidence is never worse and it found the
+counterexample in seconds: read down the middle risk column, the `tau_lo` band
+escalates and the `tau_mid` band above it *reviews*. That is §3.4's own table
+and it is right - escalation re-runs Layer 3 on FRONTIER, which is worth paying
+for exactly where a bigger model might settle the question, and above `tau_mid`
+it would not. The false property was replaced by the two true ones: raising `C`
+never introduces a REJECT, and the ESCALATE-to-HITL step is pinned as intended.
+
+**"Obligations compose, they never relax" is an ordering, not a convention.**
+Each override proposes and `tighten` keeps the less permissive of the two, over
+`AUTO_WRITE < ESCALATE < HITL_REVIEW < REJECT`. That makes the guarantee
+mechanical rather than dependent on how each rule is written, and it has a
+consequence worth stating: override 6's `require_review` cannot pull a REJECT up
+into a review.
+
+**Nine mutants, and one survived the first pass.** Making `tau_hi` exclusive
+killed *nothing*: at low risk the top two rows are both AUTO_WRITE, so the
+boundary is invisible there, and my boundary tests were all written at low risk.
+It only bites in the middle column, where the top row auto-writes on
+corroboration and the row below always reviews. Three boundary tests were added
+at the risk band where each threshold actually decides something.
 
 COMMIT: `feat(s5.4): decision matrix`
 

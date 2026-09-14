@@ -169,8 +169,8 @@ baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Layer 3 is under way (S5.1 – S5.3)** with semantic entropy, the
-confidence composite and the impact-risk score.
+it — and **Layer 3 is under way (S5.1 – S5.4)** with semantic entropy, the
+confidence composite, the impact-risk score and the decision matrix.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -373,6 +373,26 @@ Underneath that sits a floor. A field declared critical can never score below
 individual signals is allowed to be imperfect without the safety property being
 imperfect. The test for it is the one the build notebook calls the whole point
 of keeping the two scores apart.
+
+S5.4 is where the two scores become one answer: write it, send it to a human,
+reject it, or spend more compute and decide again. That is a twelve-cell table
+over confidence and risk, followed by seven rules that can only ever make the
+answer stricter — a detected injection, retrieved web content touching an
+important field, a claim from one source where policy wants two, degraded
+capacity, and so on.
+
+The function is deliberately boring: no clock, no configuration lookup, no
+randomness, nothing but its arguments. That is what makes a decision replayable
+months later, which is the whole premise of an audit log that can be trusted.
+A test asserts the module imports none of those things, rather than trusting
+that nobody adds one.
+
+Two details are worth knowing because they look like mistakes and are not.
+More confidence does not always give a friendlier answer: a middling claim is
+sent for a second opinion from a larger model, while a slightly better one goes
+straight to a person, because more compute only helps where the model is
+genuinely unsure. And the rules never soften an outcome — a policy asking for
+human review cannot reopen something already rejected.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

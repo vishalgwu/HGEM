@@ -3172,6 +3172,85 @@ total and deterministic over `C, R` in `[0,1]²`.
 
 ---
 
+## 2026-09-14 — Day 5 · S5.4 (decision matrix)
+
+**Shipped**
+
+- **`pipeline/l3_score/decision.py`** — §3.4's twelve cells, the starred cell's
+  corroboration test, and the clamp that stops an escalation recursing.
+- **`pipeline/l3_score/overrides.py`** — the seven hard overrides as a rule
+  table, with `tighten` turning "obligations compose, they never relax" into an
+  ordering rather than a convention.
+- **`Thresholds`** in `schemas/verdict.py`, with `Settings.thresholds()` as the
+  only construction path, plus `GM_THRESHOLDS_VERSION`.
+- **Invariant I4** property-tested over generated thresholds as well as
+  generated scores. 1044 tests; all of Layer 3 at 100% statement and branch
+  coverage.
+
+**What broke / what I learned**
+
+- **Hypothesis disproved a property I was confident about.** I wrote "raising
+  `C` never makes the decision worse" as an obvious monotonicity check, and it
+  failed on the third example. Read down §3.4's middle risk column: the
+  `tau_lo` band ESCALATEs and the `tau_mid` band above it HITL_REVIEWs. More
+  confidence, *stricter* outcome. My first instinct was that the table had a
+  transposed row — it does not. Escalation re-runs Layer 3 on FRONTIER, which is
+  worth paying for precisely where the model is unsure enough that a bigger one
+  might settle it; above `tau_mid` it would not, so the remaining doubt is a
+  person's. §3.5 budgets FRONTIER at <=6% of candidates, which is the same
+  decision seen from the cost side. I replaced the false property with two true
+  ones and pinned the non-monotone step as deliberate.
+- **A mutant survived, and the reason was that all my boundary tests lived in
+  the wrong column.** Making `tau_hi` exclusive killed nothing: at low risk the
+  top two rows are both AUTO_WRITE, so the boundary is invisible there, and
+  every case in `TestTheBandsAreHalfOpen` used low risk. It only bites in the
+  middle column. Three new boundary tests, each at the risk band where that
+  threshold actually decides something. `tau_mid` and `tau_lo` were fine by
+  luck, not by design.
+- **§3.4's table contradicts its own prose about `R`.** "Lower bound inclusive,
+  upper exclusive" against column headers drawn `<= rho_lo` and `> rho_hi`. I
+  went with the prose, because it is the sentence stated as a rule and because
+  every disagreement then lands on the stricter cell — but this is a real
+  ambiguity in the spec of record and the two tests that pin it say so.
+- **Override 1 asks for an outcome that does not exist.** "-> QUARANTINE", and
+  `Decision` has four members, none of them that. The quarantine is a namespace
+  from §2.1, so the decision is REJECT. Worth noticing that the parenthetical
+  "(never AUTO_WRITE)" is the operative part and the enum was never going to
+  carry the rest.
+- **Four of the seven overrides are unimplementable from §3.4's own
+  signature.** Nothing in `(conf, risk, conflict, thresholds,
+  already_escalated)` knows about a canary, a source tier, an ontology flag or a
+  circuit breaker. I could have dropped them, or widened a spec-of-record model;
+  both are worse than one extra parameter carrying data. `OverrideSignals` has
+  no defaults on purpose — a benign default is an override that quietly does not
+  fire, and the caller who forgets one gets the *permissive* answer.
+- **`Thresholds` ended up somewhere the docs said it would not.**
+  `verdict.py` had a paragraph saying S5.4 would own it. Settling its shape
+  turned up the reason not to: `Settings` already enforced the band ordering, so
+  a copy of that rule beside `decide()` would have been two homes for one
+  invariant. Updated the paragraph rather than leaving it wrong.
+- **The 50-line function cap moved `apply_overrides` into a rule table**, which
+  is better code than what it replaced — the loop is six lines and knows nothing
+  about any individual rule.
+
+**Still open**
+
+- **§3.4's `R` band ambiguity.** Implemented one way, pinned by tests, but the
+  spec says both things. Worth a decision from whoever owns it.
+- **QUARANTINE is named by §3.4 and absent from `Decision`.** Same.
+- **`RiskVerdict` still cannot record which betas produced its `R`** (#57), and
+  **§3.2's tier multipliers still invert `RULES.md` §4** (#52). Both unchanged.
+- Entity resolution, the missing applier, `ExtractionResult.samples` grouping:
+  unchanged. S5.6 owns the applier and is now two steps away.
+
+**Tomorrow's first step**
+
+`S5.5` — the audit chain: `digest_n == sha256(payload_n || digest_{n-1})`,
+invariant I5, and the first thing in the build that makes a decision provable
+rather than merely recorded.
+
+---
+
 ---
 
 ---

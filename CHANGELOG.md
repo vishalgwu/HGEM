@@ -17,6 +17,60 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.4 — the decision matrix.** `pipeline/l3_score/decision.py` implements
+  `MEMORY_ENGINE.md` §3.4's twelve cells; `overrides.py` implements its seven
+  hard overrides. Pure, total and deterministic — invariant I4 — with a static
+  test that neither module imports settings, a clock, or `random`.
+- **`Thresholds`, in `schemas/verdict.py`.** That module's docstring said it
+  would live in `decision.py`; settling its shape changed the answer, because
+  `Settings` already enforced `tau_lo < tau_mid < tau_hi` and a second copy of
+  that rule would be two homes for one invariant. `Settings.thresholds()` is now
+  the only construction path, so a bad `.env` still fails at startup.
+- **`GM_THRESHOLDS_VERSION`.** `PRD.md` FR-3.3 makes a threshold change an
+  audited event and every `DecisionRecord` names the set that produced it. The
+  `.env.example` guard caught its absence on the first run.
+- **Invariant I4 property-tested in the form worth having.** Not "returns
+  without raising" — a matrix with a hole satisfies that — but that the bands
+  *tile* the unit square, checked against band indices recomputed independently
+  of the module under test. Thresholds are generated too, since §3.4 makes them
+  per-namespace and the tuner refits them.
+- **Nine mutants.** One survived the first pass: making `tau_hi` exclusive
+  killed nothing, because at low risk the top two rows are both AUTO_WRITE and
+  every boundary test was written at low risk. Three boundary tests were added
+  at the risk band where each threshold actually decides something. 1044 unit
+  and property tests passing locally; all of Layer 3 at 100% statement and
+  branch coverage.
+
+### Changed
+
+- **§3.4's table and its prose disagree about `R`, and the prose wins.** The
+  prose says bands are half-open with the lower bound inclusive; the column
+  headers are drawn `<= rho_lo` and `> rho_hi`, the opposite. Applied uniformly,
+  so `R` exactly on a threshold falls in the higher, stricter band — the general
+  sentence is the one stated as a rule, and every disagreement lands on the
+  safer cell.
+- **Override 1 names an outcome `Decision` does not have.** "injection_detected
+  → QUARANTINE", but §0 declares four outcomes and `PRD.md` FR-3.2 says exactly
+  one per candidate. The quarantine is a *namespace* (§2.1), so the decision is
+  REJECT.
+- **`decide()` takes a sixth parameter, and four of the seven overrides need
+  it.** §3.4's own signature knows nothing about a canary, a source tier, an
+  ontology flag or a circuit breaker — so overrides 1, 2, 3 and 5 would have
+  been silently absent. `OverrideSignals` carries exactly those, with no
+  defaults, because a benign default is an override that quietly does not fire.
+- **"Obligations compose, they never relax" is implemented as an ordering.**
+  Each override proposes and `tighten` keeps the less permissive, over
+  `AUTO_WRITE < ESCALATE < HITL_REVIEW < REJECT`. Mechanical rather than
+  dependent on how each rule is written — and it means `require_review` cannot
+  pull a REJECT up into a review.
+- **The matrix is deliberately not monotone, and a property test taught me
+  so.** I asserted that more confidence is never worse; hypothesis found the
+  counterexample in seconds. Down the middle risk column the `tau_lo` band
+  escalates and the `tau_mid` band above it *reviews* — which is right, because
+  escalation re-runs Layer 3 on FRONTIER and that is worth paying for exactly
+  where a bigger model might settle the question. The false property was
+  replaced by two true ones.
+
 - **S5.3 — blast-radius impact risk.** `pipeline/l3_score/impact.py` implements
   `MEMORY_ENGINE.md` §3.3's `z = Σβx`, `R_raw = σ(z)`, `R = max(R_raw,
   floor[impact])`. Pure and deterministic, like the rest of Layer 3.

@@ -9,9 +9,14 @@ that fills these in is Day 5 (S5.1-S5.4); this module is only their shape.
 verdict about a candidate and `DecisionRecord` composes all three - splitting
 them out would put half of one record in another module for no gain.
 
-`Thresholds` is **not** here. S5.4 passes it into `decide()` as a value object
-and is where its shape gets settled; `DecisionRecord` carries only the
-`thresholds_version` string that `MEMORY_ENGINE.md` §0 declares.
+`Thresholds` **is** here, and the docstring said it would not be. S5.4 was to
+"settle its shape", and settling it turned up the reason it belongs in a schema
+module rather than in `l3_score/decision.py`: `Settings` already enforces
+`tau_lo < tau_mid < tau_hi` and `rho_lo < rho_hi`, so a second copy of that rule
+beside `decide()` would be two homes for one invariant. `Settings.thresholds()`
+builds one of these and its validator is the only enforcement; `decision.py`
+imports the value and never reads settings. `DecisionRecord` still carries only
+the `thresholds_version` string, as `MEMORY_ENGINE.md` §0 declares.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.policy import ObligationKind
@@ -33,6 +38,7 @@ __all__ = [
     "DecisionRecord",
     "ImpactLevel",
     "RiskVerdict",
+    "Thresholds",
 ]
 
 
@@ -103,6 +109,68 @@ _RISK_FEATURES: dict[ImpactLevel, float] = {
     ImpactLevel.HIGH: 0.66,
     ImpactLevel.CRITICAL: 1.0,
 }
+
+
+class Thresholds(GMModel):
+    """The five cut points §3.4's matrix reads, and which set they are.
+
+    Attributes:
+        tau_lo: Below this, `C` is too low to act on - the REJECT band.
+        tau_mid: Separates the escalate band from the auto-write-at-low-risk
+            band. §3.4 is explicit about why it exists: "the matrix has **four**
+            confidence bands, so it needs **three** confidence thresholds
+            [...] without it the 0.60 boundary below is a magic number and
+            `decide()` cannot be configured from settings."
+        tau_hi: At or above this, `C` is high enough to auto-write at low risk.
+        rho_lo: At or above this, `R` leaves the low-risk column.
+        rho_hi: At or above this, `R` is high enough that a human always looks.
+        version: Which set these are. `PRD.md` FR-3.3 makes a threshold change
+            an audited event, and this is the string `DecisionRecord` carries.
+
+    **Bands are half-open**: a lower bound is inclusive and an upper bound
+    exclusive, so a value exactly on a threshold falls in the *higher* band.
+    §3.4 says so for `C` and the same reading is applied to `R` - see
+    `l3_score/decision.py`, which records where §3.4's own table disagrees with
+    itself about that.
+    """
+
+    tau_lo: float = Field(ge=0.0, le=1.0)
+    tau_mid: float = Field(ge=0.0, le=1.0)
+    tau_hi: float = Field(ge=0.0, le=1.0)
+    rho_lo: float = Field(ge=0.0, le=1.0)
+    rho_hi: float = Field(ge=0.0, le=1.0)
+    version: str
+
+    @model_validator(mode="after")
+    def _bands_must_be_ordered(self) -> Thresholds:
+        """Reject a threshold set the matrix cannot use.
+
+        The rule `Settings` used to state for itself, moved here so it has one
+        home - `Settings.thresholds()` constructs one of these, so a bad `.env`
+        still fails at startup rather than at the first decision.
+
+        Out-of-order thresholds raise nowhere later: they silently produce a
+        matrix with an empty band, so a whole class of candidate becomes
+        unreachable and nothing looks wrong.
+
+        Returns:
+            The thresholds unchanged, once the bands are ordered.
+
+        Raises:
+            ValueError: if not `tau_lo < tau_mid < tau_hi`, or not
+                `rho_lo < rho_hi`.
+        """
+        if not self.tau_lo < self.tau_mid < self.tau_hi:
+            raise ValueError(
+                "confidence thresholds must satisfy tau_lo < tau_mid < tau_hi, got "
+                f"tau_lo={self.tau_lo}, tau_mid={self.tau_mid}, tau_hi={self.tau_hi}"
+            )
+        if not self.rho_lo < self.rho_hi:
+            raise ValueError(
+                "risk thresholds must satisfy rho_lo < rho_hi, got "
+                f"rho_lo={self.rho_lo}, rho_hi={self.rho_hi}"
+            )
+        return self
 
 
 class ConflictKind(StrEnum):

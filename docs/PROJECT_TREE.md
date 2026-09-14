@@ -115,7 +115,10 @@ guardmem-ai/
 │   │       │       ├── impact_features.py  # S5.3; the eight features. Three of them
 │   │       │       │                    #   (scope, pii_class, irreversibility) are named
 │   │       │       │                    #   by §3.3 and produced by NOTHING yet
-│   │       │       └── decision.py      # DecisionMatrix → AUTO_WRITE|HITL|REJECT|ESCALATE
+│   │       │       ├── decision.py      # S5.4; §3.4's twelve cells + the escalation
+│   │       │       │                    #   clamp. Pure, total, deterministic (I4)
+│   │       │       └── overrides.py     # S5.4; the seven hard overrides. `tighten` is
+│   │       │                            #   what makes "never relax" mechanical
 │   │       ├── guardrails/
 │   │       │   ├── injection.py         # prompt-injection & instruction-smuggling detect
 │   │       │   ├── pii.py               # Presidio recognizers + tokenization vault
@@ -280,6 +283,8 @@ guardmem-ai/
 │   │   └── test_incumbent_retrieval.py  #   S4.2 DONE WHEN: the seeded incumbent comes back
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
+│   │                                    #   test_i4_decision_totality.py (S5.4): the bands
+│   │                                    #   tile the unit square, over generated thresholds
 │   │                                    #   test_i2_single_live_value.py (S4.4): I2 over
 │   │                                    #   500 generated write sequences, plus the three
 │   │                                    #   properties that stop it passing vacuously
@@ -313,7 +318,7 @@ guardmem-ai/
 │   │   ├── strategy_l2.py               # S4.1/S4.2/S4.4; the Layer 2 result models
 │   │   ├── strategy_l3.py               # S5.1; MeaningClusters, drawn coherently -
 │   │   │                                #   `minority` is derived, not independent
-│   │   ├── strategy_verdict.py          # S5.1; schemas/verdict.py's four models, split
+│   │   ├── strategy_verdict.py          # S5.1/S5.4; verdict.py's models, split
 │   │   │                                #   out when strategies.py crossed the cap
 │   │   ├── seed.py                      # S4.2; the seeded demo tenant, as a plugin
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)

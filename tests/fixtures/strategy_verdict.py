@@ -9,8 +9,13 @@ These four move together because `DecisionRecord` composes the other three:
 `MEMORY_ENGINE.md` §0 makes it the full replayable record of one decision, so
 splitting them would put half of one generator in another file.
 
-Loose on purpose, like `strategy_l2.py` and unlike `strategy_l3.py`: nothing
-here has a cross-field rule to violate. A `DecisionRecord` whose `reason_codes`
+Loose on purpose, like `strategy_l2.py` and unlike `strategy_l3.py` - with one
+exception. `Thresholds` enforces `tau_lo < tau_mid < tau_hi` and
+`rho_lo < rho_hi`, so it is drawn sorted rather than filtered: independent
+triples satisfy that ordering about one time in six, and a filter would spend
+most of hypothesis's budget discarding examples and then warn about it.
+
+Everything else here has no cross-field rule to violate. A `DecisionRecord` whose `reason_codes`
 do not explain its `decision` is still a well-formed record, and pinning that
 correspondence is `tests/unit/` work at S5.4 - not something a serialisation
 property should be asserting.
@@ -38,6 +43,7 @@ from guardmem_core.schemas.verdict import (
     DecisionRecord,
     ImpactLevel,
     RiskVerdict,
+    Thresholds,
 )
 
 __all__ = ["VERDICT_STRATEGIES"]
@@ -71,7 +77,24 @@ _CONFLICT = st.builds(
     resolution_hint=st.sampled_from(["merge", "supersede", "coexist", "escalate"]),
 )
 
+
+@st.composite
+def _thresholds(draw: st.DrawFn) -> Thresholds:
+    """Five cut points in the order the matrix needs them."""
+    taus = sorted(draw(st.lists(_UNIT, min_size=3, max_size=3, unique=True)))
+    rhos = sorted(draw(st.lists(_UNIT, min_size=2, max_size=2, unique=True)))
+    return Thresholds(
+        tau_lo=taus[0],
+        tau_mid=taus[1],
+        tau_hi=taus[2],
+        rho_lo=rhos[0],
+        rho_hi=rhos[1],
+        version=draw(_ID),
+    )
+
+
 VERDICT_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
+    Thresholds: _thresholds(),
     ConfidenceReport: _CONFIDENCE,
     RiskVerdict: _RISK,
     ConflictReport: _CONFLICT,

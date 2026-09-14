@@ -28,10 +28,13 @@ from fixtures.strategy_primitives import _ID, _UNIT
 from guardmem_core.pipeline.l3_score import (
     ConfidenceWeights,
     MeaningClusters,
+    MutationType,
+    OverrideSignals,
     RiskBetas,
     RiskFeatures,
 )
 from guardmem_core.schemas import GMModel
+from guardmem_core.schemas.receipt import SourceTier
 
 __all__ = ["L3_STRATEGIES"]
 
@@ -135,7 +138,22 @@ _RISK_BETAS = st.builds(
     version=_ID,
 )
 
+# Every combination of the seven overrides' inputs. Independent, because these
+# are seven unrelated facts about a candidate and nothing constrains one by
+# another - which is also why `OverrideSignals` gives none of them a default.
+_OVERRIDE_SIGNALS = st.builds(
+    OverrideSignals,
+    injection_detected=st.booleans(),
+    source_tier=st.sampled_from(SourceTier),
+    mutation=st.sampled_from(MutationType),
+    requires_corroboration=st.booleans(),
+    budget_exhausted=st.booleans(),
+    circuit_open=st.booleans(),
+    policy_version=_ID,
+)
+
 L3_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
+    OverrideSignals: _OVERRIDE_SIGNALS,
     MeaningClusters: _meaning_clusters(),
     ConfidenceWeights: _confidence_weights(),
     RiskFeatures: _RISK_FEATURES,

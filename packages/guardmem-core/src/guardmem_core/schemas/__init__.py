@@ -75,6 +75,7 @@ from guardmem_core.schemas.verdict import (
     DecisionRecord,
     ImpactLevel,
     RiskVerdict,
+    Thresholds,
 )
 
 __all__ = [
@@ -114,6 +115,7 @@ __all__ = [
     "ScalarObject",
     "SourceTier",
     "StoredAssertion",
+    "Thresholds",
     "Turn",
     "TurnRole",
     "WriteReceipt",

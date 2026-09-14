@@ -35,6 +35,8 @@ from typing import Literal
 from pydantic import AnyUrl, Field, PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from guardmem_core.schemas.verdict import Thresholds
+
 # The schemes the Neo4j driver actually speaks. `GM_NEO4J_URI` pointing at the
 # HTTP browser port instead of bolt is an easy mistake to make, because
 # infra/docker/docker-compose.dev.yml publishes both 7474 and 7687.
@@ -113,6 +115,10 @@ class Settings(BaseSettings):
     tau_hi: float = Field(0.78, ge=0, le=1)
     rho_lo: float = Field(0.35, ge=0, le=1)
     rho_hi: float = Field(0.70, ge=0, le=1)
+    # `PRD.md` FR-3.3 makes a threshold change an audited event, so every
+    # `DecisionRecord` names the set that produced it. Bump this whenever any
+    # of the five above moves, or the audit cannot tell two runs apart.
+    thresholds_version: str = "v1"
 
     # --- pipeline tuning ----------------------------------------------------
     # K is 1, 3 or 5 by risk hint (MEMORY_ENGINE 1.2); this is the default arm.
@@ -127,6 +133,31 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(20.0, gt=0)
     store_timeout_s: float = Field(5.0, gt=0)
 
+    def thresholds(self) -> Thresholds:
+        """The five cut points as the value object `decide()` takes.
+
+        Returns:
+            A validated `Thresholds` carrying `thresholds_version`.
+
+        Raises:
+            ValueError: if the bands are out of order - `Thresholds` is what
+                enforces that, and this is the only construction path.
+
+        `MEMORY_ENGINE.md` §3.4 requires that `decide()` "never read from
+        settings inside the function", so this is the seam: the orchestrator
+        calls it once and passes the value down. It is a method rather than a
+        cached property because `Settings` is frozen and building one is two
+        microseconds.
+        """
+        return Thresholds(
+            tau_lo=self.tau_lo,
+            tau_mid=self.tau_mid,
+            tau_hi=self.tau_hi,
+            rho_lo=self.rho_lo,
+            rho_hi=self.rho_hi,
+            version=self.thresholds_version,
+        )
+
     @model_validator(mode="after")
     def _thresholds_must_be_ordered(self) -> Settings:
         """Reject threshold sets the decision matrix cannot use.
@@ -136,20 +167,16 @@ class Settings(BaseSettings):
         silently produces a matrix with an empty band, so a whole class of
         candidate becomes unreachable and nothing looks wrong.
 
+        The rule itself lives on `Thresholds`, which is the type that has to
+        hold it - S5.4 moved it there when `decide()` needed the same check and
+        a second copy would have been two homes for one invariant. Building one
+        here keeps the failure at startup, where a bad `.env` should surface.
+
         Raises:
             ValueError: if not ``tau_lo < tau_mid < tau_hi`` or not
                 ``rho_lo < rho_hi``.
         """
-        if not self.tau_lo < self.tau_mid < self.tau_hi:
-            raise ValueError(
-                "confidence thresholds must satisfy tau_lo < tau_mid < tau_hi, got "
-                f"tau_lo={self.tau_lo}, tau_mid={self.tau_mid}, tau_hi={self.tau_hi}"
-            )
-        if not self.rho_lo < self.rho_hi:
-            raise ValueError(
-                "risk thresholds must satisfy rho_lo < rho_hi, got "
-                f"rho_lo={self.rho_lo}, rho_hi={self.rho_hi}"
-            )
+        self.thresholds()
         return self
 
     @model_validator(mode="after")
