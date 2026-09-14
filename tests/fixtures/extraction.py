@@ -11,6 +11,10 @@ constants are written against it deliberately: two that it supports and one it
 does not. `INVENTED` is the confabulation case `MEMORY_ENGINE.md` §1.3 exists to
 kill, and having it here means every extraction test can reach for it rather
 than inventing its own near-miss.
+
+`ONTOLOGY` is the shipped clinical pack rather than a fixture of its own, for
+the reason recorded beside it: a prompt shown a different vocabulary than the
+schema gate enforces is a drift nothing in the suite was positioned to catch.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from typing import Final
 from fixtures.fakes import FakeLLM
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 from guardmem_core.pipeline.l1_extract.extractor import ExtractionContext, extract
-from guardmem_core.schemas import ExtractionResult, SourceTier
+from guardmem_core.schemas import ExtractionResult, SourceTier, load_ontology
 from guardmem_core.types import Namespace, TenantId, TraceId
 
 __all__ = [
@@ -44,7 +48,13 @@ CONTENT: Final = (
     "Patient: I'm allergic to penicillin - it gives me hives. "
     "I use the CVS on Elm Street now. Dr. Alvarez is my PCP."
 )
-ONTOLOGY: Final = "predicates:\n  allergy: {cardinality: many, impact: critical}\n"
+# The REAL clinical pack, rendered. This was a two-line hand-written fragment
+# until the S3.6 audit measured it against the S3.5 loader, which rejects it -
+# six validation errors. Nothing failed, because nothing compared them: the
+# model was told one ontology while its output would be validated against
+# another. `as_prompt_yaml` round-trips through `parse_ontology`, so what the
+# prompt is shown is now provably the vocabulary the schema gate will enforce.
+ONTOLOGY: Final = load_ontology("clinical").as_prompt_yaml()
 TRACE: Final = TraceId("tr_9f2a3c")
 
 CONTEXT: Final = ExtractionContext(

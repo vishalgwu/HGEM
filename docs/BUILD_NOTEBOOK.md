@@ -1806,12 +1806,60 @@ every seeded fact visible, every one carrying a non-empty span into the turn it
 was quoted from, four distinct impact floors, and the two retired rows still
 present with `valid_to` exactly equal to their successor's `valid_from`.
 
-Two things about seeded data that must not be measured. The vectors come from a
-deterministic hash embedder, because there is no `Embedder` in the package until
-S9.1 - identical text embeds identically and nothing else is modelled, so
+Two things about seeded data that must not be measured. The vectors come from
+`HashEmbedder`, the only `Embedder` the package ships until S9.1 wires a
+provider - identical text embeds identically and nothing else is modelled, so
 retrieval quality is meaningless here. And `confidence` is a placeholder,
 because Layer 3 does not exist; only `risk` is real, and only because it is the
 impact floor §3.3 declares.
+
+---
+
+### Audit after S3.6 — four facts that had been written twice
+
+Not a step. A read of everything Day 3 produced, looking for the things that
+would break later rather than now. Every finding was the same shape: **a fact
+stated in the document that owns it, and restated as a literal in a caller,
+with nothing comparing the two.** None of them was failing. Three were
+one edit away from being wrong in a direction nothing would report.
+
+1. **The deterministic embedder existed twice.** `FakeEmbedder` in the unit
+   suite and a fifteen-line twin inside the seed, which could not import
+   `tests/`. Two implementations of "identical text embeds identically" that
+   may drift make the unit suite and the demo database stop describing the same
+   system. Now `memory/vector/hash_embedder.py`, and **renamed rather than
+   aliased**: it had stopped being a fake, and shipped code called a fake in
+   the place people look for doubles is how it reaches production by accident.
+2. **`MEMORY_ENGINE.md` §3.3's impact floors** were prose in `ImpactLevel`'s
+   docstring and a `dict` of the same four numbers in the seed. Now
+   `ImpactLevel.risk_floor`, where `l3_score/impact.py` will find it.
+3. **`RULES.md` §4's source-tier ordering** was prose in `SourceTier`'s
+   docstring and a tuple in the seed's data module. Now `SourceTier.at_least`.
+   This one was the most dangerous of the four: `SourceTier` is a `StrEnum`, so
+   `<=` compares **alphabetically** and cheerfully reports that a tool output
+   outranks a trusted system. Nothing raises; the answer is simply wrong, in
+   the direction that lets a weak source write a dangerous predicate. There is
+   a test that pins exactly that, so the method cannot later look like ceremony.
+4. **The libpq/SQLAlchemy DSN conversion** was the same magic prefix inlined at
+   three call sites - and all three used `str.replace(..., 1)`, which is not
+   anchored at the front and would rewrite the first occurrence *anywhere*,
+   including inside a password. `libpq_dsn` / `sqlalchemy_dsn` use
+   `removeprefix`, and a test covers the pathological DSN.
+
+And one drift that was already real rather than latent: **the extraction prompt
+was being shown an ontology the S3.5 loader rejects.** `extract` takes
+`ontology_yaml: str`, and the only caller passed a hand-written two-line
+fragment - six validation errors against `Ontology`. Nothing failed, because
+nothing compared them: the model was told one vocabulary while its output would
+be validated against another. `Ontology.as_prompt_yaml()` renders the validated
+pack, round-trips through `parse_ontology`, and is what the fixture now passes.
+
+`make typecheck` also grew `scripts/` at S3.6 and found a real error in its
+first run - an inferred `dict[TurnId, Turn]` handed to a `dict[str, Turn]`
+parameter, which `dict`'s invariant key makes an error and `NewType`'s runtime
+erasure makes invisible.
+
+COMMIT: `refactor: extract four duplicated facts and fix the ontology the prompt is shown`
 
 ---
 

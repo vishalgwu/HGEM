@@ -215,6 +215,27 @@ class Ontology(GMModel):
             )
         return self
 
+    def as_prompt_yaml(self) -> str:
+        """Render this pack back to YAML, for the text a prompt is shown.
+
+        Returns:
+            YAML that `parse_ontology` accepts unchanged - proved by a
+            round-trip test, not by inspection.
+
+        `extract_memories/v1.md` interpolates the ontology into the prompt and
+        tells the model "use only predicates from the ontology", so the model's
+        vocabulary and the schema gate's have to be the same vocabulary. Before
+        the S3.6 audit they were not: the extractor took `ontology_yaml: str`
+        and the only caller passed a two-line fragment that this loader rejects
+        outright. Nothing failed, because nothing compared them - the model was
+        simply told a different ontology than the one its output would be
+        validated against.
+
+        `sort_keys=False` keeps the declaration order, which is the order a
+        person grouped the predicates in and the order the file reads in.
+        """
+        return yaml.safe_dump(self.model_dump(mode="json"), sort_keys=False, allow_unicode=True)
+
     def predicate(self, name: str) -> PredicateSpec | None:
         """Look up a predicate, or `None` if this pack does not declare it.
 

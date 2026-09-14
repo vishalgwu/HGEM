@@ -30,7 +30,6 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from fixtures.fakes import FakeEmbedder
 from fixtures.pgvector import (
     LATER,
     NS,
@@ -40,7 +39,9 @@ from fixtures.pgvector import (
     write_and_reveal,
 )
 from guardmem_core.errors import ConcurrencyConflict
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
+from guardmem_core.memory.vector.rowmap import EMBEDDING_DIM
 from guardmem_core.schemas.receipt import SourceTier
 from guardmem_core.types import AssertionId, TenantId
 
@@ -54,7 +55,7 @@ class _TruncatingEmbedder:
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Return exactly one vector, whatever was asked for."""
-        return [[0.0] * 1024]
+        return [[0.0] * EMBEDDING_DIM]
 
 
 class TestWritesAreInvisibleUntilTheRelaySaysSo:
@@ -62,7 +63,7 @@ class TestWritesAreInvisibleUntilTheRelaySaysSo:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """`ARCHITECTURE.md` §2.4: a partial dual write must be unretrievable."""
@@ -81,7 +82,7 @@ class TestWritesAreInvisibleUntilTheRelaySaysSo:
         assert embedder.texts == ["allergy: penicillin"]
 
     async def test_an_invisible_row_is_absent_from_search(
-        self, store: PgVectorStore, embedder: FakeEmbedder, tenancy: dict[str, str]
+        self, store: PgVectorStore, embedder: HashEmbedder, tenancy: dict[str, str]
     ) -> None:
         """Invariant I6, at the layer an application bug could otherwise skip."""
         await store.upsert([assertion(tenancy)])
@@ -92,7 +93,7 @@ class TestWritesAreInvisibleUntilTheRelaySaysSo:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """The round trip, including the parts `INT4RANGE` and `REAL` could lose."""
@@ -116,7 +117,7 @@ class TestSearch:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """`ORDER BY embedding <=> $n`, not insertion order - which is the one
@@ -135,7 +136,7 @@ class TestSearch:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """`MEMORY_ENGINE.md` §2.2 asks for the top 10 incumbents, not all of them."""
@@ -148,7 +149,7 @@ class TestSearch:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """The incumbent lookup: same subject, one predicate."""
@@ -171,7 +172,7 @@ class TestSearch:
         with pytest.raises(KeyError, match="not a searchable column"):
             await store.search(
                 namespace=NS,
-                embedding=[0.0] * 1024,
+                embedding=[0.0] * EMBEDDING_DIM,
                 k=1,
                 filters={"visible": True},
             )
@@ -181,7 +182,7 @@ class TestSearch:
         store: PgVectorStore,
         pool: asyncpg.Pool,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """RLS, reached through the store rather than through raw SQL.
@@ -203,7 +204,7 @@ class TestSupersession:
         self,
         store: PgVectorStore,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """S3.2's DONE WHEN, in full.
@@ -267,7 +268,7 @@ class TestSupersession:
         self,
         store: PgVectorStore,
         pool: asyncpg.Pool,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         owner: asyncpg.Connection,
         tenancy: dict[str, str],
     ) -> None:
@@ -350,7 +351,7 @@ class TestTheEmbeddingContract:
         """
         store = PgVectorStore(
             pool,
-            FakeEmbedder(dim=768),
+            HashEmbedder(dim=768),
             tenant_id=TenantId(tenancy["tenant"]),
             timeout_s=TIMEOUT_S,
         )
@@ -375,7 +376,7 @@ class TestTheEmbeddingContract:
             await store.upsert([assertion(tenancy), assertion(tenancy, obj="latex")])
 
     async def test_an_empty_batch_touches_nothing(
-        self, store: PgVectorStore, embedder: FakeEmbedder
+        self, store: PgVectorStore, embedder: HashEmbedder
     ) -> None:
         """No embedder call, no transaction, no round trip."""
         await store.upsert([])

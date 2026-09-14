@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-from fixtures.fakes import FakeEmbedder, FakeGraphStore
+from fixtures.fakes import FakeGraphStore
 from fixtures.graph_faults import (
     DelegatingGraph,
     GraphOutage,
@@ -43,6 +43,7 @@ from fixtures.outbox import (
 )
 from fixtures.pgvector import TIMEOUT_S, assertion, search
 from guardmem_core.memory.relay import OutboxRelay
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.types import TenantId
 
@@ -52,7 +53,7 @@ class TestADispatchedWrite:
         self,
         store: PgVectorStore,
         relay: OutboxRelay,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """The loop S3.2 left open, closed: written invisible, relayed, found."""
@@ -126,7 +127,7 @@ class TestTheRelayKilledMidFlight:
         store: PgVectorStore,
         pool: asyncpg.Pool,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """The graph side landed and the flip did not. Nothing is retrievable.
@@ -154,7 +155,7 @@ class TestTheRelayKilledMidFlight:
         store: PgVectorStore,
         pool: asyncpg.Pool,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """Restart, replay, and count. One edge, one flip, one dispatch.
@@ -269,7 +270,7 @@ class TestTenancy:
         store: PgVectorStore,
         pool: asyncpg.Pool,
         owner: asyncpg.Connection,
-        embedder: FakeEmbedder,
+        embedder: HashEmbedder,
         tenancy: dict[str, str],
     ) -> None:
         """Why `outbox` is the one operational table outside `TENANT_SCOPED`.

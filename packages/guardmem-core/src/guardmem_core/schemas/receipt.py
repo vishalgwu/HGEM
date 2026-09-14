@@ -42,6 +42,27 @@ class SourceTier(StrEnum):
     TOOL_OUTPUT = "tool_output"
     RETRIEVED_WEB = "retrieved_web"  # lowest trust; never auto-writes HIGH impact
 
+    def at_least(self, floor: SourceTier) -> bool:
+        """Is this tier at least as trustworthy as `floor`?
+
+        Args:
+            floor: The weakest tier the caller will accept - typically a
+                predicate's `min_source_tier` from the tenant ontology.
+
+        Returns:
+            True when this tier is `floor` or stronger.
+
+        The ordering is `RULES.md` §4's, quoted in the class docstring above,
+        and it lives here because that is where the enum lives. It was a tuple
+        in a seed script first, which is one file away from the definition it
+        describes - and a safety ordering with two homes is one that can
+        disagree with itself. The S3.5 schema gate and the S3.6 seed both ask
+        this question; a `StrEnum` compares alphabetically and would answer it
+        wrong without ever raising.
+        """
+        order = list(SourceTier)
+        return order.index(self) <= order.index(floor)
+
 
 class Provenance(GMModel):
     """Where a claim came from, exactly.

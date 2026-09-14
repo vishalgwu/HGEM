@@ -2451,6 +2451,91 @@ Layer 2.
 
 ---
 
+## 2026-09-13 — Audit pass: four facts written twice, and a prompt shown the wrong ontology
+
+Not a step. A read of everything Day 3 produced, looking for what would break
+later rather than what is failing now. Nothing was failing.
+
+**Shipped**
+
+- `memory/vector/hash_embedder.py` — the one deterministic `Embedder`.
+- `ImpactLevel.risk_floor`, `SourceTier.at_least`, `libpq_dsn` /
+  `sqlalchemy_dsn` — three facts moved to the type that owns them.
+- `Ontology.as_prompt_yaml()`, and the extraction fixture now passes the real
+  clinical pack.
+- `tests/unit/test_hash_embedder.py` and `test_shared_primitives.py`.
+  656 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **Every finding had the same shape, which is the finding.** A fact stated in
+  the document that owns it, and restated as a literal in a caller, with nothing
+  comparing the two. The impact floors were prose in `ImpactLevel`'s docstring
+  and a `dict` in the seed. The tier ordering was prose in `SourceTier`'s
+  docstring and a tuple in the seed's data module. The DSN scheme was a magic
+  prefix at three call sites. The embedder was fifteen lines written twice. I
+  was not looking for a pattern; I found the same one four times, and the reason
+  is structural — **a docstring that states a fact is not a place the fact
+  lives**, so the next person who needs it writes it down again.
+
+- **The tier ordering was the dangerous one, and it was dangerous quietly.**
+  `SourceTier` is a `StrEnum`, so `<=` compares alphabetically: Python will tell
+  you, without raising, that `tool_output` outranks `trusted_system`. Nothing
+  in the repo did that comparison yet — the seed used an explicit tuple — but
+  the next caller to reach for the obvious operator would have got a wrong
+  answer in the direction that lets a weak source write a critical predicate.
+  `SourceTier.at_least` exists, and there is a test that asserts the *wrong*
+  comparison is wrong, so the method cannot later be mistaken for ceremony.
+
+- **A real drift, not a latent one: the extraction prompt was being shown an
+  ontology the loader rejects.** `extract` takes `ontology_yaml: str`, and the
+  only caller passed a hand-written two-line fragment written months before the
+  ontology existed. Measured against S3.5's loader: six validation errors. The
+  model was being told one vocabulary while its output would be validated
+  against another, and nothing compared them because nothing could - there was
+  no way to get from a validated `Ontology` back to prompt text.
+  `as_prompt_yaml()` closes that, and round-trips through `parse_ontology`.
+
+- **Three inline `str.replace(dsn, ..., 1)` calls were not anchored at the
+  front.** `replace` rewrites the first occurrence *anywhere*, so a password
+  containing the scheme text would be corrupted. Nobody has that password. I
+  only found it because writing the shared helper made me write a test for what
+  it should not touch - which is the argument for extracting a duplicated
+  one-liner even when the one-liner looks obviously correct.
+
+- **I renamed rather than aliased, and the name was the point.** The first
+  version of this kept `FakeEmbedder = HashEmbedder` so call sites read
+  unchanged. That is worse: the thing had stopped being a fake, and shipped
+  code called a fake in the one directory people look for doubles is how it
+  ends up in production by accident. Eight call sites, one rename.
+
+- **Two mistakes of my own, both caught by the tests I was writing.** I pinned
+  three vector values from memory instead of measuring them, and left an
+  `await` on a synchronous method. The first is the one worth naming: a pinned
+  constant that was never measured is a test that asserts the author's
+  recollection.
+
+**Still open**
+
+- `schemas/ontology.py` is at 393 lines against `RULES.md` §2.4's cap of 400.
+  The next addition splits it, and the seam is already visible: the models are
+  one thing and the YAML loader is another.
+- `scripts/` has no `__init__.py`, so `demo_tenant_data` is a bare top-level
+  module name under `mypy`'s roots alongside `tests/`. Harmless today; the same
+  trap as the duplicate `conftest` if either tree ever grows a matching
+  basename.
+- Nothing else in the sweep: no bare excepts, no unbounded `gather`, no
+  outbound call without a timeout, no mutable defaults, no TODO markers, and
+  `.env.example` builds `Settings` with no missing or extra keys.
+
+**Tomorrow's first step**
+
+`S4.1` — the schema gate, unchanged by this pass except that it now inherits
+`SourceTier.at_least` and `ImpactLevel.risk_floor` rather than needing to invent
+them.
+
+---
+
 ---
 
 <!--

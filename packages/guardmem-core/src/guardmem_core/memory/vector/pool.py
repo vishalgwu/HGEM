@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import asyncpg
 from pgvector.asyncpg import register_vector
@@ -31,13 +31,71 @@ if TYPE_CHECKING:
 
     from guardmem_core.types import TenantId
 
-__all__ = ["Conn", "create_pool", "tenant_transaction", "transaction"]
+__all__ = [
+    "Conn",
+    "create_pool",
+    "libpq_dsn",
+    "sqlalchemy_dsn",
+    "tenant_transaction",
+    "transaction",
+]
 
 # What `Pool.acquire()` actually hands back. Not a `Connection`: it is a proxy
 # that forwards to one and is returned to the pool on exit, and `asyncpg-stubs`
 # is right to distinguish them. Named here, next to the helpers that yield it,
 # so the store and the relay annotate the same thing the same way.
 type Conn = PoolConnectionProxy[asyncpg.Record]
+
+# SQLAlchemy names a driver in the URL scheme; libpq does not. `GM_DATABASE_URL`
+# is specified to carry the SQLAlchemy form because Alembic reads it, and
+# asyncpg rejects it outright - so every asyncpg call site has to convert, and
+# three of them were doing it inline with this literal before the S3.6 audit.
+_SQLALCHEMY_SCHEME: Final = "postgresql+asyncpg://"
+_LIBPQ_SCHEME: Final = "postgresql://"
+
+
+def libpq_dsn(url: str) -> str:
+    """Convert a DSN to the form asyncpg accepts.
+
+    Args:
+        url: A Postgres URL in either form. Already-libpq input is returned
+            unchanged, so this is safe to apply twice.
+
+    Returns:
+        The same DSN with SQLAlchemy's `+asyncpg` driver marker removed.
+
+    Named rather than inlined because the alternative is a magic string at every
+    asyncpg call site, and a typo in one of them produces a connection error
+    that reads like a network fault rather than like a string bug.
+
+    **Anchored at the front**, unlike the three inline `str.replace(..., 1)`
+    calls it replaced. A scheme is a prefix; `replace` is not, so it would
+    happily rewrite the first occurrence anywhere in the string - including
+    inside a password. Nobody has that password, and a conversion that can
+    corrupt a credential under any input is not one worth keeping.
+    """
+    if not url.startswith(_SQLALCHEMY_SCHEME):
+        return url
+    return _LIBPQ_SCHEME + url.removeprefix(_SQLALCHEMY_SCHEME)
+
+
+def sqlalchemy_dsn(url: str) -> str:
+    """Convert a DSN to the form `GM_DATABASE_URL` and Alembic expect.
+
+    Args:
+        url: A Postgres URL in either form. Already-SQLAlchemy input is returned
+            unchanged.
+
+    Returns:
+        The same DSN carrying the `+asyncpg` driver marker.
+
+    The inverse of `libpq_dsn`, and anchored at the front for the reason that
+    one gives. Needed just as often: anything that starts a database and then
+    hands it to `alembic upgrade head` has a libpq DSN and needs the other one.
+    """
+    if url.startswith(_SQLALCHEMY_SCHEME) or not url.startswith(_LIBPQ_SCHEME):
+        return url
+    return _SQLALCHEMY_SCHEME + url.removeprefix(_LIBPQ_SCHEME)
 
 
 async def create_pool(dsn: str, *, min_size: int = 1, max_size: int = 10) -> asyncpg.Pool:

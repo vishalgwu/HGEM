@@ -15,6 +15,45 @@ repository; the log records what happened while changing it.
 
 ## [Unreleased]
 
+### Changed
+
+- **Audit after S3.6 — four facts that had been written twice.** Each was stated
+  in the document that owns it and restated as a literal in a caller, with
+  nothing comparing the two. None was failing; three were one edit from being
+  wrong in a direction nothing would report.
+  - The deterministic embedder existed twice (`FakeEmbedder` in the suite, a
+    fifteen-line twin in the seed, which cannot import `tests/`). It is now
+    `memory/vector/hash_embedder.py::HashEmbedder` — **renamed rather than
+    aliased**, because it had stopped being a fake and shipped code called a
+    fake in the place people look for doubles is how it reaches production by
+    accident.
+  - `MEMORY_ENGINE.md` §3.3's impact floors were prose in one file and a `dict`
+    in another. They are `ImpactLevel.risk_floor` now.
+  - `RULES.md` §4's source-tier ordering was prose in one file and a tuple in
+    another. It is `SourceTier.at_least` now — and this was the dangerous one:
+    `SourceTier` is a `StrEnum`, so `<=` compares **alphabetically** and reports
+    that a tool output outranks a trusted system. Nothing raises; the answer is
+    just wrong, in the direction that lets a weak source write a dangerous
+    predicate. A test pins that so the method cannot later look like ceremony.
+  - The libpq/SQLAlchemy DSN conversion was the same magic prefix inlined at
+    three call sites, all using `str.replace(..., 1)` — not anchored at the
+    front, so it would rewrite the first occurrence anywhere, including inside a
+    password. `libpq_dsn` / `sqlalchemy_dsn` use `removeprefix`.
+
+### Fixed
+
+- **The extraction prompt was being shown an ontology the S3.5 loader rejects.**
+  `extract` takes `ontology_yaml: str` and the only caller passed a hand-written
+  two-line fragment — six validation errors against `Ontology`. Nothing failed,
+  because nothing compared them: the model was told one vocabulary while its
+  output would be validated against another. `Ontology.as_prompt_yaml()` renders
+  the validated pack, round-trips through `parse_ontology`, and is what the
+  fixture passes now.
+- `test_pgvector_store.py` hard-coded the embedding dimension as `1024` in two
+  places instead of reading `EMBEDDING_DIM`.
+- The seed's redundant `sys.path.insert`, which forced every import below a
+  statement and was already satisfied by how the script is run.
+
 ### Added
 
 - **S3.6 — the demo tenant seed, and the end of Day 3.** `make seed` writes one

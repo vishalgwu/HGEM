@@ -20,7 +20,7 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from fixtures.fakes import FakeEmbedder
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.memory.vector.pool import create_pool
 from guardmem_core.schemas.entity import StoredAssertion
@@ -144,13 +144,13 @@ async def pool(app_role_dsn: str) -> AsyncIterator[asyncpg.Pool]:
 
 
 @pytest.fixture
-def embedder() -> FakeEmbedder:
-    """Deterministic 1024-dimension vectors: same text in, same vector out."""
-    return FakeEmbedder()
+def embedder() -> HashEmbedder:
+    """Deterministic vectors at the dimension the column declares."""
+    return HashEmbedder()
 
 
 @pytest.fixture
-def store(pool: asyncpg.Pool, embedder: FakeEmbedder, tenancy: dict[str, str]) -> PgVectorStore:
+def store(pool: asyncpg.Pool, embedder: HashEmbedder, tenancy: dict[str, str]) -> PgVectorStore:
     """The subject, bound to this test's tenant."""
     return PgVectorStore(pool, embedder, tenant_id=TenantId(tenancy["tenant"]), timeout_s=TIMEOUT_S)
 
@@ -214,7 +214,7 @@ async def write_and_reveal(
 
 async def search(
     store: PgVectorStore,
-    embedder: FakeEmbedder,
+    embedder: HashEmbedder,
     text: str,
     *,
     as_of: datetime | None = None,

@@ -35,18 +35,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import math
-import struct
-import sys
-from collections.abc import Sequence
-from pathlib import Path
 from typing import Final
 from uuid import NAMESPACE_URL, uuid5
 
 import asyncpg
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
+# A sibling module, resolved because `python scripts/seed_demo_tenant.py` puts
+# this directory at the head of `sys.path`. An explicit `sys.path.insert` stood
+# here until the S3.6 audit measured it: it was redundant on the only path that
+# runs this file, and it forced every import below the statement.
 from demo_tenant_data import (
     INTAKE_AT,
     MOVE_CALL,
@@ -55,7 +52,6 @@ from demo_tenant_data import (
     SEED_FACTS,
     SUPERSESSIONS,
     TENANT_SLUG,
-    TIER_ORDER,
     TRANSCRIPT,
     SeedFact,
 )
@@ -64,8 +60,9 @@ from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.relay import OutboxRelay
 from guardmem_core.memory.router import StoreRouter
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
-from guardmem_core.memory.vector.pool import create_pool
+from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.pipeline.l1_extract.span_linker import link_span
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.ontology import PredicateSpec, load_ontology
@@ -77,18 +74,6 @@ from guardmem_core.types import AssertionId, EntityId, TenantId, TraceId
 PACK: Final = "clinical"
 PATIENT_KEY: Final = "patient-7781"
 TRACE: Final = TraceId("tr_seed")
-EMBEDDING_DIM: Final = 1024
-
-# `MEMORY_ENGINE.md` §3.3's impact floors. `RiskVerdict.risk` is
-# `max(R_raw, floor[impact])`, and with no Layer 3 to produce `R_raw` the floor
-# is the whole number. It is the only part of a seeded score that is not made
-# up, which is why it is derived rather than written into the data.
-RISK_FLOOR: Final[dict[str, float]] = {
-    "low": 0.15,
-    "medium": 0.35,
-    "high": 0.60,
-    "critical": 0.80,
-}
 
 # Not scored. See the module docstring.
 PLACEHOLDER_CONFIDENCE: Final = 0.80
@@ -110,35 +95,6 @@ def identifier(kind: str, key: str) -> str:
     that it does not.
     """
     return str(uuid5(NAMESPACE_URL, f"guardmem/{TENANT_SLUG}/{kind}/{key}"))
-
-
-class DeterministicEmbedder:
-    """Hash text into a unit vector. Demo only - see the module docstring.
-
-    Not a model and not pretending to be one. `guardmem-core` has no `Embedder`
-    implementation until S9.1, and a seed that required an API key would be a
-    seed nobody could run offline.
-    """
-
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """Return one deterministic unit vector per text, in input order."""
-        return [self._vector(text) for text in texts]
-
-    def _vector(self, text: str) -> list[float]:
-        """Expand a digest of `text` into `EMBEDDING_DIM` normalised floats.
-
-        Normalised because `assertion_hnsw` indexes `vector_cosine_ops`, and an
-        all-zero vector has no cosine distance at all.
-        """
-        raw = b"".join(
-            hashlib.sha256(f"{index}:{text}".encode()).digest()
-            for index in range(EMBEDDING_DIM // 8 + 1)
-        )
-        values = [
-            struct.unpack_from(">i", raw, offset * 4)[0] / 2**31 for offset in range(EMBEDDING_DIM)
-        ]
-        norm = math.sqrt(sum(value * value for value in values)) or 1.0
-        return [value / norm for value in values]
 
 
 def build_assertion(fact: SeedFact, spec: PredicateSpec, turns: dict[str, Turn]) -> StoredAssertion:
@@ -164,7 +120,7 @@ def build_assertion(fact: SeedFact, spec: PredicateSpec, turns: dict[str, Turn])
     match = link_span(fact.quote, turn.text)
     if match is None:
         raise ValueError(f"{fact.key}: {fact.quote!r} is not in turn {fact.turn_id}")
-    if TIER_ORDER.index(fact.tier) > TIER_ORDER.index(spec.min_source_tier):
+    if not fact.tier.at_least(spec.min_source_tier):
         raise ValueError(
             f"{fact.key}: source tier {fact.tier} is weaker than {fact.predicate}'s "
             f"declared minimum {spec.min_source_tier} (ontology/{PACK}.yaml)"
@@ -177,7 +133,7 @@ def build_assertion(fact: SeedFact, spec: PredicateSpec, turns: dict[str, Turn])
         predicate=fact.predicate,
         object=fact.object,
         confidence=PLACEHOLDER_CONFIDENCE,
-        risk=RISK_FLOOR[spec.impact.value],
+        risk=spec.impact.risk_floor,
         valid_from=fact.valid_from,
         recorded_at=INTAKE_AT,
         provenance=[
@@ -268,8 +224,8 @@ async def seed() -> None:
     """
     settings = get_settings()
     # `Settings.database_url` carries SQLAlchemy's driver marker for Alembic;
-    # asyncpg does not understand it. `pool.create_pool` says to strip it.
-    dsn = str(settings.database_url).replace("postgresql+asyncpg://", "postgresql://", 1)
+    # asyncpg does not understand it.
+    dsn = libpq_dsn(str(settings.database_url))
     ontology = load_ontology(PACK)
     # Annotated `str`, not inferred `TurnId`: `dict` is invariant in its key,
     # so an inferred `dict[TurnId, Turn]` is not a `dict[str, Turn]` and
@@ -296,7 +252,7 @@ async def seed() -> None:
     try:
         tenant = TenantId(identifier("tenant", TENANT_SLUG))
         store = PgVectorStore(
-            pool, DeterministicEmbedder(), tenant_id=tenant, timeout_s=settings.store_timeout_s
+            pool, HashEmbedder(), tenant_id=tenant, timeout_s=settings.store_timeout_s
         )
         await StoreRouter(store, tenant_id=tenant).write(assertions)
         relay = OutboxRelay(pool, NetworkXGraphStore(), timeout_s=settings.store_timeout_s)

@@ -44,7 +44,6 @@ __all__ = [
     "SEED_FACTS",
     "SUPERSESSIONS",
     "TENANT_SLUG",
-    "TIER_ORDER",
     "TRANSCRIPT",
     "SeedFact",
 ]
@@ -59,19 +58,6 @@ NAMESPACE: Final = Namespace("patient:7781")
 # is what supersedes the address and the pharmacy.
 INTAKE_AT: Final = datetime(2026, 4, 8, 10, 15, tzinfo=UTC)
 MOVED_AT: Final = datetime(2026, 9, 2, 14, 0, tzinfo=UTC)
-
-# `RULES.md` §4's ordering, strongest first: "TRUSTED_SYSTEM > VERIFIED_USER >
-# UNVERIFIED_USER > TOOL_OUTPUT > RETRIEVED_WEB". `SourceTier` is a `StrEnum`
-# and carries no order of its own, so the fact lives here until S4.1's schema
-# gate needs it too - at which point it belongs beside the enum, not in two
-# places.
-TIER_ORDER: Final = (
-    SourceTier.TRUSTED_SYSTEM,
-    SourceTier.VERIFIED_USER,
-    SourceTier.UNVERIFIED_USER,
-    SourceTier.TOOL_OUTPUT,
-    SourceTier.RETRIEVED_WEB,
-)
 
 # Entity types the pack declares, for the ids the assertions below point at.
 # The step says "one patient entity" and this is five more, deliberately: an

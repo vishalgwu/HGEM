@@ -23,13 +23,18 @@ model and `FakeVectorStore` scores by insertion order, so "nearest" means
 "most recently written" unless a test says otherwise), latency, cost, or
 provider failure modes. Those belong to the integration suite, against
 testcontainers, from S3.2.
+
+**There is no `HashEmbedder` here, and there was until the S3.6 audit.** It is
+`HashEmbedder` in `guardmem_core.memory.vector.hash_embedder` now - moved
+because the S3.6 seed needed the same deterministic vectors, could not import
+`tests/`, and had grown a fifteen-line twin that was free to drift. Renamed
+rather than aliased, because it had stopped being a fake: it is the only
+`Embedder` the package ships, and calling shipped code a fake in the one place
+people look for doubles is how it ends up in production by accident.
 """
 
 from __future__ import annotations
 
-import hashlib
-import math
-import struct
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,10 +45,11 @@ from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 from guardmem_core.memory.graph.base import GraphStore
 from guardmem_core.memory.vector.base import Embedder, VectorStore
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.schemas.entity import Edge, StoredAssertion
 from guardmem_core.types import AssertionId, EntityId, Namespace
 
-__all__ = ["FakeEmbedder", "FakeGraphStore", "FakeLLM", "FakeVectorStore", "RecordedCall"]
+__all__ = ["FakeGraphStore", "FakeLLM", "FakeVectorStore", "RecordedCall"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,54 +124,6 @@ class FakeLLM:
             )
         index = min(len(self.calls) - 1, len(self.responses) - 1)
         return self.responses[index]
-
-
-@dataclass(slots=True)
-class FakeEmbedder:
-    """A deterministic `Embedder`: same text in, same unit vector out.
-
-    Attributes:
-        dim: Vector length. Defaults to the 1024 `assertion.embedding` declares,
-            so the store's dimension check passes; a test that wants to see that
-            check fire sets it to something else.
-        texts: Every batch this was asked to embed, flattened, in order. What a
-            test asserts against to prove the store embeds the *assertion* and
-            not, say, its id.
-
-    Not a model, and not pretending to be one. It hashes the text and expands
-    the digest into a unit vector, which buys exactly two properties: identical
-    text embeds identically, so a search for a known assertion's own text finds
-    it; and different text lands somewhere effectively unrelated, so "nearest"
-    is not accidentally everything. Semantic similarity is not modelled at all
-    and must not be tested here - `RULES.md` §5 puts that in the nightly eval
-    suite, where there is a labelled corpus to measure it against.
-    """
-
-    dim: int = 1024
-    texts: list[str] = field(default_factory=list)
-
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """Return one deterministic unit vector per text, in input order."""
-        self.texts.extend(texts)
-        return [self._vector(text) for text in texts]
-
-    def _vector(self, text: str) -> list[float]:
-        """Expand a digest of `text` into `dim` floats, normalised.
-
-        Normalised because `assertion_hnsw` indexes `vector_cosine_ops`: with
-        unit vectors, cosine distance and ordering by it behave the way a test
-        reading `ORDER BY distance` would expect, and an all-zero vector - which
-        an unnormalised scheme can produce - has no cosine distance at all.
-        """
-        raw = b"".join(
-            hashlib.sha256(f"{index}:{text}".encode()).digest()
-            for index in range(self.dim // 8 + 1)
-        )
-        values = [
-            struct.unpack_from(">i", raw, offset * 4)[0] / 2**31 for offset in range(self.dim)
-        ]
-        norm = math.sqrt(sum(value * value for value in values)) or 1.0
-        return [value / norm for value in values]
 
 
 def _is_valid_at(assertion: StoredAssertion, as_of: datetime | None) -> bool:
@@ -346,6 +304,6 @@ class FakeGraphStore:
 # `isinstance` check would not do: `@runtime_checkable` compares method *names*
 # and ignores signatures, arity and async-ness entirely.
 _llm: LLMClient = FakeLLM()
-_embedder: Embedder = FakeEmbedder()
+_embedder: Embedder = HashEmbedder()
 _vectors: VectorStore = FakeVectorStore()
 _graph: GraphStore = FakeGraphStore()

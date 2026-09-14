@@ -118,6 +118,8 @@ guardmem-ai/
 │   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered;
 │   │       │   │   │                    #   S3.3 added tenant_transaction, shared with the relay
 │   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both directions
+│   │       │   │   ├── hash_embedder.py # S3.6 audit; the one deterministic Embedder,
+│   │       │   │   │                    #   shared by the seed and the suite, so they cannot drift
 │   │       │   │   ├── pgvector_store.py
 │   │       │   │   └── qdrant_store.py
 │   │       │   ├── graph/
@@ -265,8 +267,8 @@ guardmem-ai/
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
 │   ├── fixtures/                        # a package, so mypy resolves one module name
-│   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7),
-│   │   │                                #   FakeEmbedder (S3.2)
+│   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7).
+│   │   │                                #   The embedder moved to the package at the S3.6 audit
 │   │   ├── postgres.py                  # S3.2; the migrated testcontainer, as a pytest plugin
 │   │   ├── pgvector.py                  # S3.2; tenant, pool and store fixtures over it
 │   │   ├── outbox.py                    # S3.3; relay fixtures and the owner-side row probes

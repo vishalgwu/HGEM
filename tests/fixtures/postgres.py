@@ -43,6 +43,7 @@ import asyncpg
 import pytest
 
 from conftest import REPO_ROOT
+from guardmem_core.memory.vector.pool import libpq_dsn, sqlalchemy_dsn
 
 __all__ = ["app_role_dsn", "postgres_dsn"]
 
@@ -126,7 +127,7 @@ def _migrate(dsn: str) -> None:
             since a failure here is a broken migration and not a broken test.
     """
     environment = dict(os.environ)
-    environment["GM_DATABASE_URL"] = dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+    environment["GM_DATABASE_URL"] = sqlalchemy_dsn(dsn)
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=REPO_ROOT,
@@ -161,7 +162,7 @@ def postgres_dsn() -> Iterator[str]:
     """
     external = os.environ.get("GM_TEST_DATABASE_URL")
     if external:
-        yield external.replace("postgresql+asyncpg://", "postgresql://", 1)
+        yield libpq_dsn(external)
         return
     if not _docker_available():
         pytest.skip("no Docker daemon; set GM_TEST_DATABASE_URL to use an existing database")

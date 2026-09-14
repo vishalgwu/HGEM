@@ -49,6 +49,34 @@ class ImpactLevel(StrEnum):
     HIGH = "high"
     CRITICAL = "critical"
 
+    @property
+    def risk_floor(self) -> float:
+        """The floor this impact level puts under `RiskVerdict.risk`.
+
+        Returns:
+            `MEMORY_ENGINE.md` §3.3's value: low .15, medium .35, high .60,
+            critical .80.
+
+        §3.3 computes `R = max(R_raw, floor[impact])`, so these four numbers are
+        what stop a confidently-scored write to a critical field reaching the
+        auto-write path. They were prose in this docstring and a dict literal in
+        a seed script until the S3.6 audit - the same four numbers written twice,
+        one of which nothing checked. `l3_score/impact.py` is the consumer that
+        makes this a property rather than a lookup table somebody else owns.
+        """
+        return _RISK_FLOORS[self]
+
+
+# Defined after the class because a `StrEnum` body cannot hold a non-member
+# mapping keyed by its own members. Private: `ImpactLevel.risk_floor` is the
+# interface, so a caller cannot reach for a floor by string and miss the enum.
+_RISK_FLOORS: dict[ImpactLevel, float] = {
+    ImpactLevel.LOW: 0.15,
+    ImpactLevel.MEDIUM: 0.35,
+    ImpactLevel.HIGH: 0.60,
+    ImpactLevel.CRITICAL: 0.80,
+}
+
 
 class ConflictKind(StrEnum):
     """What Layer 2 found when it compared a candidate with its incumbents."""

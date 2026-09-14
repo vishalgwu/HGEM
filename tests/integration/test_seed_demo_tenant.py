@@ -29,6 +29,7 @@ import asyncpg
 import pytest
 
 from conftest import REPO_ROOT
+from guardmem_core.memory.vector.pool import sqlalchemy_dsn
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -62,7 +63,7 @@ def run_seed(dsn: str) -> str:
     runner gets from `cp .env.example .env`.
     """
     environment = dict(os.environ)
-    environment["GM_DATABASE_URL"] = dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+    environment["GM_DATABASE_URL"] = sqlalchemy_dsn(dsn)
     result = subprocess.run(
         [sys.executable, str(SEED)],
         cwd=REPO_ROOT,
