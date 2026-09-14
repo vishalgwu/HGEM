@@ -46,6 +46,7 @@ TENANT: Final = TenantId("11111111-1111-1111-1111-111111111111")
 
 def citation(
     *,
+    source_hash: str = "sha256:abc",
     verbatim: str = "allergic to penicillin",
     span: tuple[int, int] = (13, 35),
     tier: SourceTier = SourceTier.VERIFIED_USER,
@@ -55,6 +56,10 @@ def citation(
     """One well-formed `Provenance`.
 
     Args:
+        source_hash: Digest of the source *document*. The axis §2.4's merge
+            counts on: two citations sharing this are two spans of one source
+            and corroborate nothing, so a test about corroboration has to be
+            able to vary it.
         verbatim: The supporting text. Not checked against any source here -
             these are unit fixtures, and the *real* guarantee that
             `source[span] == verbatim` is `span_linker`'s, proved by the I1
@@ -68,7 +73,7 @@ def citation(
         The citation.
     """
     return Provenance(
-        source_hash="sha256:abc",
+        source_hash=source_hash,
         source_span=span,
         source_tier=tier,
         verbatim=verbatim,

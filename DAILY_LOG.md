@@ -2869,6 +2869,89 @@ cardinality against the ontology, and temporal overlap.
 that an incumbent already saying what the candidate says should have been all
 along.
 
+## 2026-09-13 — Day 4 · S4.4 (resolution matrix and semantic dedupe)
+
+**Shipped**
+
+- **`pipeline/l2_validate/dedupe.py`** — §2.3's six-row table as a pure
+  function, §2.4's merge, and the precedence that reduces ten incumbents to one
+  answer. `conflict.py` decides whether to ask a model; this decides what the
+  answer means.
+- **DUPLICATE and REFINEMENT, which S4.3 carried the evidence for and compared
+  nowhere.** REFINEMENT is the row that needs both entailment directions, and
+  the reason `Judgement` has two.
+- **`merge`** — appends the citation, raises `corroboration_count` only for a
+  genuinely new `source_hash`, keeps the same `assertion_id`. Idempotent,
+  because S3.3's relay replays.
+- **Invariant I2 over 500 generated write sequences**, plus three properties
+  beside it so the invariant is not satisfiable by writing nothing.
+- 759 unit and property tests passing; Layer 2 at 100% statement and branch
+  coverage.
+
+**What broke / what I learned**
+
+- **I wrote the equality check as a short circuit and it was wrong.** The
+  reasoning was clean: if the incumbent already holds this exact object, cosine
+  and entailment have nothing left to establish, so return DUPLICATE before
+  paying for a judge. It ran ahead of the judge, and an S4.3 test —
+  `test_a_contradiction_never_comes_back_as_supersede` — turned red with
+  `merge` where it wanted `escalate`.
+  The test was right and I had missed something real: **`object` carries no
+  polarity.** "Allergic to penicillin" and "not allergic to penicillin" both
+  extract `penicillin`. The negation lives in the verbatim, which is the only
+  thing the judge ever sees. So an equal object is not agreement, and the
+  short-circuit version would have merged a fact with its own negation —
+  raising `corroboration_count` for it, which raises `S_cor`, which raises `C`.
+  That is precisely the failure I had written a paragraph against in the same
+  file an hour earlier, under "contradiction is read before the similarity
+  rows", and then reintroduced by putting the check somewhere else. Equality is
+  now *evidence* handed to `classify`, read below the contradiction rows.
+- **Two of the S4.3 tests were using identical objects as scaffolding.** They
+  wanted to reach the judge and picked the shortest route, which happened to be
+  an incumbent holding the same value. Once equality meant something, those
+  tests were asserting on a case they were not about. Fixed the fixture, not the
+  rule — `latex` against `penicillin` is what "the judge is being asked about
+  these two" actually looks like.
+- **Nineteen corpus pairs had the wrong label and the probe told me.** Every
+  miss was a row the corpus itself had named `-same`, `-restated` or
+  `ok-duplicate-wording`, sitting at `expected=NONE`. They were always
+  duplicates; S4.3 had no DUPLICATE row to label them with. Relabelled, nothing
+  added or removed — a probe that grew nineteen easy pairs would have raised the
+  score by dilution.
+- **The table has a hole and I nearly papered over it.** Cosine 0.88, both
+  entailments 0.9, no contradiction: that matches no row in §2.3. The first
+  instinct was to widen row 1's cosine until the gap closed. The honest version
+  is a documented fall-through to `coexist` and a note that the table is not
+  total, because widening a threshold to make a function total changes what the
+  spec says while looking like an implementation detail.
+- **`most_severe` is a rule §2.3 does not contain.** The table is written for
+  one pair; retrieval returns ten. I could not find a reading of the spec that
+  settles it, so the ordering is stated in one comment block with its argument
+  attached, rather than emerging from the order of a few `if`s.
+
+**Still open**
+
+- **Entity resolution.** Unchanged, and still the largest gap in the build.
+- **CONTRADICTION → `escalate` is no longer a placeholder**, though it looks
+  identical from outside. The rule is implemented in full and `escalate` is what
+  it returns when `C` is unknown. S5.4 is where the number arrives and the
+  answer can change.
+- **The applier does not exist.** `detect` returns a hint and nothing carries it
+  out; the four lines that do live in the I2 property test. S5.6 joins the
+  stages, and that is the step that has to prove it honours the hint.
+- **`merge` does not recompute confidence**, and §2.4's sentence asks for it.
+  `S_cor` is one of five inputs to §3.2's composite — S5.2's, not this step's.
+- The graph half still returns `Edge`s rather than assertions. The merge did not
+  need it either, so it moves forward again.
+
+**Tomorrow's first step**
+
+END OF DAY 4 CHECK: "a second contradictory fact is detected, not silently
+stored alongside." Then `S5.1` — semantic entropy, and the worked example in
+§3.1 that has to reproduce `H_norm = 0.590` to three decimals.
+
+---
+
 ---
 
 ---

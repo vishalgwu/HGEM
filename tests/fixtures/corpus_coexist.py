@@ -19,6 +19,7 @@ from guardmem_core.schemas.verdict import ConflictKind
 
 __all__ = ["COEXIST"]
 
+_D: Final = ConflictKind.DUPLICATE
 _N: Final = ConflictKind.NONE
 
 _COEXIST: Final[tuple[ConflictPair, ...]] = (
@@ -72,7 +73,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "allergy",
         ("penicillin", "allergic to penicillin"),
         ("penicillin", "penicillin allergy"),
-        _N,
+        _D,
         0.02,
         0.93,
     ),
@@ -81,7 +82,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "medication",
         ("metformin 500mg", "metformin 500mg twice a day"),
         ("metformin 500mg", "takes metformin 500mg"),
-        _N,
+        _D,
         0.02,
         0.95,
     ),
@@ -90,7 +91,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "allergy",
         ("penicillin", "allergic to penicillin"),
         ("penicillin", "allergic to penicillin, hives specifically"),
-        _N,
+        _D,
         0.04,
         0.88,
     ),
@@ -126,7 +127,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "allergy",
         ("shellfish", "shellfish, though that's milder"),
         ("shellfish", "shellfish allergy, mild"),
-        _N,
+        _D,
         0.03,
         0.9,
     ),
@@ -135,7 +136,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "dietary_restriction",
         ("no shellfish", "no shellfish"),
         ("no shellfish", "avoids shellfish"),
-        _N,
+        _D,
         0.02,
         0.92,
     ),
@@ -144,7 +145,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "emergency_contact",
         ("person-ruth", "Ruth Ellery first"),
         ("person-ruth", "my daughter, Ruth"),
-        _N,
+        _D,
         0.02,
         0.94,
     ),
@@ -180,7 +181,7 @@ _COEXIST: Final[tuple[ConflictPair, ...]] = (
         "emergency_contact",
         ("person-ruth", "my daughter Ruth"),
         ("person-ruth", "Ruth, my daughter"),
-        _N,
+        _D,
         0.02,
         0.95,
     ),

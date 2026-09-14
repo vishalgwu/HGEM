@@ -13,8 +13,8 @@
 > coordinates the dual write, the graph store on the other side of it, and the
 > ontology that says what a predicate is allowed to mean — with `make seed`
 > putting all of it together, and S4.1 starting Layer 2 by enforcing that
-> vocabulary, S4.2 retrieving what it already believes and S4.3 deciding
-> whether the two can both be true:
+> vocabulary, S4.2 retrieving what it already believes, S4.3 deciding
+> whether the two can both be true and S4.4 settling what to do about it:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -167,8 +167,9 @@ stack it actually requires.
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
-– S3.6**), and **Layer 2 is under way (S4.1 – S4.3)** — the schema gate, incumbent
-retrieval and conflict detection.
+– S3.6**), and **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
+retrieval, conflict detection, and the resolution matrix with the merge behind
+it.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -308,6 +309,24 @@ against a bar of ninety percent, and five deliberate mutations of the code were
 each caught by it, which is the part of that claim worth believing. What it
 measures honestly is this repository's reading of the numbers; the judge's own
 accuracy is a later step's question, and this same set is what will ask it.
+
+S4.4 turns that finding into an action. A duplicate is merged rather than
+stored: the new citation is appended to the fact it restates and the source
+count goes up, so three independent mentions of one fact read as a corroborated
+fact rather than as three. A claim that is strictly narrower than what is on
+record supersedes it. A contradiction stops and asks a human, because the rule
+for resolving one automatically depends on a confidence score that Layer 3 has
+not computed yet — the rule is implemented in full, and *ask a human* is what it
+returns when that number is missing.
+
+The invariant underneath it is that a predicate declared to hold one value holds
+one value. That is property-tested over five hundred generated write sequences,
+with three further properties beside it so that it cannot be satisfied by
+refusing to write anything: the value that survives is the one asserted last,
+nothing is ever deleted, and a fact restated is corroborated rather than
+duplicated. Building that test is what found a real hole — an incumbent holding
+the identical value did not trip any check, because sameness was being inferred
+from similarity scores rather than read off the values themselves.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

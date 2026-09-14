@@ -17,6 +17,71 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S4.4 — the resolution matrix and semantic dedupe.**
+  `pipeline/l2_validate/dedupe.py` implements `MEMORY_ENGINE.md` §2.3's six-row
+  table and §2.4's merge. `conflict.py` decides *whether to ask a model*; this
+  decides *what the answer means*, which is why (b) and (c) stay on the near
+  side of the judge call and everything past it is a pure table lookup.
+- **DUPLICATE and REFINEMENT now exist.** S4.3 carried `cosine` and the forward
+  entailment onto the report and compared neither. REFINEMENT is the row that
+  needs the asymmetry — the candidate entails the incumbent and not the reverse,
+  so the candidate is the narrower claim — and it is the reason `Judgement`
+  carries two directions.
+- **`merge` increments `corroboration_count`, appends the `Provenance`, and
+  does not create a row.** The count is *independent sources*, not
+  `len(provenance)`: two spans of one document are two citations and one source.
+  §3.2's `S_cor` is a function of sources, so counting citations would let a
+  single planted document quoted three times score as corroborated — inflating
+  confidence exactly where a poisoning attempt wants it inflated. Sameness is
+  `source_hash`. The merge is also idempotent, because S3.3's relay replays.
+- **Invariant I2 property-tested across 500 generated write sequences**, plus
+  three properties beside it that stop the invariant being satisfiable by doing
+  nothing: the surviving value is the one last asserted, nothing is ever
+  deleted, and a restatement corroborates rather than duplicating.
+
+### Changed
+
+- **CONTRADICTION's `escalate` is no longer a deviation.** S4.3 recorded it as
+  one and said S4.4 owned closing it. It closes as a *total function* rather
+  than a TODO: §2.3 resolves a contradiction by "supersede if candidate newer
+  *and* `C` >= tau_hi, else escalate", `C` is Layer 3's and does not exist when
+  Layer 2 runs, so the conjunct cannot be established and the row's own `else`
+  applies. The rule is implemented in full; S5.4 is where the number arrives.
+- **Contradiction is read before the similarity rows, departing from the
+  printed order.** The table lists DUPLICATE first with `—` in the contradiction
+  column, so a literal top-to-bottom match merges a pair the judge scored at 0.9
+  contradiction. A merge bumps `corroboration_count`, which feeds `S_cor`, which
+  raises `C` — so the printed order lets an incoherent or manipulated judgement
+  raise confidence in a fact by feeding it its own negation. Costs nothing when
+  the numbers are coherent.
+- **The table is not total, and the gap resolves to `coexist`.** A pair at
+  cosine 0.88 with both entailments at 0.9 and no contradiction matches no row.
+  `classify` is total by construction; the fall-through costs a near-duplicate
+  row rather than retiring or absorbing a fact on similarity alone.
+- **Equality satisfies the DUPLICATE row without the thresholds, and invariant
+  I2 is what found it.** Cosine and entailment are proxies for "these are the
+  same claim"; when the incumbent already holds the exact object over an
+  intersecting interval, the proxies have nothing left to establish. Without it
+  a restatement the embedder scores at 0.94 becomes a second live row saying
+  what the first one says — I2 broken on a `ONE` predicate, unbounded
+  duplication on a `MANY` one. It is read *below* the contradiction rows, never
+  above: an equal object does not mean the claims agree, because polarity lives
+  in the verbatim and not in the object. "Allergic to penicillin" and "not
+  allergic to penicillin" both extract `penicillin`.
+- **Nineteen of the sixty probe pairs were relabelled from `NONE` to
+  `DUPLICATE`.** No pairs were added or removed. They are the rows the corpus
+  itself named `-same`, `-restated` and `ok-duplicate-wording`; S4.3 could only
+  label them `NONE` because §2.3's DUPLICATE row had nothing implementing it.
+- **§2.3's five thresholds live in one module.** `conflict.py` held two of them
+  until this step. A threshold with two homes is one that can disagree with
+  itself.
+- **A composition rule §2.3 does not state.** The table is written for one pair
+  and retrieval returns up to ten, so `most_severe` ranks: anything that stops
+  the pipeline outranks anything that changes memory, and among the changes the
+  one that writes least wins. Stated in one place so a reviewer can disagree
+  with it in one place. 759 unit and property tests passing locally, Layer 2 at
+  100% statement *and* branch coverage.
+
 - **S4.3 — the three conflict checks.** `pipeline/l2_validate/conflict.py`
   answers `MEMORY_ENGINE.md` §2.2's question — can this candidate and what is
   already on record both be true — and the order of the three checks is the

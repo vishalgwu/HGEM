@@ -16,16 +16,24 @@ CARDINALITY's is "always audited", so nothing is lost by answering with the
 cheaper, certain one - and §2.2(b)'s "regardless of NLI" is the more specific
 instruction.
 
-**S4.4 owns the rest of §2.3's table.** DUPLICATE, REFINEMENT and the merge that
-follows read `cosine` and the entailment asymmetry; this carries both onto the
-report and stops there, because "Implement the table in MEMORY_ENGINE.md 2.3" is
-S4.4's sentence, not this step's.
+**The table itself is `dedupe.py`, as of S4.4.** This module decides *whether to
+ask a model*; that one decides *what the answer means*. So the two deterministic
+checks below return their row without a judge, and everything past them is
+handed to `classify` - including the DUPLICATE and REFINEMENT rows, which read
+the cosine and the entailment asymmetry this step deliberately only carried.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING
 
+from guardmem_core.pipeline.l2_validate.dedupe import (
+    CARDINALITY,
+    COEXIST,
+    TEMPORAL_OVERLAP,
+    classify,
+    most_severe,
+)
 from guardmem_core.pipeline.l2_validate.nli import Judgement, NLIJudge
 from guardmem_core.schemas.entity import Cardinality
 from guardmem_core.schemas.verdict import ConflictKind, ConflictReport
@@ -34,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from guardmem_core.memory.vector.base import ScoredAssertion
+    from guardmem_core.pipeline.l2_validate.dedupe import Resolution
     from guardmem_core.pipeline.l2_validate.incumbents import IncumbentSet
     from guardmem_core.schemas.base import ObjectValue
     from guardmem_core.schemas.candidate import MemoryCandidate
@@ -41,12 +50,6 @@ if TYPE_CHECKING:
     from guardmem_core.schemas.ontology import PredicateSpec
 
 __all__ = ["detect"]
-
-# §2.2(a)'s thresholds, from §2.3's table. Named because two of them are the
-# boundary of the "ambiguous" band - contradiction between 0.3 and 0.65 escalates
-# rather than deciding, which is the band a human exists for.
-_CONTRADICTION: Final = 0.65
-_AMBIGUOUS_FLOOR: Final = 0.3
 
 
 def _live_incumbent(
@@ -134,20 +137,21 @@ async def detect(
     upgraded. `ARCHITECTURE.md` §0: degradation never widens the auto-write
     path, and guessing `supersede` here would be exactly that.
 
-    S4.4 owns the rest of §2.3's table - DUPLICATE, REFINEMENT and the merge
-    that follows - which is why `cosine` is carried onto the report rather than
-    compared here.
+    The rest of §2.3's table - DUPLICATE, REFINEMENT, and the precedence that
+    picks one answer out of ten incumbents - is `dedupe.classify` and
+    `dedupe.most_severe` as of S4.4. What stays here is the pair of checks that
+    answer *before* the judge is asked.
     """
     if not incumbents.nearest:
         return _no_conflict()
     if spec.cardinality is Cardinality.ONE and (
         hit := _live_incumbent(incumbents.nearest, candidate.object)
     ):
-        return _conflict(ConflictKind.CARDINALITY, hit, "supersede")
+        return _report(CARDINALITY, hit)
     if spec.cardinality is Cardinality.ONE_PER_TIME and (
         overlapping := _first_overlap(candidate, incumbents.nearest)
     ):
-        return _conflict(ConflictKind.TEMPORAL_OVERLAP, overlapping, "supersede")
+        return _report(TEMPORAL_OVERLAP, overlapping)
     return _adjudicate(candidate, incumbents, await _judge(candidate, incumbents, nli))
 
 
@@ -160,6 +164,44 @@ async def _judge(
         [hit.assertion.provenance[0].verbatim for hit in incumbents.nearest],
         trace_id=candidate.trace_id,
     )
+
+
+def _restates(candidate: MemoryCandidate, incumbent: StoredAssertion) -> bool:
+    """Does this incumbent already assert the very same value?
+
+    Args:
+        candidate: The proposed fact.
+        incumbent: One live incumbent.
+
+    Returns:
+        True when the objects are equal over intersecting intervals.
+
+    **Evidence for §2.3's DUPLICATE row, and the I2 property suite is what found
+    it missing.** That row identifies a duplicate by cosine and entailment,
+    which are *proxies for sameness*; when the object is literally equal under
+    the same predicate for the same subject, the proxy has nothing left to
+    establish. Without this the pair falls through to `coexist` whenever the
+    embedder scores the restatement under 0.95 or the judge scores it under
+    0.85 - writing a second live row that says exactly what the first one says.
+    On a `ONE` predicate that is invariant I2 broken; on a `MANY` predicate it
+    is the unbounded duplication §2.4 exists to prevent.
+
+    **It is evidence, not a short circuit, and that distinction is the whole
+    care in this function.** An equal `object` does not mean the two claims
+    agree, because the object does not carry polarity: "allergic to penicillin"
+    and "not allergic to penicillin" both extract `penicillin`, and the
+    negation lives only in the verbatim. Returning DUPLICATE here without
+    asking the judge would merge a fact with its own negation and raise
+    `corroboration_count` for it - the precise failure `dedupe`'s first recorded
+    deviation exists to close. So this is handed to `classify`, which reads the
+    contradiction score first and only then lets equality speak.
+
+    The interval test is why this is not simply `object ==`. Under
+    `ONE_PER_TIME` the same value over *disjoint* intervals is two facts, not
+    one - an address lived at, left, and returned to - and merging them would
+    collapse a real history into a single span that was never true.
+    """
+    return incumbent.object == candidate.object and _overlaps(candidate, incumbent)
 
 
 def _first_overlap(
@@ -179,33 +221,32 @@ def _first_overlap(
 def _adjudicate(
     candidate: MemoryCandidate, incumbents: IncumbentSet, judgements: list[Judgement]
 ) -> ConflictReport:
-    """Read §2.2(a)'s numbers into a verdict.
+    """Read §2.2(a)'s numbers through §2.3's table.
 
     Args:
-        candidate: The proposed fact, unused beyond its shape - kept in the
-            signature so the reasoning below reads against something.
+        candidate: The proposed fact, for the object comparison `_restates`
+            makes against each incumbent.
         incumbents: What retrieval found, paired positionally with `judgements`.
-        judgements: One per incumbent, in the same order.
+        judgements: One per incumbent, in the same order. `strict=True` below is
+            the second half of the safety check `LLMJudge` makes first - a
+            mismatch here would attribute one incumbent's contradiction to
+            another, and neither side is willing to let that pass quietly.
 
     Returns:
-        CONTRADICTION at `contradiction >= 0.65`; `NONE` with an `escalate` hint
-        in §2.3's ambiguous band, 0.3 to 0.65, where "the NLI is unsure, so a
-        human or frontier model decides"; `NONE` and `coexist` below it.
+        The report for whichever pair `most_severe` picked.
 
-    The worst pair decides, not the nearest. A candidate that contradicts the
-    third incumbent and agrees with the first is still a contradiction, and
-    reporting the nearest one's comfortable numbers would hide it.
+    Every pair is classified, not just the nearest. A candidate that duplicates
+    the first incumbent and contradicts the third is a contradiction, and
+    `dedupe._PRECEDENCE` is where that ordering is argued.
     """
-    worst = max(
-        zip(incumbents.nearest, judgements, strict=True),
-        key=lambda pair: pair[1].contradiction,
-    )
-    hit, judgement = worst
-    if judgement.contradiction >= _CONTRADICTION:
-        return _conflict(ConflictKind.CONTRADICTION, hit, "escalate", judgement)
-    if judgement.contradiction >= _AMBIGUOUS_FLOOR:
-        return _conflict(ConflictKind.NONE, hit, "escalate", judgement)
-    return _conflict(ConflictKind.NONE, hit, "coexist", judgement)
+    pairs = list(zip(incumbents.nearest, judgements, strict=True))
+    resolutions = [
+        classify(hit.cosine, judgement, restates=_restates(candidate, hit.assertion))
+        for hit, judgement in pairs
+    ]
+    winner = most_severe(resolutions)
+    hit, judgement = pairs[winner]
+    return _report(resolutions[winner], hit, judgement)
 
 
 def _no_conflict() -> ConflictReport:
@@ -216,32 +257,38 @@ def _no_conflict() -> ConflictReport:
         entailment=0.0,
         contradiction=0.0,
         cosine=0.0,
-        resolution_hint="coexist",
+        resolution_hint=COEXIST.resolution_hint,
     )
 
 
-def _conflict(
-    kind: ConflictKind,
-    hit: ScoredAssertion,
-    resolution_hint: Literal["merge", "supersede", "coexist", "escalate"],
-    judgement: Judgement | None = None,
+def _report(
+    resolution: Resolution, hit: ScoredAssertion, judgement: Judgement | None = None
 ) -> ConflictReport:
-    """Build the report for one incumbent.
+    """Build the report for one incumbent and the row it matched.
+
+    Args:
+        resolution: The table row, from `dedupe`.
+        hit: The incumbent it was matched against, with its cosine.
+        judgement: The judge's numbers, or `None` when a deterministic check
+            answered without asking.
+
+    Returns:
+        The report.
 
     `entailment` is §0's `P(incumbent ⊨ candidate)` - the forward direction, and
     the one `ConflictReport` declares. `entail_rev` is not on that model and is
-    not invented here: S4.4's REFINEMENT row is the only reader of the
-    asymmetry, and it can ask the judge itself rather than have this widen a
-    schema the spec of record owns.
+    not invented here: `classify` is the only reader of the asymmetry and it
+    reads it from the `Judgement` directly, so widening a schema the spec of
+    record owns buys nothing.
 
     Zeroes when the deterministic checks answered, because they did so without
     asking - a fabricated 0.9 would read as a measurement.
     """
     return ConflictReport(
-        kind=kind,
+        kind=resolution.kind,
         incumbent_assertion_id=hit.assertion.assertion_id,
         entailment=judgement.entail_fwd if judgement else 0.0,
         contradiction=judgement.contradiction if judgement else 0.0,
         cosine=hit.cosine,
-        resolution_hint=resolution_hint,
+        resolution_hint=resolution.resolution_hint,
     )

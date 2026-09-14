@@ -103,7 +103,8 @@ guardmem-ai/
 │   │       │   │   │                    #   overlap answer without a model, (a) NLI last
 │   │       │   │   ├── nli.py           # S4.3; NLIJudge protocol + LLMJudge. Separate
 │   │       │   │   │                    #   because the cross-encoder swap is scheduled
-│   │       │   │   └── dedupe.py        # cosine + bidirectional entailment merge
+│   │       │   │   └── dedupe.py        # S4.4; §2.3's resolution table and §2.4's merge.
+│   │       │   │                        #   classify() is pure; merge() adds no row
 │   │       │   └── l3_score/
 │   │       │       ├── entropy.py       # semantic entropy over K samples
 │   │       │       ├── confidence.py    # weighted confidence composite C
@@ -273,6 +274,9 @@ guardmem-ai/
 │   │   └── test_incumbent_retrieval.py  #   S4.2 DONE WHEN: the seeded incumbent comes back
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
+│   │                                    #   test_i2_single_live_value.py (S4.4): I2 over
+│   │                                    #   500 generated write sequences, plus the three
+│   │                                    #   properties that stop it passing vacuously
 │   ├── security/                        # injection corpus regression
 │   ├── fixtures/                        # a package, so mypy resolves one module name
 │   │   ├── fakes.py                     # FakeLLM / FakeVectorStore / FakeGraphStore (S1.7).
@@ -287,7 +291,8 @@ guardmem-ai/
 │   │   │                                #   the three modules below. Split by which mistake
 │   │   │                                #   a row guards against, not by size
 │   │   ├── conflict_pair.py             # S4.3; ConflictPair + the pair() shorthand
-│   │   ├── corpus_settled.py            # S4.3; the 20 rows (b)/(c) answer with no judge
+│   │   ├── corpus_settled.py            # S4.3; the 20 rows (b)/(c) answer with no judge.
+│   │   │                                #   S4.4 relabelled the restatements DUPLICATE
 │   │   ├── corpus_contradictions.py     # S4.3; rows a judge has to catch
 │   │   ├── corpus_coexist.py            # S4.3; rows that must NOT be flagged, plus the
 │   │   │                                #   0.3-0.65 band that must escalate instead
@@ -299,7 +304,7 @@ guardmem-ai/
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates
-│   │   ├── strategy_l2.py               # S4.1/S4.2; the Layer 2 result models
+│   │   ├── strategy_l2.py               # S4.1/S4.2/S4.4; the Layer 2 result models
 │   │   ├── seed.py                      # S4.2; the seeded demo tenant, as a plugin
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.

@@ -2069,8 +2069,70 @@ TIME: 60 min
 Implement the table in MEMORY_ENGINE.md 2.3. Merge increments `corroboration_count` and appends
 provenance — it does not create a row.
 
+**Four corrections to this step, found by building it.**
+
+1. **§2.3's row order is a matching order, and following it literally lets a
+   contradiction merge.** DUPLICATE is the table's first row and carries `—` in
+   the contradiction column, so a top-to-bottom match merges a pair the judge
+   scored at 0.9 contradiction. A merge is not neutral: it raises
+   `corroboration_count`, which feeds §3.2's `S_cor`, which raises `C`. The
+   printed order therefore lets an incoherent or manipulated judgement raise
+   confidence in a fact by feeding it its own negation. `classify` reads the
+   contradiction rows first. That costs nothing when the numbers are coherent -
+   mutual entailment and mutual exclusion do not co-occur in a sane judge.
+2. **The table is not total.** A pair at cosine 0.88 with both entailments at
+   0.9 and no contradiction matches no row: row 1 needs 0.95, row 2 needs
+   `fwd < 0.85`, row 5 needs `cosine < 0.80`, row 6 needs contradiction above
+   0.3. `classify` is total by construction and answers `coexist` in the gap -
+   the safe reading, because two facts that do not contradict can both be true.
+3. **Equality has to satisfy the DUPLICATE row on its own, and invariant I2 is
+   what found it.** §2.3 identifies a duplicate by cosine and entailment, which
+   are *proxies* for "these are the same claim". When the incumbent already
+   holds the exact object over an intersecting interval, the proxies have
+   nothing left to establish - and leaving them to decide means a restatement
+   the embedder scores at 0.94, or the judge scores at 0.84, becomes a second
+   live row saying what the first one says. On a `ONE` predicate that is I2
+   broken; on a `MANY` predicate it is the unbounded duplication §2.4 exists to
+   prevent. The check sits *below* the contradiction rows, not above: an equal
+   object does not mean the claims agree, because polarity lives in the verbatim
+   and not in the object - "allergic to penicillin" and "not allergic to
+   penicillin" both extract `penicillin`. Written as a short circuit first, and
+   the S4.3 test that a contradiction never resolves to a merge caught it.
+4. **The table says nothing about multiple incumbents.** It is written for one
+   pair and §2.2 retrieves up to ten. `most_severe` states the composition rule
+   in one place: anything that stops the pipeline outranks anything that changes
+   memory, and among the changes, the one that writes least wins.
+
+**S4.3's open deviation closes here, and not as a TODO.** Row 3 resolves a
+CONTRADICTION by "supersede if candidate newer *and* `C` >= tau_hi, else
+escalate". `C` is Layer 3's and does not exist when Layer 2 runs, so the
+conjunct cannot be established and the row's own `else` applies. The rule is
+implemented in full; `escalate` is what it returns when confidence is unknown.
+
 DONE WHEN: property test — invariant I2 holds (no two visible assertions share subject+predicate
 when cardinality is ONE) across 500 generated write sequences.
+
+**Held, plus three properties beside it.** I2 alone is satisfiable by writing
+nothing, so the suite also pins that the surviving value is the one last
+asserted, that nothing is ever deleted, and that a restatement corroborates
+rather than duplicating. The scripted judge is deliberately inert - it reaches
+no similarity row - so every duplicate the suite finds is found by object
+equality, which is the route that has to hold when a real judge is unhelpful.
+
+What the suite assumes rather than proves is named in its own docstring: the
+*applier* that turns a resolution into a store call does not exist until S5.6,
+so those four lines live in the test. It proves the decision layer keeps I2
+given an applier that honours the hint - not that S5.6's will.
+
+Three mutants, three kills: dropping the equality row breaks I2 directly
+(`2 live values for a ONE predicate`), counting citations instead of independent
+sources breaks corroboration, and taking the nearest incumbent instead of
+ranking breaks four tests.
+
+**Nineteen of the sixty probe pairs were relabelled `NONE` → `DUPLICATE`.** None
+were added or removed. They are the rows the corpus itself named `-same`,
+`-restated` and `ok-duplicate-wording`; S4.3 could only call them `NONE` because
+§2.3's DUPLICATE row had nothing implementing it.
 
 COMMIT: `feat(s4.4): resolution matrix and semantic dedupe`
 

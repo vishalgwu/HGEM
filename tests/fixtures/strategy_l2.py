@@ -26,9 +26,11 @@ from guardmem_core.pipeline.l2_validate import (
     GateOutcome,
     IncumbentSet,
     Judgement,
+    Resolution,
     SchemaGateResult,
 )
 from guardmem_core.schemas import GMModel
+from guardmem_core.schemas.verdict import ConflictKind
 from guardmem_core.types import CandidateId
 
 __all__ = ["l2_strategies"]
@@ -36,6 +38,16 @@ __all__ = ["l2_strategies"]
 
 # One NLI verdict. `_UNIT` is [0, 1], which is what all three fields declare.
 _JUDGEMENTS = st.builds(Judgement, entail_fwd=_UNIT, entail_rev=_UNIT, contradiction=_UNIT)
+
+# Any (kind, hint) pairing, including ones §2.3's table never emits - DUPLICATE
+# resolved by `escalate`, say. Loose for the reason in the module docstring: this
+# feeds the serialisation properties, and `tests/unit/test_dedupe.py` is where
+# the seven real rows are pinned to their meanings.
+_RESOLUTIONS = st.builds(
+    Resolution,
+    kind=st.sampled_from(ConflictKind),
+    resolution_hint=st.sampled_from(["merge", "supersede", "coexist", "escalate"]),
+)
 
 
 def _gated(candidates: st.SearchStrategy[object]) -> st.SearchStrategy[GatedCandidate]:
@@ -70,6 +82,7 @@ def l2_strategies(
             rejected=st.lists(gated, max_size=2),
         ),
         Judgement: _JUDGEMENTS,
+        Resolution: _RESOLUTIONS,
         AdjudicationBatch: st.builds(
             AdjudicationBatch, judgements=st.lists(_JUDGEMENTS, max_size=3)
         ),

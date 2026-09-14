@@ -70,9 +70,21 @@ class TestTheProbe:
 
     def test_the_set_covers_every_kind_this_step_can_produce(self) -> None:
         """A probe with no cardinality pairs would score well and measure a
-        third of the module."""
+        third of the module.
+
+        DUPLICATE joined the set at S4.4, and not by adding pairs: nineteen of
+        the sixty are restatements that S4.3 could only label `NONE`, because
+        §2.3's DUPLICATE row had nothing implementing it. `ok-duplicate-wording`
+        and `card-dx-same` were always duplicates; the corpus could not say so.
+
+        REFINEMENT is absent and cannot be reached from here - see the module
+        docstring of `tests/unit/test_dedupe.py`. Every pair is scored at one
+        cosine and `judge_pair` sets `entail_rev` equal to `entail_fwd`, so the
+        asymmetry that row is made of cannot be expressed in this fixture.
+        """
         assert {pair.expected for pair in PAIRS} == {
             ConflictKind.NONE,
+            ConflictKind.DUPLICATE,
             ConflictKind.CONTRADICTION,
             ConflictKind.CARDINALITY,
             ConflictKind.TEMPORAL_OVERLAP,
@@ -213,7 +225,7 @@ class TestReadingTheJudge:
         assert spec is not None
 
         report = await detect(
-            candidate(predicate="allergy", obj="penicillin"),
+            candidate(predicate="allergy", obj="latex", verbatim="latex sets me off"),
             incumbents(("allergy", "penicillin", "allergic to penicillin")),
             spec,
             ScriptedJudge(

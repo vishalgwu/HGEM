@@ -21,6 +21,7 @@ from guardmem_core.schemas.verdict import ConflictKind
 __all__ = ["SETTLED"]
 
 _K: Final = ConflictKind.CARDINALITY
+_D: Final = ConflictKind.DUPLICATE
 _N: Final = ConflictKind.NONE
 _T: Final = ConflictKind.TEMPORAL_OVERLAP
 
@@ -43,7 +44,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "primary_dx",
         ("E11.9", "type 2 diabetes"),
         ("E11.9", "diagnosed with type 2 diabetes"),
-        _N,
+        _D,
         0.02,
         0.95,
     ),
@@ -59,7 +60,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "blood_type",
         ("O negative", "blood group O negative"),
         ("O negative", "O neg"),
-        _N,
+        _D,
         0.01,
         0.96,
     ),
@@ -75,7 +76,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "consent_flag",
         (True, "yes, you can share my records"),
         (True, "yes that is still fine"),
-        _N,
+        _D,
         0.02,
         0.9,
     ),
@@ -91,7 +92,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "primary_care_provider",
         ("provider-okafor", "Dr Okafor is my GP"),
         ("provider-okafor", "my GP is Ama Okafor"),
-        _N,
+        _D,
         0.01,
         0.94,
     ),
@@ -114,7 +115,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "care_plan_status",
         ("active", "care plan status active"),
         ("active", "the plan is still active"),
-        _N,
+        _D,
         0.01,
         0.96,
     ),
@@ -123,7 +124,7 @@ _CARDINALITY: Final[tuple[ConflictPair, ...]] = (
         "preferred_language",
         ("English", "English is fine"),
         ("English", "write to me in English"),
-        _N,
+        _D,
         0.01,
         0.95,
     ),
@@ -150,7 +151,7 @@ _TEMPORAL: Final[tuple[ConflictPair, ...]] = (
         "home_address",
         ("14 Ashfield Road, Leeds", "14 Ashfield Road"),
         ("14 Ashfield Road, Leeds", "still 14 Ashfield Road"),
-        _N,
+        _D,
         0.01,
         0.97,
     ),
@@ -166,7 +167,7 @@ _TEMPORAL: Final[tuple[ConflictPair, ...]] = (
         "preferred_pharmacy",
         ("pharmacy-headrow", "Boots on The Headrow"),
         ("pharmacy-headrow", "the Boots on The Headrow"),
-        _N,
+        _D,
         0.01,
         0.95,
     ),
@@ -186,14 +187,14 @@ _TEMPORAL: Final[tuple[ConflictPair, ...]] = (
     ),
     pair("time-weight-changed", "weight_kg", (78.5, "78.5 kilos"), (76.2, "76.2 kilos"), _T),
     pair(
-        "time-weight-same", "weight_kg", (78.5, "78.5 kilos"), (78.5, "still 78.5"), _N, 0.01, 0.98
+        "time-weight-same", "weight_kg", (78.5, "78.5 kilos"), (78.5, "still 78.5"), _D, 0.01, 0.98
     ),
     pair(
         "time-insurer-same",
         "insurance_plan",
         ("payer-northwind", "Northwind Health"),
         ("payer-northwind", "still with Northwind"),
-        _N,
+        _D,
         0.01,
         0.96,
     ),
@@ -202,7 +203,7 @@ _TEMPORAL: Final[tuple[ConflictPair, ...]] = (
         "advance_directive",
         ("doc-adv-7781", "directive on file"),
         ("doc-adv-7781", "the directive from 2024"),
-        _N,
+        _D,
         0.01,
         0.97,
     ),
@@ -211,7 +212,7 @@ _TEMPORAL: Final[tuple[ConflictPair, ...]] = (
         "weight_kg",
         (78.5, "78.5 kilos"),
         (78.5, "78 and a half kilos"),
-        _N,
+        _D,
         0.01,
         0.93,
     ),
