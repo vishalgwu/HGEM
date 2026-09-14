@@ -169,8 +169,8 @@ baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Layer 3 has begun (S5.1 – S5.2)** with semantic entropy and the
-confidence composite.
+it — and **Layer 3 is under way (S5.1 – S5.3)** with semantic entropy, the
+confidence composite and the impact-risk score.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -358,6 +358,21 @@ fact that conflicts with live memory scores zero on the consistency term even
 when no model was asked to judge it, because a conflict the system caught by
 arithmetic is still a conflict; reading the unmeasured value as agreement would
 have awarded a contradiction full marks.
+
+S5.3 scores the other axis, and the point of it is that the two are not
+opposites. How confident the system is that a fact is *true* says nothing about
+what breaks if it is wrong — a perfectly-confident write to the field naming an
+account's owner is still a dangerous write. So risk is computed separately, from
+how far the change reaches: what the ontology declares the field's impact to be,
+whether the write retires an existing fact or merely adds one, how many other
+facts hang off the same subject, whether the data is medical or financial,
+whether anything an agent already did on it can be undone.
+
+Underneath that sits a floor. A field declared critical can never score below
+0.80 however harmless everything else looks, which means the weighting of the
+individual signals is allowed to be imperfect without the safety property being
+imperfect. The test for it is the one the build notebook calls the whole point
+of keeping the two scores apart.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

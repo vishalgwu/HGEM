@@ -17,6 +17,75 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.3 — blast-radius impact risk.** `pipeline/l3_score/impact.py` implements
+  `MEMORY_ENGINE.md` §3.3's `z = Σβx`, `R_raw = σ(z)`, `R = max(R_raw,
+  floor[impact])`. Pure and deterministic, like the rest of Layer 3.
+- **The floor is the safety property, not the linear model.** §3.3 opens with
+  "risk is *not* the inverse of confidence", and the floor is what enforces it:
+  no combination of the eight features can pull a CRITICAL predicate below 0.80,
+  so the betas are free to be wrong without the safety property being wrong.
+  S5.3's DONE WHEN candidate scores **0.255** on the linear model alone —
+  asserted in its own test, so the DONE WHEN cannot pass by accident.
+- **`impact_features.py`** — §3.3's left-hand column: four vocabularies
+  (`Scope`, `PiiClass`, `Irreversibility`, `MutationType`) and four conversions
+  (`graph_fanout`, `source_tier_risk`, `novelty`, and `ImpactLevel
+  .risk_feature`). Split from the model because these change when the domain
+  gains a PII class and the betas change when the tuner refits — different
+  reasons, different cadences.
+- **`graph_fanout` finally reads what S3.4 built it for.** `GraphStore.degree`
+  counts both directions precisely because §3.3 asks "how much depends on this
+  node?", and this is the first caller.
+- **`RiskFeatures` is a model, not the `dict[str, float]` that gets persisted.**
+  A misnamed key cannot silently score zero — which matters twice, since those
+  same names are what `threshold_tuner.py` refits betas against, so a typo would
+  drop a feature from the model *and* from the refit with nothing raising.
+- **Five mutants, five kills.** Removing the floor fails seven tests including
+  the DONE WHEN; turning it into a cap fails nineteen. 905 unit and property
+  tests passing locally; both new modules at 100% statement and branch coverage.
+
+### Fixed
+
+- **`novelty = 1 - cosine` could exceed 1.** Cosine over unnormalised embeddings
+  is genuinely negative sometimes — `ConflictReport.cosine` is bounded at -1 for
+  exactly that reason — so `1 - (-0.4)` is 1.4: a feature outside its own range,
+  weighted as more than maximally novel. `RiskFeatures` would have raised on a
+  legitimate retrieval result. Clamped.
+- **The sigmoid is written in two branches.** `1/(1+exp(-z))` raises
+  `OverflowError` once `-z` passes ~710, and one refit beta of the wrong sign on
+  a feature at 1.0 is all it would take — an exception out of a pure scoring
+  function rather than a number.
+- **A test of mine passed for the wrong reason.**
+  `test_every_feature_raises_risk_on_its_own` measured from all-features-zero,
+  where `z` is -3.4 and a single feature rarely lifts σ(z) past even the LOW
+  floor of 0.15 — so the floor, not the beta, decided seven of the eight cases.
+  Rerun from a mid-range baseline, with an assertion that the floor is not
+  deciding.
+
+### Changed
+
+- **`mutation_type` is read from `ConflictKind`, not `resolution_hint`.** The
+  vocabularies do not line up: `merge` and `escalate` are hints with no mutation
+  type, `refine` and `retract` are mutation types with no hint. `kind` also
+  answers the right question — an escalated CONTRADICTION still describes a
+  write that would retire a live fact, and scoring it `coexist` because no hint
+  said `supersede` would price the risk of the *decision* rather than of the
+  write.
+- **`ImpactLevel` now carries two mappings and they are not interchangeable.**
+  `risk_feature` is an input weighed against seven other things at β 2.20;
+  `risk_floor` is applied afterwards and weighed against nothing. A test asserts
+  they differ at every level.
+- **Three of the eight features have no producer anywhere in the repo.**
+  `scope`, `pii_class` and `irreversibility` are named by §3.3 and defined by
+  nothing. Typed as enums so the vocabulary is reviewable in one place and a
+  caller that has not decided must say so; S5.6 passes them.
+- **`RiskBetas` carries a version that `RiskVerdict` has nowhere to store.**
+  §3.3 refits the coefficients weekly, so a stored `R` is only reproducible
+  against the fit that produced it — but §0 gives `RiskVerdict` no version field
+  and `DecisionRecord` carries one for thresholds and policy only. After the
+  first refit `replay_trace.py` would recompute a different `R` and print a diff
+  it cannot explain. **Flagged, not fixed**: a field on a spec-of-record model
+  is an ADR, and S5.5/S5.6 are where it bites.
+
 - **S5.2 — the confidence composite.** `pipeline/l3_score/confidence.py`
   implements `MEMORY_ENGINE.md` §3.2's
   `C = w_H(1-H) + w_g S_src + w_s S_sch + w_c S_cor + w_k S_con`. Pure: no I/O,

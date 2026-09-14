@@ -24,7 +24,13 @@ from collections import Counter
 
 from hypothesis import strategies as st
 
-from guardmem_core.pipeline.l3_score import ConfidenceWeights, MeaningClusters
+from fixtures.strategy_primitives import _ID, _UNIT
+from guardmem_core.pipeline.l3_score import (
+    ConfidenceWeights,
+    MeaningClusters,
+    RiskBetas,
+    RiskFeatures,
+)
 from guardmem_core.schemas import GMModel
 
 __all__ = ["L3_STRATEGIES"]
@@ -96,7 +102,42 @@ def _confidence_weights(draw: st.DrawFn) -> ConfidenceWeights:
     )
 
 
+# The eight features, drawn independently - unlike the two above, nothing here
+# is derived from anything else, and §3.3 bounds each one at [0, 1] on its own.
+_RISK_FEATURES = st.builds(
+    RiskFeatures,
+    impact_declared=_UNIT,
+    mutation_type=_UNIT,
+    scope=_UNIT,
+    graph_fanout=_UNIT,
+    pii_class=_UNIT,
+    irreversibility=_UNIT,
+    source_tier_risk=_UNIT,
+    novelty=_UNIT,
+)
+
+# Logistic-regression coefficients, so deliberately *not* `_UNIT`: they do not
+# sum to anything, and `threshold_tuner.py` refitting from reviewer labels may
+# legitimately return a negative one. Bounded only enough to keep `z` in a range
+# the sigmoid can express, which is what a real fit would produce anyway.
+_BETA = st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+_RISK_BETAS = st.builds(
+    RiskBetas,
+    impact_declared=_BETA,
+    mutation_type=_BETA,
+    scope=_BETA,
+    graph_fanout=_BETA,
+    pii_class=_BETA,
+    irreversibility=_BETA,
+    source_tier_risk=_BETA,
+    novelty=_BETA,
+    bias=_BETA,
+    version=_ID,
+)
+
 L3_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     MeaningClusters: _meaning_clusters(),
     ConfidenceWeights: _confidence_weights(),
+    RiskFeatures: _RISK_FEATURES,
+    RiskBetas: _RISK_BETAS,
 }

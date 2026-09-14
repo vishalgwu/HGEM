@@ -66,6 +66,24 @@ class ImpactLevel(StrEnum):
         """
         return _RISK_FLOORS[self]
 
+    @property
+    def risk_feature(self) -> float:
+        """This level as §3.3's `impact_declared` feature.
+
+        Returns:
+            `MEMORY_ENGINE.md` §3.3's mapping: low 0, medium .33, high .66,
+            critical 1.
+
+        **Not the same numbers as `risk_floor`, and the difference is the
+        point.** This one is an *input* to the linear score, weighted at
+        `beta = 2.20` and traded off against seven other features; the floor is
+        applied afterwards and cannot be traded off against anything. A
+        critical-impact write is therefore expensive twice over - once because
+        it pushes `z` up, and once because `R` can never land below .80
+        whatever the other features say.
+        """
+        return _RISK_FEATURES[self]
+
 
 # Defined after the class because a `StrEnum` body cannot hold a non-member
 # mapping keyed by its own members. Private: `ImpactLevel.risk_floor` is the
@@ -75,6 +93,15 @@ _RISK_FLOORS: dict[ImpactLevel, float] = {
     ImpactLevel.MEDIUM: 0.35,
     ImpactLevel.HIGH: 0.60,
     ImpactLevel.CRITICAL: 0.80,
+}
+
+# §3.3's `impact_declared` feature scale. Evenly spaced where the floors are
+# not, because this one enters a weighted sum and the floors are a safety net.
+_RISK_FEATURES: dict[ImpactLevel, float] = {
+    ImpactLevel.LOW: 0.0,
+    ImpactLevel.MEDIUM: 0.33,
+    ImpactLevel.HIGH: 0.66,
+    ImpactLevel.CRITICAL: 1.0,
 }
 
 

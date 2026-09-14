@@ -3100,6 +3100,78 @@ perfect confidence still scores `R >= 0.80`.
 
 ---
 
+## 2026-09-14 — Day 5 · S5.3 (blast-radius impact risk)
+
+**Shipped**
+
+- **`pipeline/l3_score/impact.py`** — §3.3's linear score, the squash, and the
+  floor by declared impact. `impact_features.py` beside it for the eight
+  features and the vocabularies they come from.
+- **`ImpactLevel.risk_feature`**, beside `risk_floor`, and a test asserting the
+  two differ at every level.
+- **The DONE WHEN**: a CRITICAL candidate benign on every other axis scores
+  0.255 on the linear model and 0.80 after the floor. Both asserted. 905 tests;
+  both new modules at 100% statement and branch coverage.
+
+**What broke / what I learned**
+
+- **A test of mine passed for the wrong reason, and the parametrisation is what
+  showed it.** `test_every_feature_raises_risk_on_its_own` bumped one feature
+  from zero and checked `R` went up. Seven of the eight cases failed — not
+  because the betas were wrong, but because at all-features-zero `z` is -3.4 and
+  a single feature rarely lifts the sigmoid past even the LOW floor of 0.15. The
+  *floor* was deciding, so the test would have passed against almost any beta.
+  My own docstring had claimed LOW impact avoided this. Rerun from a mid-range
+  baseline where `z` is 1.6, with an explicit assertion that the floor is not
+  deciding. Running it per-feature is the only reason I saw it at all; in
+  aggregate it would have passed.
+- **`novelty = 1 - cosine` can exceed 1, and I wrote the clamp only because I
+  went back to check why `ConflictReport.cosine` is bounded at -1.** It is
+  because cosine over unnormalised embeddings is genuinely negative. So a
+  perfectly ordinary retrieval result would have produced a feature of 1.4 and
+  `RiskFeatures` would have raised on it — a validation error from a legitimate
+  input, which is the worst kind because it looks like a bug in the caller.
+- **`mutation_type` has no clean source and I nearly used the wrong one.**
+  `resolution_hint` is the obvious field and it does not fit: `merge` and
+  `escalate` are hints with no mutation type, `refine` and `retract` are
+  mutation types with no hint. Worse, using it would have scored an escalated
+  CONTRADICTION as `coexist` — pricing the risk of the *decision* instead of the
+  write, when what is proposed is retiring a live fact. `ConflictKind` maps
+  cleanly and asks the right question.
+- **Three of the eight features are specified and produced by nothing.**
+  `scope`, `pii_class` and `irreversibility` appear in §3.3's table and in no
+  other document, no ontology field, no extractor. I made them enums with the
+  spec's values rather than float arguments, so the vocabulary is reviewable and
+  a caller has to state a choice instead of passing 0.0 by default. That does
+  not close the gap, it just stops it being invisible.
+- **§3.2's tier inversion propagates into risk.** `source_tier_risk` is
+  `1 - grounding_multiplier`, so a tool output scores *less* risky (0.15) than
+  an unverified human (0.2). Pinned with a test in both modules, so whoever
+  resolves the §3.2-vs-§4 question finds every site that depends on the answer.
+
+**Still open**
+
+- **`RiskVerdict` has nowhere to record which betas produced its `R`.** §3.3
+  refits them weekly and `RiskBetas` carries a `version`; §0 gives the verdict
+  four fields and none of them is it, and `DecisionRecord` versions thresholds
+  and policy only. After the first refit `replay_trace.py` recomputes a
+  different `R` and prints a diff it cannot explain. Needs an ADR; **S5.5**'s
+  audit chain and **S5.6**'s replay are where it bites.
+- **The §3.2 tier-multiplier inversion.** Still awaiting a human call.
+- **`scope`, `pii_class`, `irreversibility` have no producer.** S5.6 passes
+  them; nothing classifies a predicate.
+- Entity resolution, the missing applier, `ExtractionResult.samples` grouping:
+  unchanged.
+
+**Tomorrow's first step**
+
+`S5.4` — the decision matrix. Pure function, no I/O, no clock, no randomness:
+the matrix, then the seven hard overrides in order, with `Thresholds` passed in
+as a value and half-open bands. The DONE WHEN includes invariant I4 — `decide()`
+total and deterministic over `C, R` in `[0,1]²`.
+
+---
+
 ---
 
 ---

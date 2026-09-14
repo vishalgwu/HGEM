@@ -110,7 +110,11 @@ guardmem-ai/
 │   │       │       │                    #   H_norm, and the minority-hallucination drop
 │   │       │       ├── confidence.py    # S5.2; §3.2's five terms, the weight set and
 │   │       │       │                    #   its version. Pure - no I/O, no model call
-│   │       │       ├── impact.py        # blast-radius risk R
+│   │       │       ├── impact.py        # S5.3; §3.3's linear score, sigmoid, then the
+│   │       │       │                    #   impact floor - which is the safety property
+│   │       │       ├── impact_features.py  # S5.3; the eight features. Three of them
+│   │       │       │                    #   (scope, pii_class, irreversibility) are named
+│   │       │       │                    #   by §3.3 and produced by NOTHING yet
 │   │       │       └── decision.py      # DecisionMatrix → AUTO_WRITE|HITL|REJECT|ESCALATE
 │   │       ├── guardrails/
 │   │       │   ├── injection.py         # prompt-injection & instruction-smuggling detect

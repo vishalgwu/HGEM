@@ -2300,8 +2300,66 @@ TIME: 50 min
 Linear score, sigmoid, then floor by declared impact (MEMORY_ENGINE 3.3). Persist the full feature
 dict on the verdict — the review UI renders it, and the tuner refits from it.
 
+**Three corrections to this step, found by building it.**
+
+1. **Three of the eight features have no producer anywhere in this repository.**
+   `scope`, `pii_class` and `irreversibility` are named by §3.3's table and
+   defined by nothing - no ontology field declares them, no extractor emits
+   them, no other document mentions them. They are `StrEnum`s with §3.3's own
+   values rather than bare floats, so the vocabulary is reviewable in one place
+   and a caller that has not decided has to say so. S5.6 passes them until
+   something classifies a predicate.
+2. **`mutation_type` cannot be read from `resolution_hint`.** The two
+   vocabularies do not line up - `merge` and `escalate` are hints with no
+   mutation type, `refine` and `retract` are mutation types with no hint. It is
+   read from `ConflictKind` instead, which maps cleanly and answers the right
+   question: an escalated CONTRADICTION still *describes* a write that would
+   retire a live fact, and scoring it `coexist` because no hint said
+   `supersede` would price the risk of the decision rather than of the write.
+3. **`novelty = 1 - cosine` can exceed 1.** Cosine over unnormalised embeddings
+   is genuinely negative sometimes - `ConflictReport.cosine` is bounded at -1
+   for that reason - so `1 - (-0.4)` is 1.4, a feature outside its own range
+   weighted as more than maximally novel. Clamped. Without it `RiskFeatures`
+   would raise on a legitimate retrieval result.
+
+`ImpactLevel` now carries **two** mappings and they must not be conflated:
+`risk_feature` ({0, .33, .66, 1}) is an input weighed against seven other things
+at beta 2.20, and `risk_floor` ({.15, .35, .60, .80}) is applied afterwards and
+weighed against nothing. A critical write is expensive twice over.
+
+**What §3.3 does not give `RiskVerdict` a place for: the beta version.** §3.3
+has `threshold_tuner.py` refit the coefficients weekly, so a stored `R` is only
+reproducible against the fit that produced it - but `MEMORY_ENGINE.md` §0 gives
+`RiskVerdict` only `impact_level`, `risk`, `features` and `obligations`, and
+`DecisionRecord` carries `thresholds_version` and `policy_version` and nothing
+for beta. `RiskBetas` carries a `version` the way `ConfidenceWeights` does and
+it currently has nowhere to land. After the first refit
+`scripts/replay_trace.py` would recompute a different `R` and print a diff it
+cannot explain. Flagged rather than fixed - adding a field to a spec-of-record
+model is an ADR (`RULES.md` §8), and S5.5 and S5.6 are the steps that feel it.
+
 DONE WHEN: a CRITICAL-impact candidate with perfect confidence still scores R >= 0.80.
 That test is the whole point of separating C from R.
+
+**It does, and the test is written to show why.** "Perfect confidence" is not an
+input - `C` and `R` are separate axes and `score_impact` never sees confidence -
+so in feature terms it is the most benign candidate there is: nothing mutated,
+nothing personal, nothing irreversible, a trusted source, an unremarkable claim
+in a private namespace, and only the declared impact critical. Its linear score
+is **0.255**. The floor lifts it to 0.80, and a sibling test asserts the 0.255
+so the DONE WHEN cannot pass by accident.
+
+**Five mutants, five kills.** Removing the floor fails seven tests including the
+DONE WHEN itself; turning the floor into a cap fails nineteen; the naive
+`1/(1+exp(-z))` fails the overflow test; unclamping `novelty` and defaulting an
+unmapped `ConflictKind` to `coexist` each fail their own.
+
+**A test of mine passed for the wrong reason first.**
+`test_every_feature_raises_risk_on_its_own` measured from all-features-zero,
+where `z` is -3.4 and a single feature rarely lifts the sigmoid past even the
+LOW floor of 0.15 - so the *floor*, not the beta, decided seven of the eight
+cases. Rerun from a mid-range baseline where `z` is 1.6 and the floor cannot
+reach, with an assertion that says so.
 
 COMMIT: `feat(s5.3): blast-radius impact risk`
 
