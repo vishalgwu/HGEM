@@ -17,6 +17,36 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S3.6 — the demo tenant seed, and the end of Day 3.** `make seed` writes one
+  tenant, seven entities and twenty-eight assertions through the *real* write
+  path — `StoreRouter` → `PgVectorStore` → outbox → `OutboxRelay` →
+  `NetworkXGraphStore` — against the clinical ontology. It is the only artifact
+  that runs S3.2 through S3.5 together, which makes it the END OF DAY 3 CHECK in
+  executable form.
+- **Idempotence needed no machinery.** Every id is a `uuid5` of the demo slug
+  and a stable key, so a second run collides at every insert and the
+  `ON CONFLICT DO NOTHING` S3.2 and S3.3 already wrote does the rest. The
+  derived-id decision made twice for the relay's replay reached a third caller
+  unchanged.
+- **Every seeded assertion cites a real span.** Each fact names a turn and
+  quotes it; the seed locates the quote with `span_linker.link_span`, the same
+  function Layer 1 uses, and refuses to write a fact whose quote is not there.
+  `RULES.md` §1.1 has no exemption for demo data, and a fabricated offset would
+  be found by the first person who clicked through to the source.
+- **The transcript contains EHR tool turns because the ontology requires them.**
+  `primary_dx`, `blood_type`, `insurance_plan` and `advance_directive` declare
+  `min_source_tier: trusted_system`, and a patient reporting their own blood
+  group is a `verified_user`. The seed checks each fact's tier against the pack
+  and stops if it is too weak — making S3.6 the first consumer of S3.5.
+- **Two facts are superseded**, by a three-turn follow-up call five months
+  later. `ARCHITECTURE.md` §0's "nothing is deleted; contradiction resolves by
+  supersession + tombstone" is the product's central claim, and a seed with no
+  retired fact cannot demonstrate it.
+- **`make typecheck` and the pre-commit mypy hook now cover `scripts/`.** It
+  paid for itself on the first run: the seed built an inferred
+  `dict[TurnId, Turn]` and passed it where `dict[str, Turn]` was declared, which
+  `dict`'s invariant key type makes an error and `NewType`'s runtime erasure
+  makes invisible. 619 tests, 100% coverage. Three mutants, three kills.
 - **S3.5 — the ontology loader and the clinical starter pack.**
   `schemas/ontology.py` validates a YAML pack into typed objects —
   `Ontology`, `PredicateSpec`, and an `ObjectSpec` union of `ScalarObject`,

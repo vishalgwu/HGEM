@@ -2361,6 +2361,96 @@ of everything Day 3 built.
 
 ---
 
+## 2026-09-13 — Day 3 · S3.6 (demo tenant seed) · END OF DAY 3
+
+**Shipped**
+
+- `scripts/seed_demo_tenant.py` + `scripts/demo_tenant_data.py` — `make seed`.
+  One tenant, seven entities, twenty-eight assertions with real provenance
+  spans, two of them superseded, written through the real path and released by
+  the real relay.
+- `make typecheck` and the pre-commit mypy hook widened to `scripts/`.
+- `tests/integration/test_seed_demo_tenant.py` — the DONE WHEN plus the END OF
+  DAY 3 CHECK. 619 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **The idempotence requirement turned out to already be satisfied, and that is
+  the best thing about this step.** I sat down expecting to write "does this row
+  exist?" before every insert. None of it was needed: ids derived with `uuid5`
+  meant the second run collided at every insert and the
+  `ON CONFLICT DO NOTHING` from S3.2 and S3.3 absorbed it. The derived-id
+  decision has now paid off three times — provenance at S3.2, the outbox row at
+  S3.3, and here — and each time the *caller* got simpler rather than the
+  storage getting cleverer. That is the shape of a good invariant.
+
+- **The ontology refused four of my facts, and it was right.** I wrote
+  `primary_dx`, `blood_type`, `insurance_plan` and `advance_directive` sourced
+  from the patient, because that is who was talking. The pack declares
+  `min_source_tier: trusted_system` for all four, and the seed's own check threw
+  before a single row was written: *"blood-type: source tier verified_user is
+  weaker than blood_type's declared minimum trusted_system"*. The fix is not to
+  relax the pack — it is that the transcript should contain the record the
+  clinician is reading from, which is both more realistic and the reason those
+  tiers exist. **S3.5 earned its keep about ninety minutes after it landed**,
+  which is the fastest any of these declarations has been vindicated.
+
+- **A seed with no retired fact cannot demonstrate the product.** The step asks
+  for "~30 existing assertions" and says nothing about supersession, but
+  `ARCHITECTURE.md` §0's central claim is that nothing is deleted and
+  contradiction resolves by supersession. A demo database with no `valid_to` set
+  anywhere has no point-in-time query worth running. Three extra turns — a
+  follow-up call five months later — buy two retired facts and the whole
+  bitemporal story.
+
+- **`mypy --strict` over `scripts/` caught a real bug in its first run.** The
+  seed built its turn lookup as an inferred `dict[TurnId, Turn]` and handed it
+  to a function declared `dict[str, Turn]`. `dict` is invariant in its key, so
+  that is an error; `NewType` erases at runtime, so nothing would ever have
+  failed. It is the same class of find S1.7 got when `tests/` joined the target,
+  and the same argument applies to a script that writes to the database: the
+  widening cost one word in the Makefile.
+
+- **The stdout was idempotent and still misleading.** It said "28 written" on a
+  re-run where nothing was written. Now it says "submitted", which is what
+  actually happens: all twenty-eight are handed to the store and none of them
+  land. The DONE WHEN only constrains row counts, and a script whose report
+  contradicts its own behaviour would satisfy it.
+
+- **All twenty-eight quotes match exactly, which I checked rather than assumed.**
+  `link_span` tries an exact `find` first and falls back to a fuzzy pass above
+  §1.3's threshold of 92, so a quote retyped from memory rather than copied out
+  of the turn would still resolve — at an alignment below 1.0, quietly. Measured:
+  zero unmatched, zero non-exact. Worth knowing in both directions, because it
+  also means **the seed does not exercise the fuzzy path at all** and cannot
+  stand in for a test of it.
+
+**Still open**
+
+- **Seeded vectors are reproducible noise and seeded confidence is a
+  placeholder.** There is no `Embedder` in the package until **S9.1**, so the
+  seed hashes text into a unit vector — identical text embeds identically and
+  nothing else is modelled. Layer 3 does not exist, so `confidence` is a
+  constant. Only `risk` is real, and only because it is §3.3's impact floor.
+  **Nothing about retrieval quality or calibration may be measured on seed
+  data**; that is the nightly eval suite's job, against a labelled corpus.
+- The transcript lives under `scripts/`, which the ownership table forbids
+  `evals/*` from importing. When **S22**'s eval harness wants the same forty
+  turns, it moves to a shared location rather than being copied.
+- The graph the seed builds is in-process and dies with the script. That is what
+  `NetworkXGraphStore` is; **S7.1**'s Neo4j backend is the first durable one.
+- No audit events. The §2.4 diagram puts one in the write transaction; the hash
+  chain arrives at its own step, and a half-built chain verifies nothing.
+
+**Tomorrow's first step**
+
+`S4.1` — the schema gate. It is the first real consumer of the ontology: coerce
+a candidate's object against the declared value type, and send an unknown
+predicate to the `quarantine` namespace rather than rejecting it. Day 4 is
+Layer 2.
+
+---
+
 ---
 
 <!--

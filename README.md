@@ -11,7 +11,8 @@
 > (noise filter, K-sample extractor, span linker), and from S3.1–S3.5 the
 > bitemporal Postgres schema, the pgvector store over it, the outbox that
 > coordinates the dual write, the graph store on the other side of it, and the
-> ontology that says what a predicate is allowed to mean:
+> ontology that says what a predicate is allowed to mean, with `make seed`
+> putting all of it together:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -163,7 +164,8 @@ stack it actually requires.
 
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
-Layer 1 is complete (S2.1 – S2.3), and the storage layer is in through **S3.5**.
+Layer 1 is complete (S2.1 – S2.3), and the storage layer is complete — **Day 3
+is done, S3.1 – S3.6**.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -235,10 +237,25 @@ score so a confident write to a critical field cannot auto-write on confidence
 alone. Nothing consumes it yet — the schema gate is the first consumer, and it
 is Layer 2.
 
+S3.6 puts all of it together. `make seed` writes one tenant, seven entities and
+twenty-eight assertions through the real path — router, store, outbox, relay,
+graph store, ontology — from a forty-turn synthetic intake call, and every
+seeded fact cites a real character span in the turn it was quoted from. Two of
+them are superseded by a follow-up call five months later, so the demo database
+contains a point-in-time query worth running. Running it twice changes nothing:
+every id is derived from a stable key, which is the same property the outbox
+relay's replay needed.
+
+Two caveats about seeded data, stated here because they are easy to forget. The
+vectors come from a deterministic hash — there is no embedding provider until
+S9.1 — so nothing about retrieval quality can be measured on them. And
+`confidence` is a placeholder, because Layer 3 does not exist yet; only `risk`
+is real, and only because it is the impact floor the ontology declares.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S3.6, the seed script — the first thing that puts a
-tenant, an ontology and a set of assertions together.
+push. The next step is S4.1, the schema gate — the first component of Layer 2,
+and the first real consumer of the ontology.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

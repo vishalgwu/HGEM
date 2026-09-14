@@ -1746,11 +1746,72 @@ TIME: 30 min
 Creates one tenant, one patient entity, ~30 existing assertions, and a 40-turn synthetic intake
 transcript you will reuse all month.
 
+**Five corrections to this step, found by building it.**
+
+1. **Idempotence needed no machinery, and that is the result worth recording.**
+   The DONE WHEN sounds like it wants an existence check before each insert. It
+   does not: every id is a `uuid5` of the demo slug and a stable key, so the
+   second run collides at every insert and the `ON CONFLICT DO NOTHING` that
+   S3.2 and S3.3 already wrote does the rest. The derived-id decision made twice
+   for the relay's replay reached its third caller unchanged.
+2. **Every seeded assertion cites a real span, located by `link_span`.** The
+   step says "~30 existing assertions" and does not say where their provenance
+   comes from - but `RULES.md` §1.1 has no exemption for demo data, and a seeded
+   fact with a fabricated offset would be discovered by the first person who
+   clicked through to the source. So each fact names a turn and quotes it, the
+   seed locates the quote with the same function Layer 1 uses, and a quote that
+   is not there stops the seed.
+3. **The transcript needs EHR tool turns, because the ontology refuses the
+   alternative.** `primary_dx`, `blood_type`, `insurance_plan` and
+   `advance_directive` declare `min_source_tier: trusted_system`, and a patient
+   saying their own blood group is a `verified_user`. Either those predicates go
+   unseeded or the transcript contains the record the clinician is reading from.
+   The second is both more realistic and the ontology doing exactly its job -
+   and the seed checks the tier against the pack, so the constraint is enforced
+   rather than remembered. This makes S3.6 the first consumer of S3.5.
+4. **Seed more than one entity.** "One patient entity" leaves every
+   `entity_ref` object pointing at nothing, which is a demo that misrepresents
+   the model it demonstrates. The patient plus the six entities its facts
+   reference is seven rows and a coherent graph.
+5. **Two facts are superseded, and the step does not ask for it.**
+   `ARCHITECTURE.md` §0's "nothing is deleted; contradiction resolves by
+   supersession + tombstone" is the product's central claim, and a seed with no
+   retired fact cannot demonstrate it. A three-turn follow-up call five months
+   later moves the address and the pharmacy - both `ONE_PER_TIME` - so the demo
+   database contains a point-in-time query worth running. This is also the one
+   place the seed is not idempotent by construction: `supersede` matches zero
+   rows on a re-run and raises `ConcurrencyConflict`, which is caught and
+   counted as already done.
+
 DONE WHEN: `make seed` is idempotent — running it twice leaves the same row count.
+
+Run it as a **subprocess** in the test, not by importing `seed()`. The claim is
+about `make seed`, and a test that awaits the function is a test of something
+that resembles the command; `tests/fixtures/postgres.py` runs `alembic upgrade
+head` the same way for the same reason.
+
+Three mutants, three kills: `uuid4` assertion ids kill the idempotence test,
+removing the relay call kills the visibility test, and demoting one critical
+fact's source tier stops the seed before it writes anything - with a message
+naming the predicate, the tier and the pack.
 
 COMMIT: `feat(s3.6): demo tenant seed`
 
 END OF DAY 3 CHECK: you can write an assertion to Postgres and read it back with provenance.
+
+`make seed` **is** that check, executable. It is the only artifact that runs
+S3.2 through S3.5 together - router, store, outbox, relay, graph store and
+ontology - and `tests/integration/test_seed_demo_tenant.py` asserts the result:
+every seeded fact visible, every one carrying a non-empty span into the turn it
+was quoted from, four distinct impact floors, and the two retired rows still
+present with `valid_to` exactly equal to their successor's `valid_from`.
+
+Two things about seeded data that must not be measured. The vectors come from a
+deterministic hash embedder, because there is no `Embedder` in the package until
+S9.1 - identical text embeds identically and nothing else is modelled, so
+retrieval quality is meaningless here. And `confidence` is a placeholder,
+because Layer 3 does not exist; only `risk` is real, and only because it is the
+impact floor §3.3 declares.
 
 ---
 

@@ -37,7 +37,7 @@ help:
 	@echo   fmt - apply ruff fixes and formatting
 	@echo   lint - ruff check, ruff format --check, import-linter contracts
 	@echo   imports - import-linter contracts only
-	@echo   typecheck - mypy --strict on guardmem-core
+	@echo   typecheck - mypy --strict on guardmem-core, tests and scripts
 	@echo   test - unit and property suites with coverage
 	@echo   test-all - every suite with coverage
 	@echo   audit - pip-audit over the installed dependency set
@@ -75,8 +75,14 @@ imports:
 # immediately: the first run found fourteen places where the test suite passed a
 # raw `str` into a field declared `CandidateId` or `TenantId`, which is the
 # exact mistake RULES.md 2.1 introduced those types to prevent.
+#
+# `scripts` joined at S3.6, the step that gave this repo its first script that
+# imports guardmem_core and writes to the database. It paid for itself on the
+# first run: the seed built its turn lookup as an inferred dict[TurnId, Turn]
+# and passed it to a function declared dict[str, Turn], which dict's invariant
+# key type makes an error and NewType's runtime erasure makes invisible.
 typecheck:
-	$(UV) mypy $(CORE_SRC) tests
+	$(UV) mypy $(CORE_SRC) tests scripts
 
 # Bare `--cov`, not `--cov=guardmem_core`. The package to measure is already
 # declared once as `source_pkgs` in pyproject.toml, and naming it again on the

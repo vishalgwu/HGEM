@@ -259,7 +259,8 @@ guardmem-ai/
 │   │   ├── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
 │   │   ├── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of
 │   │   ├── test_outbox_enqueue.py       #   S3.3; the assertion and its event, one transaction
-│   │   └── test_outbox_relay.py         #   S3.3 DONE WHEN: killed mid-flight, visible once
+│   │   ├── test_outbox_relay.py         #   S3.3 DONE WHEN: killed mid-flight, visible once
+│   │   └── test_seed_demo_tenant.py     #   S3.6 DONE WHEN: `make seed` twice, same row count
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
@@ -280,9 +281,10 @@ guardmem-ai/
 │                                        #   The ONLY conftest: a second one is a duplicate
 │                                        #   module name and mypy refuses the pair (S3.2)
 │
-├── scripts/
+├── scripts/                             # in scope for `make typecheck` from S3.6
 │   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths
-│   ├── seed_demo_tenant.py
+│   ├── seed_demo_tenant.py              # S3.6; `make seed` - the END OF DAY 3 CHECK, executable
+│   ├── demo_tenant_data.py              # S3.6; the 40-turn transcript and the facts it sources
 │   ├── replay_trace.py                  # deterministic re-run of any audited decision
 │   └── threshold_tuner.py               # fit τ/ρ from labelled reviewer decisions
 │
@@ -303,6 +305,7 @@ guardmem-ai/
 | `services/*` | `guardmem-core`, its own framework | another service's internals |
 | `apps/dashboard` | `@guardmem/sdk` via BFF only | direct DB/store access |
 | `evals/*` | `guardmem-core`, `guardmem-sdk-python` | `services/*` internals |
+| `scripts/*` | `guardmem-core`, stdlib | `services/*` and `tests/*` internals |
 
 **One-way arrow:** `apps → services → packages → stores`. A cycle fails CI (`import-linter` contract in `pyproject.toml`).
 
