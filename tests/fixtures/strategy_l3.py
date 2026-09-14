@@ -24,7 +24,7 @@ from collections import Counter
 
 from hypothesis import strategies as st
 
-from guardmem_core.pipeline.l3_score import MeaningClusters
+from guardmem_core.pipeline.l3_score import ConfidenceWeights, MeaningClusters
 from guardmem_core.schemas import GMModel
 
 __all__ = ["L3_STRATEGIES"]
@@ -67,6 +67,36 @@ def _meaning_clusters(draw: st.DrawFn) -> MeaningClusters:
     return _clusters(labels)
 
 
+@st.composite
+def _confidence_weights(draw: st.DrawFn) -> ConfidenceWeights:
+    """Draw five weights that sum to 1.
+
+    `ConfidenceWeights` validates the sum, so an independent draw across five
+    `[0, 1]` floats is rejected for all but a measure-zero set of examples -
+    hypothesis would spend its budget being filtered out. Drawn as five
+    non-negative shares and normalised instead, which is the same construction
+    argument `_meaning_clusters` makes: generate what the model accepts rather
+    than generate-and-discard.
+
+    Integer shares so the division is over exact values; the result still only
+    sums to 1 within float tolerance, which is what the validator allows for.
+    """
+    shares = [draw(st.integers(min_value=0, max_value=100)) for _ in range(5)]
+    if not any(shares):
+        shares[draw(st.integers(min_value=0, max_value=4))] = 1
+    total = sum(shares)
+    uncertainty, grounding, schema_fit, corroboration, consistency = (s / total for s in shares)
+    return ConfidenceWeights(
+        uncertainty=uncertainty,
+        grounding=grounding,
+        schema_fit=schema_fit,
+        corroboration=corroboration,
+        consistency=consistency,
+        version=draw(st.text(min_size=1, max_size=8)),
+    )
+
+
 L3_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     MeaningClusters: _meaning_clusters(),
+    ConfidenceWeights: _confidence_weights(),
 }

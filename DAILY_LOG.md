@@ -3028,6 +3028,78 @@ report, and `S_cor = 1 - exp(-0.8(n-1))` checked against 0.0 / 0.55 / 0.80 /
 
 ---
 
+## 2026-09-14 — Day 5 · S5.2 (confidence composite)
+
+**Shipped**
+
+- **`pipeline/l3_score/confidence.py`** — §3.2's five terms, `V1_WEIGHTS`, and
+  the weight set that refuses to sum to anything but 1. Pure: the entailment
+  `S_src` needs is an argument, not a model call.
+- **`SourceTier.grounding_multiplier`**, beside `at_least`, because it is a fact
+  about the tier.
+- **The DONE WHEN both ways**: each term pinned with the whole weight on it and
+  the rest zeroed, plus the sum-to-1 assertion. `S_cor` reproduces the step's
+  0.0 / 0.55 / 0.80 / 0.91. 836 tests; `confidence.py` at 100% statement and
+  branch coverage.
+
+**What broke / what I learned**
+
+- **The spec's own formula scores a contradiction as perfectly consistent, and
+  I nearly implemented it.** §3.2 says `S_con = 1 - contra`. But S4.3 writes
+  `contradiction = 0.0` on any conflict the deterministic checks settled, on
+  purpose, because a made-up number would read as a measurement. Put those two
+  together and a candidate that directly clashes with a live `ONE` predicate
+  scores `1 - 0.0 = 1.0` — the maximum consistency score, awarded to the one
+  case that is definitionally inconsistent with memory. The zero means *nobody
+  measured*, and nothing downstream can tell that apart from *measured zero*. I
+  had written the literal version and the test I wrote next — "a cardinality
+  clash scores below a novel fact" — is what made me look.
+- **Two of my own tests were wrong before the code was.** A weight of 1.1 never
+  reaches the sum validator, because the field's own `le=1.0` bound rejects it
+  first; the test had to spread 1.1 across two fields to test what it claimed
+  to. And `corroboration(1000) < 1.0` failed because the term saturates — which
+  led to the next one.
+- **I estimated the saturation point and was wrong by a factor of twenty.** I
+  reasoned that `1 - exp(-0.8(n-1))` hits 1.0 where `exp` underflows, around
+  n = 930. It actually hits 1.0 at **n = 48**, where the remainder drops below
+  the epsilon of 1.0 — a different and much earlier limit. I only found out
+  because I measured instead of writing the estimate into the test. Harmless in
+  itself, but the reasoning was the kind that reads as authoritative and is not,
+  so the measured number is pinned with a note saying it was measured.
+- **A mutant showed a test suite that could not see a transposition.** Swapping
+  `w_g` and `w_s` failed exactly one test — the one that reads the weights
+  literally. Every composite test had grounding and schema_fit both at 1.0, so
+  the arithmetic genuinely could not notice which weight went where. Added a
+  case with five distinct term values checked against the hand-computed result.
+- **§3.2's tier multipliers contradict `RULES.md` §4's ordering.** §4 ranks an
+  unverified human above a tool output; §3.2 scores the tool output higher (0.85
+  against 0.8). I implemented both as written, because they answer different
+  questions — authority against textual support — and pinned the inversion with
+  a test so nobody "fixes" it on the assumption that one ordering governs both.
+  **This one wants a human decision**: if it is a typo, it belongs fixed in the
+  spec, not worked around here.
+
+**Still open**
+
+- **The tier-multiplier inversion** above. Flagged, not resolved.
+- **`S_src`'s entailment has no producer.** The module takes it as a number and
+  nothing computes it yet: it needs an NLI call over (verbatim span, claim), and
+  the claim has no natural-language rendering — `embed_text` renders
+  `predicate: object` for vectors, which is not a sentence to entail. S5.6.
+- **`sources` likewise has no producer.** A fresh candidate has one citation, so
+  `S_cor` is 0.0 for everything until a merge raises `corroboration_count`.
+- Entity resolution, the missing applier, `ExtractionResult.samples` grouping:
+  all unchanged.
+
+**Tomorrow's first step**
+
+`S5.3` — impact risk: the linear score, the sigmoid, then the floor by declared
+impact, with the whole feature dict persisted. The DONE WHEN is the one that
+makes the point of separating `C` from `R`: a CRITICAL-impact candidate with
+perfect confidence still scores `R >= 0.80`.
+
+---
+
 ---
 
 ---

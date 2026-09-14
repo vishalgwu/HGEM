@@ -63,6 +63,45 @@ class SourceTier(StrEnum):
         order = list(SourceTier)
         return order.index(self) <= order.index(floor)
 
+    @property
+    def grounding_multiplier(self) -> float:
+        """This tier's multiplier in §3.2's `S_src` term.
+
+        Returns:
+            `MEMORY_ENGINE.md` §3.2's value: trusted 1.0, verified 0.95,
+            unverified 0.8, tool 0.85, web 0.6.
+
+        Here rather than in `l3_score/confidence.py` for the reason
+        `ImpactLevel.risk_floor` is on `ImpactLevel`: it is a fact about the
+        tier, and the one previous copy of a source-tier fact living a file away
+        from the enum is what `at_least` above exists to stop happening again.
+
+        **These do not rank in the same order as `at_least`, and that is §3.2's
+        table rather than a transcription slip.** `RULES.md` §4 orders
+        `UNVERIFIED_USER` *above* `TOOL_OUTPUT`, while the multipliers give a
+        tool output more grounding (0.85) than an unverified human (0.8). The
+        two questions are genuinely different - `at_least` answers "may this
+        source auto-write a predicate of this impact?", which is about
+        authority, and this answers "how much does the span support the claim?",
+        which is about the text. A tool's output is machine-generated and
+        literal; an unverified human's is neither. They are still worth reading
+        together before either is changed, because a reader who assumes one
+        ordering governs both will be wrong about one of them.
+        """
+        return _GROUNDING_MULTIPLIERS[self]
+
+
+# Defined after the class for the same reason `_RISK_FLOORS` is: a `StrEnum`
+# body cannot hold a non-member mapping keyed by its own members. Private, so a
+# caller cannot reach for a multiplier by string and miss the enum.
+_GROUNDING_MULTIPLIERS: dict[SourceTier, float] = {
+    SourceTier.TRUSTED_SYSTEM: 1.0,
+    SourceTier.VERIFIED_USER: 0.95,
+    SourceTier.UNVERIFIED_USER: 0.8,
+    SourceTier.TOOL_OUTPUT: 0.85,
+    SourceTier.RETRIEVED_WEB: 0.6,
+}
+
 
 class Provenance(GMModel):
     """Where a claim came from, exactly.

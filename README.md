@@ -169,7 +169,8 @@ baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Layer 3 has begun (S5.1)** with semantic entropy.
+it — and **Layer 3 has begun (S5.1 – S5.2)** with semantic entropy and the
+confidence composite.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -341,6 +342,22 @@ implies a broader one — "allergic to penicillin and amoxicillin" implies
 "allergic to penicillin" — so a one-way test would fold a specific answer into a
 vague one and report agreement where the model had actually given two different
 answers.
+
+S5.2 combines that with four other signals into a single confidence score: how
+consistently the model answered, whether the quoted source actually supports the
+claim and how far that source is trusted, how cleanly the fact fits the schema,
+how many independent sources say it, and whether it sits well with what is
+already on record. Each is kept alongside the total rather than collapsed into
+it, because a reviewer needs to see *which* signal was weak, and because the
+weights are meant to be refitted from real decisions later.
+
+Two of those deserve naming. Corroboration counts independent sources, not
+citations — quoting one planted document three times is one source, and the
+distinction is what stops a confidence score being inflated by repetition. And a
+fact that conflicts with live memory scores zero on the consistency term even
+when no model was asked to judge it, because a conflict the system caught by
+arithmetic is still a conflict; reading the unmeasured value as agreement would
+have awarded a contradiction full marks.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

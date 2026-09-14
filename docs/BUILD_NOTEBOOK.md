@@ -2231,7 +2231,62 @@ need to know which decisions used which.
 v1 weights are 0.35 / 0.25 / 0.10 / 0.15 / 0.15. Check `S_cor = 1 - exp(-0.8*(n_sources - 1))`
 returns 0.0 / 0.55 / 0.80 / 0.91 for 1 / 2 / 3 / 4 sources.
 
+**Three corrections to this step, found by building it.**
+
+1. **`S_con = 1 - contra` awards a perfect score to the one candidate that
+   definitionally clashes with memory.** §2.2's (b) and (c) settle a CARDINALITY
+   or TEMPORAL_OVERLAP conflict without a judge, so S4.3 writes
+   `contradiction = 0.0` on those reports deliberately - "a fabricated 0.9 would
+   read as a measurement". Read literally, §3.2 then computes `1 - 0.0 = 1.0`:
+   full marks for consistency with live memory, handed to a fact that directly
+   contradicts a live `ONE` predicate. The zero is an *absence of measurement*,
+   not a measurement of absence, and downstream nothing can tell the two apart.
+   Those kinds score 0.0. It costs at most `w_k` (0.15) and pushes a conflicting
+   fact toward review rather than away from it.
+2. **§3.2's source-tier multipliers do not rank in `RULES.md` §4's order.** §4
+   puts `UNVERIFIED_USER` above `TOOL_OUTPUT`; the multipliers give the tool
+   output more grounding (0.85) than the unverified human (0.8). Implemented as
+   §3.2 states it, and pinned by a test that says so, because the two questions
+   are different - §4 is about *authority* (what may auto-write), §3.2 about how
+   literally a span supports a claim. Worth a look from whoever owns the spec:
+   if the inversion is a typo it should be fixed there, not here.
+3. **The fuzzy-match penalty's form is unspecified.** §3.2 says one is "applied
+   if span alignment < 1.0" and never says what. Multiplying by `alignment` is
+   the reading taken: a no-op at exactly 1.0, monotonic, so a looser quote never
+   scores higher. Recorded as a choice rather than presented as the spec's.
+
+`S_sch` is *carried*, not recomputed - S4.1's schema gate already emits §3.2's
+scale (1.0 exact, 0.7 coerced, 0.4 unknown), which closes the open item that
+`GatedCandidate.schema_fit` was written and never read. `S_src`'s entailment is
+an *argument* rather than a model call, so this module stays pure the way S5.4
+requires `decide()` to be.
+
 DONE WHEN: unit tests pin each term independently; a test asserts weights sum to 1.0.
+
+**Both, and "independently" is doing real work.** Each term is pinned with the
+whole weight on it and the other four zeroed, so `C` *is* that term - a test
+that varied one term under the real weights would move `C` by 0.35 or 0.10 and
+pass just as well against a composite with two terms transposed. The sum-to-1
+check is on `V1_WEIGHTS`, and `ConfidenceWeights` refuses any set that breaks it:
+over 1.0 produces a `C` above 1.0 on some inputs and not others, under 1.0 caps
+confidence below every threshold it is compared against, and neither raises on
+its own.
+
+S5.2's own check - `S_cor` returning 0.0 / 0.55 / 0.80 / 0.91 for one to four
+sources - reproduces exactly.
+
+**Five mutants, five kills**: using `H_norm` unflipped, letting the
+deterministic conflicts read their placeholder zero, dropping the alignment
+factor, and transposing `w_g` with `w_s` each fail their own tests. The
+transposition was caught by only *one* test at first - the composite cases left
+grounding and schema_fit both at 1.0, so the arithmetic could not notice - and
+`test_each_weight_is_applied_to_its_own_term` was added to close that.
+
+**Measured rather than estimated:** `S_cor` reaches exactly 1.0 in float64 at
+**n = 48** sources, where the remainder falls under the epsilon of 1.0. My first
+estimate said ~930, reasoning about `exp` underflow instead. Harmless - 1.0 is
+inside the declared bound and 48 independent sources is maximal corroboration -
+but pinned, so it stays a known property.
 
 COMMIT: `feat(s5.2): confidence composite scorer`
 

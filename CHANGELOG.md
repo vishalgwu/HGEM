@@ -17,6 +17,54 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.2 — the confidence composite.** `pipeline/l3_score/confidence.py`
+  implements `MEMORY_ENGINE.md` §3.2's
+  `C = w_H(1-H) + w_g S_src + w_s S_sch + w_c S_cor + w_k S_con`. Pure: no I/O,
+  no clock, no settings read inside the function, because this is the arithmetic
+  a `DecisionRecord` has to be replayable against.
+- **All five terms are persisted, not just `C`** — §3.2's own reason is that the
+  review UI renders the breakdown and `threshold_tuner.py` refits from it, and a
+  single scalar makes both impossible.
+- **`ConfidenceWeights` carries its own version**, so a report cannot claim a
+  version its numbers did not come from, and refuses any set that does not sum
+  to 1. That is load-bearing rather than tidy: every term is in [0, 1], so
+  weights summing to 1 are exactly what keeps `C` in [0, 1].
+- **`SourceTier.grounding_multiplier`**, beside `at_least` and for the reason
+  `ImpactLevel.risk_floor` sits on `ImpactLevel` — it is a fact about the tier,
+  and the last source-tier fact that lived a file away from the enum is what
+  `at_least` exists to prevent.
+- **`S_cor` reproduces the step's stated check exactly**: 0.0 / 0.55 / 0.80 /
+  0.91 for one to four sources.
+- **Five mutants, five kills.** The transposed-weights mutant was caught by only
+  one test at first — the composite cases left grounding and schema_fit both at
+  1.0, so the arithmetic could not notice — and a test pairing five distinct
+  term values against the hand-computed result was added to close it.
+  836 unit and property tests passing locally; `confidence.py` at 100%
+  statement and branch coverage.
+
+### Changed
+
+- **`S_con` departs from §3.2 for the conflicts settled without a judge.** §3.2
+  defines it as `1 - contra`, but `conflict.py` writes `contradiction = 0.0` on
+  a CARDINALITY or TEMPORAL_OVERLAP report because nothing measured it — S4.3's
+  deliberate choice, since "a fabricated 0.9 would read as a measurement". Read
+  literally, that hands a candidate clashing with a live `ONE` predicate a
+  *perfect* consistency score. Those kinds score 0.0; an absence of measurement
+  is not a measurement of absence.
+- **§3.2's tier multipliers invert `RULES.md` §4's trust ordering**, and both are
+  implemented as written. §4 ranks `UNVERIFIED_USER` above `TOOL_OUTPUT`; the
+  multipliers score the tool output higher (0.85 against 0.8). The questions
+  differ — §4 is about authority, §3.2 about how literally a span supports a
+  claim — so both stand, with a test pinning the inversion so it is not
+  "corrected" by someone assuming one ordering governs both. **Worth a review by
+  whoever owns the spec**: if it is a typo it belongs fixed there.
+- **The fuzzy-match penalty's form is this step's choice.** §3.2 says one is
+  "applied if span alignment < 1.0" and never says what. Multiplying by
+  `alignment` is a no-op at 1.0 and monotonic, so a looser quote never scores
+  higher.
+- **`GatedCandidate.schema_fit` finally has a reader.** S4.1 already emits
+  §3.2's `S_sch` scale, so this carries it rather than recomputing it.
+
 - **S5.1 — semantic entropy over meaning clusters.**
   `pipeline/l3_score/entropy.py` implements `MEMORY_ENGINE.md` §3.1: the K
   samples are partitioned by **bidirectional** entailment and the entropy is

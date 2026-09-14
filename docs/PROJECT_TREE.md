@@ -108,7 +108,8 @@ guardmem-ai/
 │   │       │   └── l3_score/
 │   │       │       ├── entropy.py       # S5.1; §3.1 bidirectional-entailment clusters,
 │   │       │       │                    #   H_norm, and the minority-hallucination drop
-│   │       │       ├── confidence.py    # weighted confidence composite C
+│   │       │       ├── confidence.py    # S5.2; §3.2's five terms, the weight set and
+│   │       │       │                    #   its version. Pure - no I/O, no model call
 │   │       │       ├── impact.py        # blast-radius risk R
 │   │       │       └── decision.py      # DecisionMatrix → AUTO_WRITE|HITL|REJECT|ESCALATE
 │   │       ├── guardrails/
