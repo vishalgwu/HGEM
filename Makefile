@@ -149,7 +149,7 @@ migrate:                    ## S3.1
 	$(UV) alembic upgrade head
 
 seed:                       ## S3.6
-	$(UV) python scripts/seed_demo_tenant.py
+	$(UV) python -m scripts.seed_demo_tenant
 
 eval:                       ## S22.1
 	$(UV) python evals/runners/run_suite.py --all

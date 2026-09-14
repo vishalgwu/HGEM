@@ -94,6 +94,10 @@ guardmem-ai/
 │   │       │   │   ├── noise_filter.py  # S2.1; rules tier + one batched FAST call
 │   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
 │   │       │   │   └── span_linker.py   # S2.3; SpanMatch, exact then fuzzy >= 92, snapped
+│   │       │   ├── orchestrator.py   # S5.6; run() - one proposal, every layer. Writes
+│   │       │   │                    #   NOTHING: the audit/write transaction is unowned
+│   │       │   ├── deps.py           # S5.6; Deps + the 3 protocols NOTHING implements
+│   │       │   ├── inputs.py         # S5.6; the joins between stages, each pure
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # S4.1; pass / coerce / quarantine / reject against
 │   │       │   │   │                    #   the tenant ontology, carrying S_sch forward
@@ -337,7 +341,9 @@ guardmem-ai/
 │   ├── normalise_secrets_baseline.py    # pre-commit: POSIX-ify .secrets.baseline paths
 │   ├── seed_demo_tenant.py              # S3.6; `make seed` - the END OF DAY 3 CHECK, executable
 │   ├── demo_tenant_data.py              # S3.6; the 40-turn transcript and the facts it sources
-│   ├── replay_trace.py                  # deterministic re-run of any audited decision
+│   ├── replay_trace.py                  # S5.6; re-runs decide() from the audit chain and
+│   │                                    #   diffs. NOT the model calls - see its docstring
+│   ├── __init__.py                      # S5.6; a package, so mypy sees one module name
 │   └── threshold_tuner.py               # fit τ/ρ from labelled reviewer decisions
 │
 └── .github/workflows/

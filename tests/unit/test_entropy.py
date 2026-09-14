@@ -144,6 +144,75 @@ class TestTheEdgesOfTheFormula:
             semantic_entropy([], by_meaning)
 
 
+class TestAbstentions:
+    """A sample that proposed nothing for this `(subject, predicate)` is `None`.
+
+    S5.6's correction to this step: `ExtractionResult.samples` holds K draws and
+    not every draw proposes every fact, so `K` is the *draw* count and the gaps
+    are abstentions. See the module docstring for why they are not dropped.
+    """
+
+    @pytest.mark.parametrize(
+        ("samples", "expected"),
+        [
+            (["A", "A", "A", "A", "A"], 0.0),
+            (["A", "A", "A", "A", None], 0.3109),
+            (["A", "A", "A", None, None], 0.5904),
+            (["A", "A", None, None, None], 0.8277),
+            (["A", None, None, None, None], 1.0),
+        ],
+    )
+    def test_entropy_rises_as_support_falls(
+        self, samples: list[str | None], expected: float
+    ) -> None:
+        """The property that made the first implementation wrong.
+
+        Fewer draws proposing the fact must mean more uncertainty, monotonically.
+        """
+        assert cluster_meanings(samples, literal).entropy == pytest.approx(expected, abs=0.0005)
+
+    def test_abstentions_do_not_cluster_with_each_other(self) -> None:
+        """The bug this class exists for, stated as the mechanism.
+
+        Clustering the silent draws together makes one claim against four
+        abstentions a 0.2/0.8 split - low spread, so *low* entropy - and a fact
+        one sample proposed scores more confident than one three samples agreed
+        on. `same_meaning` is bidirectional entailment; an abstention asserts no
+        proposition and so entails nothing, including another abstention.
+        """
+        clusters = cluster_meanings([None, None, None], literal)
+
+        assert clusters.labels == [0, 1, 2]
+        assert clusters.entropy == pytest.approx(1.0)
+
+    def test_one_of_five_is_not_more_confident_than_three_of_five(self) -> None:
+        """The comparison the first version got backwards."""
+        sparse = cluster_meanings(["A", None, None, None, None], literal).entropy
+        supported = cluster_meanings(["A", "A", "A", None, None], literal).entropy
+
+        assert sparse > supported
+
+    def test_entail_is_never_asked_about_an_abstention(self) -> None:
+        """There is no text to judge, and a cross-encoder handed `None` would
+        raise rather than return a number."""
+        asked: list[tuple[str, str]] = []
+
+        def counting(premise: str, hypothesis: str) -> float:
+            asked.append((premise, hypothesis))
+            return 0.0
+
+        cluster_meanings(["A", None, "B"], counting)
+
+        assert asked == [("A", "B")]
+
+    def test_an_abstaining_sample_zero_still_anchors_the_minority(self) -> None:
+        """Possible only if candidates are ever pooled across samples, but the
+        rule is defined against sample 0 either way."""
+        clusters = cluster_meanings([None, "A", "A"], literal)
+
+        assert clusters.minority == [1, 2]
+
+
 class TestBidirectionalIsNotOptional:
     """§3.1 step 1 requires entailment >= 0.8 **in both directions**."""
 

@@ -3328,6 +3328,94 @@ one call, the applier that carries out a resolution, and
 
 ---
 
+## 2026-09-14 — Day 5 · S5.6 (orchestrator and deterministic replay)
+
+**Shipped**
+
+- **`pipeline/orchestrator.py`** — one proposal, every layer, for the first
+  time. Candidates scored concurrently under an explicit bound, each failure
+  attributed to its candidate rather than cancelling the batch.
+- **`pipeline/deps.py`** — `Deps`, and the three protocols nothing implements.
+- **`pipeline/inputs.py`** — the joins: the document spans index into, §3.1's
+  draw grouping, §3.2's claim rendering, §3.3's feature assembly.
+- **`scripts/replay_trace.py`** — the DONE WHEN. Prints "identical". 1146 unit
+  and property tests plus 79 integration; the three new modules at 100%
+  statement and branch coverage.
+
+**What broke / what I learned**
+
+- **I settled §3.1's `K` question and got the fix backwards on the first
+  attempt.** S5.1 deferred "when three of five draws propose a fact, is K three
+  or five?" to this step. Five is right, and the two missing draws are
+  abstentions — that part I reasoned to correctly. Then I clustered the
+  abstentions *together*, on the perfectly sensible grounds that silence is one
+  meaning rather than one per silent sample. The numbers said otherwise: one
+  claim against four shared abstentions is a 0.2/0.8 split, and entropy measures
+  *spread*, so a lopsided split is low-entropy. A fact one sample proposed came
+  out more confident than one three samples agreed on. I only saw it because I
+  printed the table rather than trusting the argument.
+  The fix is not the arithmetic, though — it is that `same_meaning` is
+  bidirectional entailment, an abstention asserts no proposition, and a
+  non-assertion entails nothing, including another one. Leaving them unclustered
+  falls out of the ordinary rule and makes support monotone: five agreeing 0.0,
+  three of five 0.59, one of five 1.0.
+- **Composing the pipeline is what finally forced three gaps into the open.**
+  Entity resolution, §3.3's `pii_class` and `irreversibility`, and the
+  entailment function. Each had been "specified nowhere" in an open item for
+  weeks; what changed is that `run()` cannot be written without them. Making
+  them injected protocols with *nothing shipped* is the honest form — a default
+  entity resolver would have looked like progress and silently split one patient
+  across three spellings.
+- **The orchestrator cannot write, and that is a real architectural conflict
+  rather than laziness.** `RULES.md` non-negotiable #4 wants the audit event in
+  the same transaction as the state change. `VectorStore.upsert` owns the only
+  transaction and the protocol hands out no connection — deliberately, because
+  §2.4 makes the backend an operator decision. Closing it means widening the
+  protocol or teaching the store about audit, and both deserve an ADR. What I
+  could do honestly was notice that a DECISION event is not a state change: three
+  of the four outcomes write nothing, so `append_decision` ships alone and the
+  WRITE event waits.
+- **`strict=True` refuses its own JSON round trip through a dict.**
+  `DecisionRecord.model_dump(mode="json")` writes enums as strings; reading them
+  back with `model_validate` on the `JSONB` dict is rejected, because in dict
+  mode a string is not an enum. `model_validate_json` accepts the identical data,
+  because in JSON a string is *how* an enum is spelled. Only visible against a
+  real column.
+- **Open item #35 came true exactly as written.** It said `scripts/` having no
+  `__init__.py` was "harmless today; the same trap as the duplicate `conftest` if
+  either tree grows a matching basename". What grew was a test importing
+  `scripts.replay_trace`. Adding the package cost one Makefile line, and broke
+  the seed integration test until I switched that to `-m` too — which the fixture
+  now explains rather than just doing.
+- **Two caps fired and both improved the code.** `_decide_one` at 78 lines split
+  at the Layer 2 / Layer 3 seam; the module at 401 lines gave up
+  `override_signals` to `inputs.py`, where it belonged anyway.
+
+**Still open**
+
+- **The applier, still.** `run()` returns decisions and nothing carries them
+  out. This is now a *narrower* gap than before — it needs one Postgres-specific
+  composition owning one transaction — but it needs an ADR first.
+- **Entity resolution, `pii_class`, `irreversibility`**: named as protocols,
+  implemented by nothing. `run()` refuses to be called without them, which is
+  the gap being loud rather than closed.
+- **No escalation loop.** Every candidate is a first pass; an ESCALATE is
+  returned for the caller to act on. §3.4's second pass needs FRONTIER providers
+  (S9.1) to be worth measuring.
+- **`scope_of_namespace` under-prices a shared namespace with an unrecognised
+  prefix** — `team:eng` scores as one subject. Pinned by a test that says so.
+- The four spec questions (52, 57, 61, 62) are unchanged.
+
+**Tomorrow's first step**
+
+**CHECKPOINT B** — "the most important gate in the project". 200 candidates from
+the seed transcript, hand-labelled by a human, and the AUROC of `C` against those
+labels. `>= 0.80` proceeds; `< 0.75` stops the build. Everything after it assumes
+the scoring can tell good candidates from bad ones, and Day 5 is cheap to redo
+where Day 25 is not.
+
+---
+
 ---
 
 ---

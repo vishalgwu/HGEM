@@ -66,6 +66,7 @@ from fixtures.strategy_l2 import l2_strategies
 from fixtures.strategy_l3 import L3_STRATEGIES
 from fixtures.strategy_observability import OBSERVABILITY_STRATEGIES
 from fixtures.strategy_ontology import ONTOLOGY_STRATEGIES
+from fixtures.strategy_pipeline import pipeline_strategies
 from fixtures.strategy_primitives import (
     _ASSERTION_IDS,
     _CANDIDATE_IDS,
@@ -86,7 +87,7 @@ from fixtures.strategy_primitives import (
     _WHEN,
     _ordered_datetimes,
 )
-from fixtures.strategy_verdict import VERDICT_STRATEGIES
+from fixtures.strategy_verdict import DECISION_RECORDS, VERDICT_STRATEGIES
 
 _SPAN_MATCHES = st.builds(SpanMatch, span=_SPAN, text=_TEXT, alignment=_UNIT)
 
@@ -243,6 +244,9 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     # `observability/` (S5.5). Coherent, because `broken_at` and `verified`
     # are one fact wearing two names.
     **OBSERVABILITY_STRATEGIES,
+    # The orchestrator's own models (S5.6), which compose two of the
+    # generators below - hence the call rather than a dict.
+    **pipeline_strategies(_TURNS, DECISION_RECORDS),
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

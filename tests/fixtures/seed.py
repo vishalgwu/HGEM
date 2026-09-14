@@ -28,7 +28,11 @@ if TYPE_CHECKING:
 
 __all__ = ["PATIENT_NAME", "TENANT_SLUG", "demo", "run_seed", "seeded"]
 
-SEED: Final = REPO_ROOT / "scripts" / "seed_demo_tenant.py"
+# Invoked as a module, not as a path, since S5.6 made `scripts` a package:
+# `seed_demo_tenant` imports a sibling, and a qualified import only resolves
+# with the repo root on `sys.path`, which `-m` from `cwd=REPO_ROOT` provides
+# and running the file by path does not. `make seed` says the same thing.
+SEED: Final = "scripts.seed_demo_tenant"
 
 # The slug `scripts/demo_tenant_data.py` writes, and the canonical name it gives
 # the patient. Both are read back from the database rather than recomputed, so
@@ -59,7 +63,7 @@ def run_seed(dsn: str) -> str:
     environment = dict(os.environ)
     environment["GM_DATABASE_URL"] = sqlalchemy_dsn(dsn)
     result = subprocess.run(
-        [sys.executable, str(SEED)],
+        [sys.executable, "-m", SEED],
         cwd=REPO_ROOT,
         env=environment,
         capture_output=True,

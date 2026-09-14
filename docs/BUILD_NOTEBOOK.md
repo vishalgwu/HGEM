@@ -2555,7 +2555,81 @@ async def run(proposal: MemoryProposal, deps: Deps) -> PipelineResult:
 ```
 Replay re-runs with pinned model/prompt/policy versions from the audit record and diffs decisions.
 
+**Six corrections to this step, found by building it.**
+
+1. **`MemoryProposal` does not exist, and `MCP_INTEGRATION.md` §2.2 publishes a
+   *tool schema* rather than a model.** Its fields are the gateway's - `mode`,
+   `idempotency_key`, `predicates_of_interest` - and the pipeline uses none of
+   them. `Proposal` is the pipeline's half; S8.1 builds the surface that accepts
+   the other. §2.2's `hints.subject` turned out to matter: it is where a caller
+   that already knows which entity it means says so.
+2. **Three inputs have no producer anywhere, and composing the pipeline is what
+   finally forced them into the open.** Entity resolution (surface form to
+   `EntityId`), §3.3's `pii_class` and `irreversibility`, and the entailment
+   function §3.1 and §3.2 both need. They are injected `Protocol`s on `Deps`
+   with **nothing shipped** for the first two, so `run()` cannot be called
+   without them - a default that used the surface form as an entity id would be
+   worse than none, because it splits one patient across three spellings and
+   every incumbent lookup then reads as "this is a novel fact".
+3. **§3.1's `K` is the draw count, and the abstentions are what make it work.**
+   S5.1 deferred this here. When three of five samples propose a fact, `K` is
+   five: three would divide by `log 3` over a set that all agreed, and a fact
+   only sample 0 proposed would reach `K = 1`, where §3.1 sets `H_norm := 0` -
+   maximum confidence from minimum evidence.
+4. **Clustering the abstentions together was backwards, and the arithmetic
+   said so.** "Silence is one meaning" sounds right and produces a 0.2/0.8 split
+   for one claim against four silences - *low* spread, so low entropy - scoring
+   a fact one sample proposed as more certain than one three samples agreed on.
+   Each abstention is its own cluster, which is not a special case at all:
+   `same_meaning` is bidirectional entailment, and a non-assertion entails
+   nothing, including another one. Support is monotone now - five agreeing 0.0,
+   three of five 0.59, one of five 1.0.
+5. **The orchestrator writes nothing, and that is the transaction boundary
+   rather than a shortcut.** `RULES.md` non-negotiable #4 binds the audit event
+   to the state change, and `VectorStore.upsert` owns the only transaction in
+   the write path by design - the protocol hands out no connection, because
+   §2.4 makes the backend an operator decision and a Qdrant store has no
+   Postgres transaction to join. Writing and auditing atomically is a
+   Postgres-specific composition owning one connection; building it here means
+   widening the protocol or teaching the store about audit, and both are
+   ADR-sized. A DECISION event *can* stand alone - three of the four outcomes
+   change no state - so `append_decision` ships and the WRITE event does not.
+6. **`scripts/` became a package, which open item #35 predicted.** It said the
+   bare module names were "harmless today; the same trap as the duplicate
+   `conftest` if either tree grows a matching basename". What grew was a test
+   importing `scripts.replay_trace`, putting one file under two module names in
+   mypy's roots. `make seed` now runs `python -m scripts.seed_demo_tenant`,
+   because a *sibling* import has to be qualified; S5.6's own DONE WHEN command
+   is unaffected, since `replay_trace` imports no sibling.
+
 DONE WHEN: `uv run python scripts/replay_trace.py <trace_id>` prints "identical" for a fresh trace.
+
+**It does**, driven through `main` the way the command line drives it - argv in,
+exit code out - against a real chain in real Postgres.
+
+**What replay can honestly compare.** `decide()`, not the model calls. The
+extractor draws K samples at temperature 0.7 and the judge is a network call, so
+re-running those produces different numbers on a *healthy* system and a "replay"
+including them would report a diff every time. What is replayable is the step
+from three reports to one decision - which is the step that decided whether a
+fact entered memory, and the one an incident asks about. It works because
+`DecisionRecord` carries its own inputs, so a diff means exactly one thing: the
+code or the thresholds moved. A test changes `tau_hi` to 0.99 and watches an
+`auto_write` become a `reject`, with both threshold versions named.
+
+**A strict model's audit payload has to be revalidated as JSON, not as a dict.**
+`GMModel` sets `strict=True`, so `model_validate` on the dict `JSONB` hands back
+*refuses* the string forms of `Decision`, `ConflictKind` and `ImpactLevel` -
+which are exactly what `model_dump(mode="json")` wrote. In JSON mode a string is
+how an enum is spelled, so the same strictness accepts it and the record
+round-trips identically. Found by running it against Postgres.
+
+**Two of `OverrideSignals`' six are recovered exactly on replay**, because §3.3
+persists all eight risk features verbatim and the tier multipliers and mutation
+values are each distinct. The other four are runtime facts on no model and are
+reconstructed benign - sound for this comparison, because every override only
+tightens, so a decision an override tightened shows up as a diff whose recorded
+reason codes name the override that did it.
 
 COMMIT: `feat(s5.6): pipeline orchestrator and deterministic replay`
 

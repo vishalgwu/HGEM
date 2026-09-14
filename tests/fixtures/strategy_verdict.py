@@ -46,7 +46,7 @@ from guardmem_core.schemas.verdict import (
     Thresholds,
 )
 
-__all__ = ["VERDICT_STRATEGIES"]
+__all__ = ["DECISION_RECORDS", "VERDICT_STRATEGIES"]
 
 _CONFIDENCE = st.builds(
     ConfidenceReport,
@@ -93,20 +93,25 @@ def _thresholds(draw: st.DrawFn) -> Thresholds:
     )
 
 
+# Named rather than inlined below, because `strategy_pipeline.py` composes it
+# into `PipelineResult` - a decision record is what the orchestrator produces,
+# so the two generators have to agree about its shape.
+DECISION_RECORDS = st.builds(
+    DecisionRecord,
+    decision=st.sampled_from(Decision),
+    reason_codes=st.lists(_TEXT, max_size=4),
+    confidence=_CONFIDENCE,
+    risk=_RISK,
+    conflict=_CONFLICT,
+    thresholds_version=_ID,
+    policy_version=_ID,
+    escalated_from=st.none() | st.sampled_from(Decision),
+)
+
 VERDICT_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     Thresholds: _thresholds(),
     ConfidenceReport: _CONFIDENCE,
     RiskVerdict: _RISK,
     ConflictReport: _CONFLICT,
-    DecisionRecord: st.builds(
-        DecisionRecord,
-        decision=st.sampled_from(Decision),
-        reason_codes=st.lists(_TEXT, max_size=4),
-        confidence=_CONFIDENCE,
-        risk=_RISK,
-        conflict=_CONFLICT,
-        thresholds_version=_ID,
-        policy_version=_ID,
-        escalated_from=st.none() | st.sampled_from(Decision),
-    ),
+    DecisionRecord: DECISION_RECORDS,
 }

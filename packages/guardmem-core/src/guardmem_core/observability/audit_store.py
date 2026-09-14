@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
     from guardmem_core.memory.vector.pool import Conn
     from guardmem_core.observability.audit import ChainVerification
+    from guardmem_core.schemas.verdict import DecisionRecord
 
 # Every `uuid` parameter is cast in the statement rather than converted to
 # `uuid.UUID` here. That is `rowmap.py`'s convention from S3.2 and it is what
@@ -59,6 +60,7 @@ __all__ = [
     "SELECT_CHAIN",
     "SELECT_HEAD",
     "append",
+    "append_decision",
     "event_from_row",
     "read_chain",
     "verify_tenant_chain",
@@ -151,6 +153,50 @@ async def append(
         link.created_at,
     )
     return link.model_copy(update={"seq": seq})
+
+
+async def append_decision(
+    connection: Conn,
+    record: DecisionRecord,
+    *,
+    tenant_id: TenantId,
+    trace_id: TraceId,
+    created_at: datetime,
+) -> AuditEvent:
+    """Record one Layer 3 decision on the tenant's chain.
+
+    Args:
+        connection: As `append`.
+        record: What was decided, and everything it was decided from.
+        tenant_id: Whose chain.
+        trace_id: The proposal.
+        created_at: System time of the decision.
+
+    Returns:
+        The inserted link.
+
+    **A DECISION is not a state change, which is why this may stand alone.**
+    `RULES.md` non-negotiable #4 binds the audit event to "the state change" -
+    and three of the four outcomes change nothing: a REJECT, a HITL_REVIEW and
+    an ESCALATE write no assertion. The record *is* the artifact. An AUTO_WRITE
+    does change state, and the `WRITE` event for it has to commit with the
+    assertion; that is the applier's transaction and it does not exist yet (see
+    `pipeline/orchestrator.py`). Calling this and then writing separately would
+    satisfy neither rule, so nothing here does.
+
+    `mode="json"` because the payload is hashed as canonical JSON and re-read
+    from `JSONB`: the enums have to be their string values and the floats plain
+    numbers, or `canonical_json` refuses them - which it does loudly rather than
+    coercing, for the reason its docstring gives.
+    """
+    return await append(
+        connection,
+        tenant_id=tenant_id,
+        trace_id=trace_id,
+        kind="DECISION",
+        payload=record.model_dump(mode="json"),
+        created_at=created_at,
+    )
 
 
 async def read_chain(connection: Conn, tenant_id: TenantId) -> list[AuditEvent]:

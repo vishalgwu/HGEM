@@ -26,6 +26,30 @@ and `extract` refuses a short sample count rather than absorbing it - the two
 rules hold each other up, and relaxing either one turns a degraded provider into
 a confident one.
 
+**A sample that proposed nothing is `None`, and that is S5.6's correction to
+this step.** §3.1 clusters "the K samples for a given `(subject, predicate)`"
+and S5.1 read that as K rendered claims. Composing the pipeline showed the
+question it leaves open: when three of five samples propose a fact, is `K` three
+or five?
+
+Five. Three divides by `log 3` over a set that all agreed, so a fact only three
+draws mentioned scores `H_norm = 0` - and one that only sample 0 proposed
+reaches `K = 1`, where §3.1 sets `H_norm := 0` outright. That is maximum
+confidence from minimum evidence, which is the exact shape `ARCHITECTURE.md` §0
+forbids.
+
+**Each abstention is its own cluster, and getting that wrong is subtle.** The
+first attempt clustered all the silent draws together - silence being one
+meaning, not one per sample - and the arithmetic said otherwise: one claim
+against four shared abstentions is a 0.2/0.8 split scoring 0.31, while three
+agreeing claims against two is 0.6/0.4 scoring 0.42. Entropy measures *spread*,
+so a lopsided split is low-entropy, and a fact one sample proposed came out more
+confident than one three samples agreed on. Leaving abstentions unclustered
+makes support monotone: five agreeing scores 0.0, three of five 0.59, one of
+five 1.0. The justification is not the arithmetic, though - it is that
+`same_meaning` is bidirectional entailment, an abstention asserts no
+proposition, and a non-assertion entails nothing. Including another one.
+
 **The minority-cluster drop is built and cannot fire today.** §3.1 adds that "a
 candidate that appears in zero clusters containing sample 0's meaning is dropped
 as a minority hallucination", and S5.1's own "Do NOT" list says not to skip it
@@ -92,12 +116,13 @@ class MeaningClusters(GMModel):
     minority: list[int]
 
 
-def cluster_meanings(samples: Sequence[str], entail: EntailFn) -> MeaningClusters:
+def cluster_meanings(samples: Sequence[str | None], entail: EntailFn) -> MeaningClusters:
     """Partition `samples` by meaning and score the spread.  §3.1
 
     Args:
         samples: The K rendered claims for one `(subject, predicate)`, in draw
-            order. **Sample 0 must be the canonical draw** - §1.2 draws it at
+            order, with `None` where a sample proposed nothing for that pair.
+            **Sample 0 must be the canonical draw** - §1.2 draws it at
             temperature 0 and `minority` is defined relative to it, so passing
             these out of order silently redefines which answers count as
             hallucinations.
@@ -126,12 +151,19 @@ def cluster_meanings(samples: Sequence[str], entail: EntailFn) -> MeaningCluster
         )
     parent = list(range(size))
     for left, right in combinations(range(size), 2):
+        first, second = samples[left], samples[right]
+        if first is None or second is None:
+            # An abstention asserts nothing, so it entails nothing - including
+            # another abstention. It is never shown to `entail` (there is no
+            # text to judge) and never unions, which leaves each silent draw its
+            # own cluster by the ordinary rule rather than by a special case.
+            # See the module docstring: clustering them together instead scores
+            # a fact one sample proposed as *more* certain than one three
+            # samples agreed on.
+            continue
         # `and` short-circuits, so a pair that fails forward is never asked in
         # reverse. Most pairs in a disagreeing sample set fail forward.
-        if (
-            entail(samples[left], samples[right]) >= _SAME_MEANING
-            and entail(samples[right], samples[left]) >= _SAME_MEANING
-        ):
+        if entail(first, second) >= _SAME_MEANING and entail(second, first) >= _SAME_MEANING:
             _union(parent, left, right)
     labels = [_find(parent, index) for index in range(size)]
     return MeaningClusters(
@@ -141,7 +173,7 @@ def cluster_meanings(samples: Sequence[str], entail: EntailFn) -> MeaningCluster
     )
 
 
-def semantic_entropy(samples: Sequence[str], entail: EntailFn) -> float:
+def semantic_entropy(samples: Sequence[str | None], entail: EntailFn) -> float:
     """`H_norm` over the meanings in `samples`.  §3.1
 
     Args:

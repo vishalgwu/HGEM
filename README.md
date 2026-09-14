@@ -169,9 +169,9 @@ baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema gate, incumbent
 retrieval, conflict detection, and the resolution matrix with the merge behind
-it — and **Layer 3 is under way (S5.1 – S5.5)** with semantic entropy, the
-confidence composite, the impact-risk score, the decision matrix and the
-hash-chained audit log.
+it — and **Day 5 is complete (S5.1 – S5.6)**: semantic entropy, the confidence
+composite, the impact-risk score, the decision matrix, the hash-chained audit
+log, and the orchestrator that runs a proposal through all of it.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -407,6 +407,26 @@ all, so the chain is the second line rather than the only one. The honest limit
 is worth stating: lopping entries off the *end* leaves a shorter log that still
 adds up, and catching that needs something outside the system to remember how
 long it should have been.
+
+S5.6 joins the parts up. One call takes a conversation and returns a decision
+per fact it found, with the reasoning attached: the filter, the extractor, the
+schema check, the lookup against what is already known, the conflict check and
+all four scores. Candidates are handled in parallel with a ceiling on how many
+models run at once, and a fact whose scoring fails is reported on its own rather
+than taking the rest of the batch down with it.
+
+It stops short of writing. Storing a fact and recording that it was stored have
+to happen together or not at all, and the storage interface is deliberately
+backend-agnostic — it has no transaction to share. Closing that needs a decision
+about which of the two to bend, so what ships is the part that can be trusted:
+every decision, complete and re-checkable.
+
+Re-checkable is the last piece. A script re-runs any recorded decision from the
+inputs stored alongside it and reports whether today's code still reaches the
+same answer. It deliberately does not re-run the language models — those are not
+reproducible, and pretending otherwise would make the check meaningless. What it
+proves is narrower and more useful: that the rules which decided whether a fact
+was believed have not silently moved.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every

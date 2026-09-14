@@ -17,6 +17,77 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S5.6 — the pipeline orchestrator and deterministic replay.**
+  `pipeline/orchestrator.py` runs one proposal through every layer: noise
+  filter, extractor, schema gate, incumbent retrieval, conflict detection,
+  entropy, confidence, impact, decision. The step five open items were pointing
+  at.
+- **`pipeline/deps.py` names the three things nothing in this repository
+  supplies.** Entity resolution, §3.3's `pii_class` and `irreversibility`, and
+  the entailment function §3.1 and §3.2 both need — injected `Protocol`s with
+  **nothing shipped** for the first two, so `run()` cannot be called without
+  them. A default entity resolver using the surface form would be worse than
+  none: it splits one patient across three spellings and every incumbent lookup
+  then reads as "this is a novel fact".
+- **`pipeline/inputs.py` holds the joins**, each of which is where something
+  goes quietly wrong: the span offsets index into the string `render_content`
+  produces, §3.1's draws are grouped by `(subject, predicate)`, and §3.2's
+  `S_src` needs a claim rendered as a sentence because a candidate is a triple.
+- **`scripts/replay_trace.py`** — S5.6's DONE WHEN. Prints "identical" for a
+  fresh trace, exits 1 on a diff naming both decisions and both threshold
+  versions, and exits 2 on a trace with no decisions, which is a different
+  answer from "identical" and must not be mistaken for one.
+- **`append_decision`** puts a `DecisionRecord` on the tenant's audit chain,
+  which is what replay reads. 1146 unit and property tests plus 79 integration
+  tests passing locally; all three new pipeline modules at 100% statement and
+  branch coverage.
+
+### Fixed
+
+- **Clustering abstentions together scored sparse extraction as confident, and
+  the arithmetic is what caught it.** S5.1's `cluster_meanings` now takes `None`
+  for a draw that proposed nothing. The first version clustered all the silent
+  draws together — "silence is one meaning" — which makes one claim against four
+  silences a 0.2/0.8 split: *low* spread, so low entropy, so a fact one sample
+  proposed scored **more** confident than one three samples agreed on. Each
+  abstention is its own cluster, which is not a special case: `same_meaning` is
+  bidirectional entailment and a non-assertion entails nothing, including
+  another one. Support is monotone now.
+- **A strict model's audit payload has to be revalidated as JSON, not as a
+  dict.** `GMModel` sets `strict=True`, so `model_validate` on what `JSONB`
+  hands back refuses the string forms of `Decision`, `ConflictKind` and
+  `ImpactLevel` — exactly what `model_dump(mode="json")` wrote. Found by running
+  the replay against Postgres.
+- **`scripts/` is a package**, which open item #35 predicted would be needed
+  "if either tree grows a matching basename". A test importing
+  `scripts.replay_trace` put one file under two module names in mypy's roots.
+  `make seed` now runs `python -m scripts.seed_demo_tenant`.
+
+### Changed
+
+- **§3.1's `K` is the draw count**, settled here because S5.1 deferred it. When
+  three of five samples propose a fact, `K` is five: three would divide by
+  `log 3` over a set that all agreed, and a fact only sample 0 proposed would
+  reach `K = 1`, where §3.1 sets `H_norm := 0` — maximum confidence from minimum
+  evidence.
+- **The orchestrator writes nothing, and that is the transaction boundary.**
+  `RULES.md` non-negotiable #4 binds the audit event to the state change;
+  `VectorStore.upsert` owns the only transaction in the write path and the
+  protocol hands out no connection, because §2.4 makes the backend an operator
+  decision. Writing and auditing atomically is a Postgres-specific composition
+  owning one connection — ADR-sized either way. A DECISION event can stand
+  alone, since three of the four outcomes change no state, so `append_decision`
+  ships and the WRITE event does not. A test asserts the store stays empty.
+- **`MemoryProposal` does not exist.** §2.2 publishes a *tool schema* whose
+  fields belong to the gateway (S8.1). `Proposal` is the pipeline's half — and
+  §2.2's `hints.subject` turned out to matter, as the one place a caller states
+  the entity rather than leaving it to be resolved.
+- **Replay compares `decide()`, not the model calls**, and says so. Re-running
+  a temperature-0.7 draw would report a diff on a healthy system. Two of
+  `OverrideSignals`' six fields are recovered exactly from the persisted risk
+  features; the other four are reconstructed benign, which is sound because
+  every override only tightens.
+
 - **S5.5 — the hash-chained audit log.** `observability/audit.py` is the
   arithmetic — `canonical_json`, `digest_for`, `next_link`, `verify_chain` — and
   `audit_store.py` is the table. Invariant I5 is

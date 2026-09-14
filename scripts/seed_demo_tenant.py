@@ -40,22 +40,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 import asyncpg
 
-# A sibling module, resolved because `python scripts/seed_demo_tenant.py` puts
-# this directory at the head of `sys.path`. An explicit `sys.path.insert` stood
-# here until the S3.6 audit measured it: it was redundant on the only path that
-# runs this file, and it forced every import below the statement.
-from demo_tenant_data import (
-    INTAKE_AT,
-    MOVE_CALL,
-    NAMESPACE,
-    OBJECT_ENTITIES,
-    SEED_FACTS,
-    SUPERSESSIONS,
-    TENANT_SLUG,
-    TRANSCRIPT,
-    SeedFact,
-)
-
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.relay import OutboxRelay
@@ -70,6 +54,22 @@ from guardmem_core.schemas.receipt import Provenance
 from guardmem_core.schemas.turn import Turn
 from guardmem_core.settings import get_settings
 from guardmem_core.types import AssertionId, EntityId, TenantId, TraceId
+
+# A sibling module, resolved because `python scripts/seed_demo_tenant.py` puts
+# this directory at the head of `sys.path`. An explicit `sys.path.insert` stood
+# here until the S3.6 audit measured it: it was redundant on the only path that
+# runs this file, and it forced every import below the statement.
+from scripts.demo_tenant_data import (
+    INTAKE_AT,
+    MOVE_CALL,
+    NAMESPACE,
+    OBJECT_ENTITIES,
+    SEED_FACTS,
+    SUPERSESSIONS,
+    TENANT_SLUG,
+    TRANSCRIPT,
+    SeedFact,
+)
 
 PACK: Final = "clinical"
 PATIENT_KEY: Final = "patient-7781"
