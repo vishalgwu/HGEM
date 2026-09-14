@@ -39,7 +39,12 @@ _ROOT_MARKER = "pyproject.toml"
 # `__init__.py` collide under `mypy`, which would take the whole test suite out
 # of `make typecheck`. Nothing here starts a container until a test asks for the
 # fixture, so the unit suite is unaffected. S3.2.
-pytest_plugins = ("fixtures.postgres", "fixtures.pgvector", "fixtures.outbox")
+pytest_plugins = (
+    "fixtures.postgres",
+    "fixtures.pgvector",
+    "fixtures.outbox",
+    "fixtures.seed",
+)
 
 
 def _find_repo_root() -> Path:

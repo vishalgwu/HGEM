@@ -17,6 +17,32 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S4.2 — incumbent retrieval.** `pipeline/l2_validate/conflict.py` fetches
+  `MEMORY_ENGINE.md` §2.2's top-10 by cosine within
+  `(namespace, subject, predicate)` plus the 1-hop graph neighbours. It is the
+  first code in the pipeline to call both stores, and the first caller of
+  `assertion_live_idx` — the partial index S3.1 built for exactly this query.
+- **`embed_text` moved to `memory/vector/base.py` and grew a `Claim`
+  protocol.** Both sides of every cosine comparison now go through one renderer:
+  a `StoredAssertion` on the write side and a `MemoryCandidate` on the read
+  side. A second renderer would produce distances between differently-shaped
+  texts — numbers that still order the results and mean nothing, with nothing
+  failing. The move itself was forced by the import contract: `rowmap` imports
+  `asyncpg`, so reaching the renderer from `pipeline/` dragged a driver behind
+  it.
+- **Retrieval takes a resolved `EntityId`, because nothing produces one.**
+  `MemoryCandidate.subject` is a surface form and `VectorStore` filters on a
+  UUID. **Entity resolution is specified in no document** — not the notebook,
+  not `MEMORY_ENGINE.md`, not `PROJECT_TREE.md`. Passing the id in keeps that
+  gap visible rather than burying a guess inside a retrieval function.
+- **The graph half adds rather than repeats.** `neighbors(subject)` returns
+  every live edge the subject asserts, including the assertions the vector
+  search just found; those are filtered out so what is left genuinely widens the
+  picture.
+- **`tests/fixtures/seed.py`** — the seeded demo tenant is a plugin now, so more
+  than one integration suite can use it. 729 tests, 100% coverage. Three
+  mutants, three kills.
+
 - **S4.1 — the ontology schema gate, and the start of Layer 2.**
   `pipeline/l2_validate/schema_gate.py` is the first thing in the pipeline to
   read the ontology S3.5 built. Every candidate Layer 1 produced arrives
@@ -43,7 +69,8 @@ repository; the log records what happened while changing it.
   and `entity_ref` refuse anything not already a string: stringifying `71.5`
   into an RxNorm slot produces a code that does not exist.
 - Two of §2.1's checks deliberately do **not** live here: the `subject` entity
-  type cannot be checked until entity resolution runs at S4.2, and
+  type cannot be checked until entity resolution exists — which S4.2 found is
+  specified in no document at all — and
   `min_source_tier` is a cap on what may *auto-write*, which belongs with the
   decision matrix. 700 tests, 100% coverage. Four mutants, four kills.
 

@@ -1934,7 +1934,53 @@ TIME: 40 min
 Fetch top-10 by cosine within `(namespace, subject, predicate)` plus 1-hop graph neighbours. This
 is where L2 depends on day 3 — you cannot detect a contradiction without the incumbent.
 
+**Five corrections to this step, found by building it.**
+
+1. **Retrieval needs a resolved `EntityId`, and nothing in this repository
+   produces one.** §2.2 retrieves "within `(namespace, subject, predicate)`";
+   `VectorStore` filters on `subject_id`, a UUID; `MemoryCandidate.subject` is a
+   surface form because Layer 1 extracts what the speaker said. **Entity
+   resolution appears in no document** - not this notebook, not
+   `MEMORY_ENGINE.md`, not `ARCHITECTURE.md`, not `PROJECT_TREE.md`. It is a
+   real specification gap. `retrieve_incumbents` takes the resolved id as an
+   argument rather than inventing a resolver inside a retrieval function, which
+   keeps the gap visible instead of burying a guess.
+2. **The candidate and the incumbents must go through the same renderer**, and
+   this is the step where that stops being obvious. `embed_text` computes what a
+   stored vector is made of; the query has to be made the same way or the cosine
+   distances are between differently-shaped texts - numbers that still order the
+   results and mean nothing, with nothing failing. `embed_text` grew a `Claim`
+   protocol so a `MemoryCandidate` and a `StoredAssertion` use one function.
+3. **That renderer had to move, and the import contract is what found it.**
+   `rowmap.py` imports `asyncpg` for one annotation, so reaching for
+   `embed_text` from `pipeline/` pulled a database driver in behind it and broke
+   the S3.4 contract. The right answer was not to relax the contract but to
+   notice that *what text a fact embeds as* is a decision about meaning, not
+   about column order. It lives in `memory/vector/base.py` now, beside the
+   protocols.
+4. **"Plus graph neighbors" has to actually add.** `neighbors(subject)` returns
+   every live edge the subject asserts - including the very assertions the
+   vector search just found under that predicate. Returned unfiltered the two
+   overlap rather than widen, so the edges already accounted for are removed and
+   what is left is what else this subject says.
+5. **The step has no COMMIT line.** Every other step in the notebook carries
+   one. Used `feat(s4.2): incumbent retrieval`, matching the convention.
+
 DONE WHEN: integration test returns the seeded incumbent for a matching candidate.
+
+Use the **seeded** tenant, which is what the sentence says and what makes the
+test worth running: those twenty-eight assertions were embedded, relayed and
+made visible by the real path, so retrieval is being asked to find what the
+*system* stored rather than what the test just wrote. `tests/fixtures/seed.py`
+became a plugin at this step so a second suite could reach it.
+
+Three mutants, three kills. Dropping the predicate from the filter kills four
+tests; embedding the candidate's `verbatim` instead of the renderer's output
+kills the DONE WHEN *and* the ordering test - which is the one that matters,
+because a wrong renderer still returns results in an order; and returning the
+graph edges unfiltered kills both widening tests.
+
+COMMIT: `feat(s4.2): incumbent retrieval`
 
 ---
 

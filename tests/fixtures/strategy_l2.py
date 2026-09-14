@@ -5,7 +5,8 @@ handful of lines under `RULES.md` §2.4's cap, and the registry there should sta
 a readable index rather than becoming the place every new model's generator
 lands.
 
-`SchemaGateResult` is drawn as three independent lists, which is *looser* than
+`SchemaGateResult` and `IncumbentSet` are drawn as independent lists, which is
+*looser* than
 the gate can actually produce - a real result never puts a `REJECTED` verdict in
 `admitted`. That is deliberate. These strategies feed the schema-layer property
 tests, whose job is round-tripping and `extra="forbid"`, and a generator that
@@ -19,8 +20,14 @@ from __future__ import annotations
 from hypothesis import strategies as st
 
 from fixtures.strategy_primitives import _ID, _UNIT
-from guardmem_core.pipeline.l2_validate import GatedCandidate, GateOutcome, SchemaGateResult
+from guardmem_core.pipeline.l2_validate import (
+    GatedCandidate,
+    GateOutcome,
+    IncumbentSet,
+    SchemaGateResult,
+)
 from guardmem_core.schemas import GMModel
+from guardmem_core.types import CandidateId
 
 __all__ = ["l2_strategies"]
 
@@ -38,12 +45,14 @@ def _gated(candidates: st.SearchStrategy[object]) -> st.SearchStrategy[GatedCand
 
 def l2_strategies(
     candidates: st.SearchStrategy[object],
+    assertions: st.SearchStrategy[object],
+    edges: st.SearchStrategy[object],
 ) -> dict[type[GMModel], st.SearchStrategy[GMModel]]:
-    """Build the registry entries, given the `MemoryCandidate` strategy.
+    """Build the registry entries, given the generators this layer composes.
 
-    Takes the candidate strategy as an argument rather than importing it,
-    because it lives in `strategies.py` and importing it back would make the two
-    modules import each other.
+    Takes them as arguments rather than importing them, because they live in
+    `strategies.py` and importing them back would make the two modules import
+    each other.
     """
     gated = _gated(candidates)
     return {
@@ -53,5 +62,11 @@ def l2_strategies(
             admitted=st.lists(gated, max_size=3),
             quarantined=st.lists(gated, max_size=2),
             rejected=st.lists(gated, max_size=2),
+        ),
+        IncumbentSet: st.builds(
+            IncumbentSet,
+            candidate_id=_ID.map(CandidateId),
+            nearest=st.lists(assertions, max_size=3),
+            neighbours=st.lists(edges, max_size=2),
         ),
     }

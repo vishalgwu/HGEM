@@ -2686,6 +2686,91 @@ once and of `assertion_live_idx`.
 
 ---
 
+## 2026-09-13 — Day 4 · S4.2 (incumbent retrieval)
+
+**Shipped**
+
+- `pipeline/l2_validate/conflict.py`, first half — §2.2's top-10 within
+  `(namespace, subject, predicate)` plus the 1-hop graph widening.
+- `embed_text` moved to `memory/vector/base.py` and grew a `Claim` protocol, so
+  candidates and assertions render through one function.
+- `tests/fixtures/seed.py` — the seeded demo tenant as a plugin.
+  729 tests, 100% coverage.
+
+**What broke / what I learned**
+
+- **Entity resolution is specified in no document, and this is the step that
+  needed it.** §2.2 retrieves "within `(namespace, subject, predicate)`";
+  `VectorStore` filters on `subject_id`, a UUID; `MemoryCandidate.subject` is a
+  surface form because Layer 1 extracts what the speaker said. Something has to
+  turn "Joan Ellery" into an entity id, and I searched the notebook,
+  `MEMORY_ENGINE.md`, `ARCHITECTURE.md` and `PROJECT_TREE.md` for it - nothing.
+  Not deferred to a step, not mentioned. **I had also written, at S4.1, that
+  S4.2 was where resolution happens** - I assumed it because the gap had to
+  close somewhere, and today it did not. Corrected in the changelog and in
+  `schema_gate.py`, and `retrieve_incumbents` takes the resolved id as an
+  argument so the absence stays visible instead of becoming a guess inside a
+  retrieval function.
+
+- **The import contract caught a layering mistake I would not have looked for.**
+  `retrieve_incumbents` must embed the candidate with the same renderer that
+  produced the stored vectors, so it imported `rowmap.embed_text` - and
+  `lint-imports` refused, because `rowmap` imports `asyncpg` for one annotation
+  and the S3.4 contract says the pipeline never reaches a driver. My first
+  instinct was that the contract was being pedantic about a `TYPE_CHECKING`
+  import. It was not: the right reading is that *what text a fact embeds as* is
+  a decision about meaning and had no business living in the module that knows
+  column order. It is in `base.py` now, beside the protocols, and its tests
+  moved with it.
+
+- **The property that matters here fails silently, which is why it has two
+  tests.** If the candidate and the incumbents were rendered differently, cosine
+  would still return numbers, still order them, and still look like retrieval.
+  The unit test asserts the embedder was handed exactly `embed_text`'s output;
+  the integration test asserts the *nearest* incumbent is the one the candidate
+  restates. The mutant that embeds `provenance.verbatim` instead kills both -
+  and the second is the one I would trust, because it fails on behaviour rather
+  than on a call.
+
+- **My DONE WHEN assertion was wrong and the database told me so.** I asserted
+  the seeded allergy came back as the only incumbent; four came back, because
+  `allergy` is `cardinality: many` in the clinical pack and the seed wrote four.
+  The code was right and the test was wrong. Fixed to assert what the step
+  actually means - the seeded fact is present *and* ranks first - which is a
+  stronger claim than the one I first wrote.
+
+- **Two modules named `test_incumbent_retrieval.py`.** `tests/` has no
+  `__init__.py`, so a unit and an integration module sharing a basename are two
+  modules with the same name: pytest aborts collection and `mypy` refuses the
+  pair. The unit one is `test_conflict.py` now, named for the module it covers.
+  This is the third time that trap has appeared and the first time I walked into
+  it knowingly enough to recognise the error message.
+
+- **`@dataclass(slots=True)` breaks zero-argument `super()` in a subclass.**
+  `slots=True` builds a new class object and rebinds the name, so the `__class__`
+  cell closed over by `super()` is the pre-slots class while `self` is an
+  instance of the post-slots one. `TypeError: super(type, obj): obj must be an
+  instance or subtype of type`, at the call rather than the definition.
+
+**Still open**
+
+- **Entity resolution.** The largest gap in the build so far: it has no step, no
+  module, and no mention in any spec. Everything downstream of Layer 1 that
+  addresses a subject needs it. It should get an ADR before it gets code.
+- The graph half returns `Edge`s rather than assertions, because turning one
+  back into a `StoredAssertion` needs a fetch-by-id `VectorStore` does not have.
+  **S4.3** is the step that will know whether the checks need the provenance.
+- Retrieval is sequential. `RULES.md` §2.2 wants a `TaskGroup`, and there is
+  nothing to overlap while the graph is in-process; **S7.1** makes it a network
+  hop.
+
+**Tomorrow's first step**
+
+`S4.3` — the three conflict checks, into the same module: NLI contradiction,
+cardinality against the ontology, and temporal overlap.
+
+---
+
 ---
 
 <!--

@@ -261,7 +261,7 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     **ONTOLOGY_STRATEGIES,
     # Layer 2, likewise. It takes the candidate generator as an argument so the
     # two modules do not import each other.
-    **l2_strategies(_memory_candidates()),
+    **l2_strategies(_memory_candidates(), _stored_assertions(), _edges()),
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

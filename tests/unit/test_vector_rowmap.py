@@ -1,11 +1,14 @@
 """The pure half of the pgvector store.  BUILD_NOTEBOOK.md S3.2
 
-`rowmap.py` decides two things that are worth pinning down without a database
-in the way: what text an assertion is embedded from, and what id each of its
-citations gets. Both are choices rather than mechanics - the first shapes
-retrieval, the second is what makes a replayed write idempotent - and both are
-ordinary functions, so `RULES.md` §5 puts them here rather than in the
+`rowmap.py` decides what id each of an assertion's citations gets, and that is a
+choice rather than a mechanic: it is what makes a replayed write idempotent. It
+is an ordinary function, so `RULES.md` §5 puts it here rather than in the
 integration suite.
+
+What text an assertion is embedded from used to be tested here too. `embed_text`
+moved to `base.py` at S4.2 - the import contract found that reaching it from
+`pipeline/` dragged `asyncpg` along - so its tests moved with it, to
+`test_embed_text.py`.
 
 The round trip in the other direction (`assertion_from_row`,
 `provenance_from_row`) is deliberately NOT tested here. Those take an
@@ -27,7 +30,6 @@ from guardmem_core.memory.vector.rowmap import (
     EMBEDDING_DIM,
     INSERT_ASSERTION,
     assertion_params,
-    embed_text,
     provenance_params,
 )
 from guardmem_core.schemas.base import ObjectValue
@@ -72,50 +74,6 @@ def _assertion(
         provenance=provenance or [_citation()],
         trace_id="tr_1",
     )
-
-
-class TestWhatGetsEmbedded:
-    @pytest.mark.parametrize(
-        ("obj", "expected"),
-        [
-            ("penicillin", "allergy: penicillin"),
-            (0.5, "allergy: 0.5"),
-            (True, "allergy: True"),
-            ({"street": "12 Elm", "city": "Leeds"}, "allergy: 12 Elm Leeds"),
-        ],
-        ids=["string", "number", "boolean", "structured"],
-    )
-    def test_the_object_is_rendered_for_a_model_not_for_a_parser(
-        self, obj: ObjectValue, expected: str
-    ) -> None:
-        """A dict renders as its values, not as JSON.
-
-        Braces, quotes and keys are tokens an embedding model spends attention
-        on and gets nothing back for; the values are what carry the meaning.
-        """
-        assert embed_text(_assertion(obj=obj)) == expected
-
-    def test_the_subject_is_absent(self) -> None:
-        """`subject_id` is a resolved `EntityId` - a UUID, semantically empty.
-
-        Stated as a test because the alternative is tempting and wrong: joining
-        the entity's canonical name in would make the vector depend on a row
-        this store does not own and cannot re-embed when it changes.
-        """
-        assert "e_8812" not in embed_text(_assertion())
-
-    def test_corroboration_does_not_change_the_text(self) -> None:
-        """The same fact embeds the same however many sources it has.
-
-        `provenance` is a list, so embedding `verbatim` would make the vector a
-        function of how often a fact happened to be said. That is exactly the
-        axis `MEMORY_ENGINE.md` §3.2 gives to `S_cor`, and retrieval must not
-        double-count it.
-        """
-        once = _assertion(provenance=[_citation()])
-        thrice = _assertion(provenance=[_citation(), _citation(span=(40, 61)), _citation()])
-
-        assert embed_text(once) == embed_text(thrice)
 
 
 class TestCitationIdsAreDerivedFromContent:

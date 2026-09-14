@@ -97,7 +97,8 @@ guardmem-ai/
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # S4.1; pass / coerce / quarantine / reject against
 │   │       │   │   │                    #   the tenant ontology, carrying S_sch forward
-│   │       │   │   ├── conflict.py      # NLI contradiction + cardinality + temporal
+│   │       │   │   ├── conflict.py      # S4.2 incumbent retrieval; S4.3 adds NLI
+│   │       │   │   │                    #   contradiction + cardinality + temporal
 │   │       │   │   └── dedupe.py        # cosine + bidirectional entailment merge
 │   │       │   └── l3_score/
 │   │       │       ├── entropy.py       # semantic entropy over K samples
@@ -115,7 +116,8 @@ guardmem-ai/
 │   │       │   ├── outbox.py            # S3.3; the `outbox` table's shape, both directions
 │   │       │   ├── relay.py             # S3.3; drains the outbox: graph side, then visible=true
 │   │       │   ├── vector/
-│   │       │   │   ├── base.py          # VectorStore + Embedder Protocols (S1.7, S3.2)
+│   │       │   │   ├── base.py          # VectorStore + Embedder Protocols (S1.7, S3.2);
+│   │       │   │   │                    #   embed_text + Claim moved here at S4.2
 │   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered;
 │   │       │   │   │                    #   S3.3 added tenant_transaction, shared with the relay
 │   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both directions
@@ -263,7 +265,8 @@ guardmem-ai/
 │   │   ├── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of
 │   │   ├── test_outbox_enqueue.py       #   S3.3; the assertion and its event, one transaction
 │   │   ├── test_outbox_relay.py         #   S3.3 DONE WHEN: killed mid-flight, visible once
-│   │   └── test_seed_demo_tenant.py     #   S3.6 DONE WHEN: `make seed` twice, same row count
+│   │   ├── test_seed_demo_tenant.py     #   S3.6 DONE WHEN: `make seed` twice, same row count
+│   │   └── test_incumbent_retrieval.py  #   S4.2 DONE WHEN: the seeded incumbent comes back
 │   ├── contract/                        # schemathesis on OpenAPI + MCP tool schemas
 │   ├── property/                        # hypothesis: pipeline invariants
 │   ├── security/                        # injection corpus regression
@@ -282,7 +285,8 @@ guardmem-ai/
 │   │   ├── strategies.py                # hypothesis strategies, one per schema
 │   │   ├── strategy_ontology.py         # S3.5; the ontology models, whose validator makes
 │   │   │                                #   entity types have to be drawn before predicates
-│   │   ├── strategy_l2.py               # S4.1; the schema gate's verdict models
+│   │   ├── strategy_l2.py               # S4.1/S4.2; the Layer 2 result models
+│   │   ├── seed.py                      # S4.2; the seeded demo tenant, as a plugin
 │   │   └── strategy_primitives.py       # the vocabulary those draw from (S2.2)
 │   └── conftest.py                      # REPO_ROOT, all_schema_models(), pytest_plugins.
 │                                        #   The ONLY conftest: a second one is a duplicate

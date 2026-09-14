@@ -1,9 +1,10 @@
 """Layer 2 - validation and conflict detection.  MEMORY_ENGINE.md 2
 
-`schema_gate` (S4.1). Incumbent retrieval (S4.2), the three conflict checks
-(S4.3) and dedupe/merge (S4.4) arrive at their own steps.
+`schema_gate` (S4.1) and the retrieval half of `conflict` (S4.2). The three
+conflict checks join the latter at S4.3; dedupe/merge is S4.4.
 """
 
+from guardmem_core.pipeline.l2_validate.conflict import IncumbentSet, retrieve_incumbents
 from guardmem_core.pipeline.l2_validate.schema_gate import (
     GatedCandidate,
     GateOutcome,
@@ -14,6 +15,8 @@ from guardmem_core.pipeline.l2_validate.schema_gate import (
 __all__ = [
     "GateOutcome",
     "GatedCandidate",
+    "IncumbentSet",
     "SchemaGateResult",
     "gate",
+    "retrieve_incumbents",
 ]

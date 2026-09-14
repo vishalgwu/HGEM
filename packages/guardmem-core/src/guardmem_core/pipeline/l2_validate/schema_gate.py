@@ -148,8 +148,10 @@ def gate(candidates: Sequence[MemoryCandidate], ontology: Ontology) -> SchemaGat
     Two checks §2.1 describes are deliberately **not** here. The ontology
     declares each predicate's `subject` entity type, and this cannot check it:
     `MemoryCandidate.subject` is still a surface form, because entity
-    resolution has not run - `StoredAssertion.subject_id` is where it becomes
-    an `EntityId`, and S4.2 is where the resolution happens. And
+    resolution has not run - `StoredAssertion.subject_id` is where it becomes an
+    `EntityId`. S4.1 assumed S4.2 would build that resolution; S4.2 found it is
+    specified in **no** document, so it is an open gap rather than a later step,
+    and `conflict.py`'s docstring carries the argument. And
     `min_source_tier` is not checked here either: `RULES.md` §4 makes the tier
     a *cap on what may auto-write*, which is a decision-matrix question, and
     answering it here would move a safety rule away from the table that

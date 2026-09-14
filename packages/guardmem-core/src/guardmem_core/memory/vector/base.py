@@ -23,10 +23,75 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
+from guardmem_core.schemas.base import ObjectValue
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.types import AssertionId, Namespace
 
-__all__ = ["Embedder", "VectorStore"]
+__all__ = ["Claim", "Embedder", "VectorStore", "embed_text"]
+
+
+class Claim(Protocol):
+    """Anything with a predicate and an object, which is all `embed_text` reads.
+
+    A `StoredAssertion` on the write side and a `MemoryCandidate` on the read
+    side. The Protocol is what lets both use the *same* renderer, and S4.2 is
+    the step that made that necessary: incumbent retrieval embeds a candidate
+    and compares it by cosine against vectors computed from assertions, so if
+    the two sides rendered their text differently the distances would be
+    meaningless and nothing would say so. A second renderer beside this one is
+    the single most dangerous duplication this module could grow.
+    """
+
+    @property
+    def predicate(self) -> str:
+        """Ontology predicate."""
+        ...
+
+    @property
+    def object(self) -> ObjectValue:
+        """The claimed or stored value."""
+        ...
+
+
+def embed_text(claim: Claim) -> str:
+    """Render the text a claim's vector is computed from.
+
+    Args:
+        claim: The fact being written, or the candidate being matched against
+            what is already there.
+
+    Returns:
+        A canonical rendering of the predicate and object.
+
+    The subject is deliberately absent. `StoredAssertion.subject_id` is an
+    `EntityId` - entity resolution has already happened - and a UUID contributes
+    nothing an embedding model can use. The canonical name lives on `entity`,
+    and joining it in would make the vector depend on a row this store does not
+    own and cannot re-embed when it changes.
+
+    `provenance[*].verbatim` is the other candidate, and it was considered: it is
+    natural language, so it would very likely retrieve better than
+    `"allergy: penicillin"` does. It is rejected because it is a *list*. A fact
+    corroborated by three sources would have three texts and one vector slot, so
+    the store would have to pick one or average them - and either way the same
+    fact embeds differently depending on how many times it happened to be said,
+    which is exactly the axis `MEMORY_ENGINE.md` §3.2 wants `S_cor` to carry and
+    retrieval not to. Revisit with the eval harness at S22, which is the first
+    point there is a number to compare.
+    """
+    return f"{claim.predicate}: {_render(claim.object)}"
+
+
+def _render(value: ObjectValue) -> str:
+    """Flatten an `ObjectValue` to something worth embedding.
+
+    `json.dumps` on a bare string would embed the quotes, and on a dict it gives
+    the model braces and colons to spend attention on. Structured objects are
+    rendered as their values, which is what carries the meaning.
+    """
+    if isinstance(value, dict):
+        return " ".join(str(item) for item in value.values())
+    return str(value)
 
 
 class Embedder(Protocol):

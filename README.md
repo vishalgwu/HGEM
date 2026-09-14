@@ -13,7 +13,7 @@
 > coordinates the dual write, the graph store on the other side of it, and the
 > ontology that says what a predicate is allowed to mean — with `make seed`
 > putting all of it together, and S4.1 starting Layer 2 by enforcing that
-> vocabulary:
+> vocabulary and S4.2 retrieving what it already believes:
 > write, search, supersede, point-in-time recall of a fact that has since been
 > retired, and a partial write that is never retrievable. Nothing yet validates,
 > scores or decides a candidate — that is Layer 2. Every performance
@@ -166,7 +166,8 @@ stack it actually requires.
 The engine is not implemented yet. The repository was reset to a documentation
 baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete (S1.1 – S1.7),
 Layer 1 is complete (S2.1 – S2.3), the storage layer is complete (**Day 3, S3.1
-– S3.6**), and **Layer 2 has started at S4.1** with the schema gate.
+– S3.6**), and **Layer 2 is under way (S4.1 – S4.2)** — the schema gate and incumbent
+retrieval.
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
 layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
@@ -273,10 +274,22 @@ while a wrong coercion is a stored fact that reads as though somebody meant it.
 vocabulary rather than a truthiness test — recording a declined consent as a
 given one is the one place this code could do real harm.
 
+S4.2 is where Layer 2 starts depending on Day 3: you cannot detect a
+contradiction without knowing what is already believed. It fetches the ten
+nearest live facts sharing a candidate's namespace, subject and predicate, plus
+the graph's one-hop view of what else that subject asserts — the first code in
+the pipeline to call both stores, and the first caller of the partial index the
+schema was given for exactly this query.
+
+One property there is worth naming because it fails silently: the candidate and
+the stored facts must be turned into text by the *same* renderer. If they were
+not, the cosine distances would still be numbers, would still order the results,
+and would mean nothing at all. So there is one such function and both sides go
+through it.
+
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push. The next step is S4.2, incumbent retrieval — the first caller of both
-stores at once.
+push. The next step is S4.3, the three conflict checks.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

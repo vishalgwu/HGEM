@@ -13,69 +13,24 @@ the thing developers type runs.
 The rest of the module is the END OF DAY 3 CHECK: "you can write an assertion to
 Postgres and read it back with provenance." The seed is the only artifact that
 exercises S3.2 through S3.5 together, so it is the right place to check that the
-pieces actually compose - that a seeded fact is visible, carries a span into the
-transcript it was quoted from, and that the superseded pair behaves the way
-`ADR-0002` says it does.
+pieces actually compose.
+
+The fixtures moved to `tests/fixtures/seed.py` at S4.2, when incumbent retrieval
+became the second suite that wants a seeded incumbent.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from typing import TYPE_CHECKING, Final
 
 import asyncpg
-import pytest
 
-from conftest import REPO_ROOT
-from guardmem_core.memory.vector.pool import sqlalchemy_dsn
+from fixtures.seed import run_seed
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
-
-SEED = REPO_ROOT / "scripts" / "seed_demo_tenant.py"
-
-# Kept in step with `scripts/demo_tenant_data.py` by the test below that reads
-# the script's own output rather than by hand.
-TENANT_SLUG: Final = "demo-clinic"
+    pass
 
 COUNTED: Final = ("entity", "assertion", "provenance", "outbox")
-
-
-def run_seed(dsn: str) -> str:
-    """Run the seed against `dsn`, as `make seed` would.
-
-    Args:
-        dsn: A libpq DSN for a migrated database.
-
-    Returns:
-        Its stdout, which is the CLI's interface and what the counts are read
-        from.
-
-    Raises:
-        RuntimeError: the seed failed. Its output is included, because a failure
-            here is a broken seed and not a broken test.
-
-    Inherits the environment and overrides one variable, exactly as the alembic
-    fixture does: `Settings` has nine required fields, the DSN is one, and the
-    other eight come from `.env` - which every developer has and a fresh CI
-    runner gets from `cp .env.example .env`.
-    """
-    environment = dict(os.environ)
-    environment["GM_DATABASE_URL"] = sqlalchemy_dsn(dsn)
-    result = subprocess.run(
-        [sys.executable, str(SEED)],
-        cwd=REPO_ROOT,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"seed failed:\n{result.stdout}\n{result.stderr}")
-    return result.stdout
 
 
 async def row_counts(owner: asyncpg.Connection, tenant: str) -> dict[str, int]:
@@ -100,31 +55,6 @@ async def row_counts(owner: asyncpg.Connection, tenant: str) -> dict[str, int]:
         ),
     }
     return {table: int(await owner.fetchval(scoped[table], tenant)) for table in COUNTED}
-
-
-@pytest.fixture(scope="session")
-def seeded(postgres_dsn: str) -> Iterator[str]:
-    """Run the seed once, session-wide, and return its stdout.
-
-    Session-scoped because the seed takes a few seconds and every test here
-    wants the same database state. The rows it writes belong to its own
-    deterministic tenant, so they cannot collide with the per-test tenants
-    `fixtures/pgvector.py` creates and destroys around them.
-    """
-    yield run_seed(postgres_dsn)
-
-
-@pytest.fixture
-async def demo(postgres_dsn: str, seeded: str) -> AsyncIterator[tuple[asyncpg.Connection, str]]:
-    """An owner connection scoped to the demo tenant, and that tenant's id."""
-    connection = await asyncpg.connect(postgres_dsn)
-    try:
-        tenant = await connection.fetchval("SELECT id FROM tenant WHERE slug = $1", TENANT_SLUG)
-        assert tenant is not None, "the seed did not create its tenant"
-        await connection.execute("SELECT set_config('app.tenant_id', $1, false)", str(tenant))
-        yield connection, str(tenant)
-    finally:
-        await connection.close()
 
 
 class TestIdempotence:

@@ -8,8 +8,11 @@ transactions, tenancy or SQL statements. The store knows those and nothing about
 column order. When S3.6 or a Qdrant backend changes one, it should not have to
 read the other.
 
-The one thing worth arguing about lives here too: what text an assertion is
-embedded from. See `embed_text`.
+`embed_text` lived here until S4.2 and now lives in `base.py`. It moved because
+the import contract said so, and the contract was right: this module imports
+`asyncpg` for a `Record` annotation, so anything under `pipeline/` that reached
+for the renderer pulled a database driver in behind it. What text a fact embeds
+as is a decision about meaning, not about column order - see `base.embed_text`.
 """
 
 from __future__ import annotations
@@ -34,7 +37,6 @@ __all__ = [
     "SELECT_PROVENANCE",
     "assertion_from_row",
     "assertion_params",
-    "embed_text",
     "provenance_from_row",
     "provenance_params",
 ]
@@ -53,46 +55,6 @@ ASSERTION_COLUMNS: Final = (
     "confidence, risk, valid_from, valid_to, recorded_at, retracted_at, "
     "superseded_by, corroboration_count, trace_id, visible"
 )
-
-
-def embed_text(assertion: StoredAssertion) -> str:
-    """Render the text an assertion's vector is computed from.
-
-    Args:
-        assertion: The fact being written.
-
-    Returns:
-        A canonical rendering of the predicate and object.
-
-    The subject is deliberately absent. `StoredAssertion.subject_id` is an
-    `EntityId` - entity resolution has already happened - and a UUID contributes
-    nothing an embedding model can use. The canonical name lives on `entity`,
-    and joining it in would make the vector depend on a row this store does not
-    own and cannot re-embed when it changes.
-
-    `provenance[*].verbatim` is the other candidate, and it was considered: it is
-    natural language, so it would very likely retrieve better than
-    `"allergy: penicillin"` does. It is rejected because it is a *list*. A fact
-    corroborated by three sources would have three texts and one vector slot, so
-    the store would have to pick one or average them - and either way the same
-    fact embeds differently depending on how many times it happened to be said,
-    which is exactly the axis `MEMORY_ENGINE.md` §3.2 wants `S_cor` to carry and
-    retrieval not to. Revisit with the eval harness at S22, which is the first
-    point there is a number to compare.
-    """
-    return f"{assertion.predicate}: {_render(assertion.object)}"
-
-
-def _render(value: str | float | bool | dict[str, object]) -> str:
-    """Flatten an `ObjectValue` to something worth embedding.
-
-    `json.dumps` on a bare string would embed the quotes, and on a dict it gives
-    the model braces and colons to spend attention on. Structured objects are
-    rendered as their values, which is what carries the meaning.
-    """
-    if isinstance(value, dict):
-        return " ".join(str(item) for item in value.values())
-    return str(value)
 
 
 def assertion_params(

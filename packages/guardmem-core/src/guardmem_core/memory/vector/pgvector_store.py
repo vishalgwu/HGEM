@@ -39,6 +39,7 @@ import asyncpg
 
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.outbox import INSERT_OUTBOX, outbox_params
+from guardmem_core.memory.vector.base import embed_text
 from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.memory.vector.rowmap import (
     ASSERTION_COLUMNS,
@@ -48,7 +49,6 @@ from guardmem_core.memory.vector.rowmap import (
     SELECT_PROVENANCE,
     assertion_from_row,
     assertion_params,
-    embed_text,
     provenance_from_row,
     provenance_params,
 )
