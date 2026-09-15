@@ -461,19 +461,25 @@ mistake — the same problem the "no model grading" rule exists to prevent — a
 scoring against the test double would measure scripted answers.
 
 Until S9.1 there was no adapter to a real model provider at all, and that was
-the whole of the explanation. It is no longer. **Three of the four dependencies
-`pipeline.run()` needs still have no implementation in this repository**, and
+the whole of the explanation. It is no longer. `pipeline.run()` takes four
+dependencies this repository did not supply; two are still open, and
 `pipeline/deps.py` says why for each:
 
 | Missing | What it feeds | Share of `C` |
 |---|---|---|
-| `EntailFn` | §3.1's meaning clustering **and** §3.2's `S_src` grounding | **0.60** |
 | `EntityResolver` | incumbent retrieval → conflict → `S_con` | 0.15 |
 | `CandidateClassifier` | §3.3's `pii_class` and `irreversibility` → `R` | none, but `run()` will not execute without it |
 
-`EntityResolver` and `CandidateClassifier` each need an ADR before an
-implementation — the first is a matching problem with a precision/recall
-trade-off that no document specifies, the second is deployment policy.
+Each needs an ADR before an implementation — the first is a matching problem
+with a precision/recall trade-off that no document specifies, the second is
+deployment policy.
+
+The other two are closed. `LLMClient` at S9.1, and `EntailFn` — the largest at
+0.60 of `C`, feeding both §3.1's meaning clustering and §3.2's grounding — by
+`LLMEntailer`, which scores a whole batch of text pairs in one BALANCED call and
+hands back a lookup. It is built and **not yet wired**: the callable the scorer
+takes is synchronous and the producer is not, so the orchestrator has to collect
+a candidate's pairs and await one lookup before scoring it.
 
 Two further gaps are not dependencies but are equally in the way. The harness
 has no `generate` subcommand, so nothing fills a corpus; and the seed transcript

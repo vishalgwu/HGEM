@@ -7,22 +7,21 @@ provenance explicitly." The argument reading differs; everything after it is the
 same call into `guardmem_core.pipeline.run`.
 
 **Neither can run today, and the reason is not in this file.** `run()` takes a
-`Deps`, and three of its members have no implementation anywhere in this
-repository:
+`Deps`, and it cannot be built yet. Two members have no implementation anywhere
+in this repository and a third is implemented but not wired:
 
-- `LLMClient` - `llm/base.py` declares the Protocol and **S9.1** builds the
-  provider adapters. The noise filter, the extractor and the NLI judge all need
-  it, so `commit` needs it too despite skipping extraction: §2.2(a)'s conflict
-  check is a model call.
 - `EntityResolver` - turning `"Joan Ellery"` into an `EntityId`. Specified in no
   document: not the notebook, not `MEMORY_ENGINE.md`, not `ARCHITECTURE.md`.
   `pipeline/deps.py` explains at length why a default would be worse than none.
 - `CandidateClassifier` - §3.3's `pii_class` and `irreversibility`, which are
   policy decisions a deploying organisation makes.
+- `EntailFn` now has a producer - `llm/entailment.py`'s `LLMEntailer` - and is
+  still not injectable here, because the callable is sync and the producer is
+  async. `entropy.py` names the resolution: the caller precomputes the pairs and
+  passes a lookup, which is a change to the orchestrator's `_score_and_decide`.
 
-Plus `EntailFn`, §3.1's and §3.2's entailment function, which has no producer
-either and whose only plausible backings are a local cross-encoder (torch, which
-this project deliberately does not install) or an LLM.
+`LLMClient` was on this list until **S9.1** and is not any more; three provider
+adapters implement it.
 
 So these handlers validate their arguments completely and then refuse, naming
 every missing piece and the step that builds it. **That is deliberately not a
@@ -31,7 +30,7 @@ stub that returns a plausible decision.** A `memory.propose` that answered
 this repository could ship: the product's entire claim is that a fact was
 governed before it was believed, and a tool that says so without having done it
 is worse than no tool. `_require_pipeline` is the one function to delete when
-S9.1 lands.
+the last of the three above is closed.
 
 **Two more fields of §2.2 need steps that do not exist**, recorded here so they
 are not mistaken for oversights when the rest is wired:
@@ -71,12 +70,12 @@ _K_BY_RISK_HINT: Final = {"low": 1, "default": 3, "high": 5}
 _MODES: Final = frozenset({"async", "strict"})
 
 # What a caller is told is missing, in the order a reader should think about it:
-# the model first, because it blocks the other two from even being testable.
+# the two that need a decision first, then the one that needs only wiring.
 MISSING_DEPENDENCIES: Final = (
-    "LLMClient (no provider adapter exists; BUILD_NOTEBOOK.md S9.1 builds them)",
-    "EntailFn (§3.1/§3.2's entailment function; no producer, S9.1)",
     "EntityResolver (surface form to EntityId; specified in no document, needs an ADR)",
     "CandidateClassifier (§3.3's pii_class and irreversibility; deployment policy)",
+    "the orchestrator's entailment wiring (LLMEntailer exists; `_score_and_decide` "
+    "has to assemble the pairs and await one lookup before scoring)",
 )
 
 
@@ -89,13 +88,15 @@ def _require_pipeline(what: str) -> None:
     Raises:
         ToolRefusedError: always, today. This is the whole function.
 
-    **Delete this when S9.1 lands** - it is the single place the two write tools
-    are gated, so wiring a real `Deps` is a change to one call site rather than a
-    hunt through two handlers.
+    **Delete this when the last missing dependency is closed** - it is the
+    single place the two write tools are gated, so wiring a real `Deps` is a
+    change to one call site rather than a hunt through two handlers.
 
     The message lists every missing dependency rather than the first one,
-    because they are not sequential: an operator who fixed `LLMClient` alone
-    would hit the next refusal and reasonably conclude the work was open-ended.
+    because they are not sequential: an operator who closed `EntityResolver`
+    alone would hit the next refusal and reasonably conclude the work was
+    open-ended. S9.1 is the proof - it closed `LLMClient`, which was first on
+    this list, and three entries remained.
     """
     raise ToolRefusedError(
         f"{what} cannot run: the decision pipeline is not wired in this build. "
@@ -122,9 +123,9 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
 
     Arguments are validated **before** the refusal, deliberately. A caller
     getting "the pipeline is not wired" for a call that was also malformed
-    learns one problem and ships the other; and when S9.1 lands, every one of
-    these checks is already the right check rather than something written in a
-    hurry against a tool that had never run.
+    learns one problem and ships the other; and when the pipeline is wired, every
+    one of these checks is already the right check rather than something written
+    in a hurry against a tool that had never run.
     """
     _require_content(arguments)
     _require_source_tier(arguments)
@@ -133,7 +134,7 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
     _require_hints(arguments)
     _require_idempotency_key(arguments)
     _require_pipeline("memory.propose")
-    raise AssertionError("unreachable until S9.1")  # pragma: no cover
+    raise AssertionError("unreachable until the pipeline is wired")  # pragma: no cover
 
 
 async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -161,7 +162,7 @@ async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[st
     _require_assertions(arguments)
     _require_idempotency_key(arguments)
     _require_pipeline("memory.commit")
-    raise AssertionError("unreachable until S9.1")  # pragma: no cover
+    raise AssertionError("unreachable until the pipeline is wired")  # pragma: no cover
 
 
 # --- §2.2 argument reading --------------------------------------------------

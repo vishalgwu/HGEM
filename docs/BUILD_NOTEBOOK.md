@@ -2215,6 +2215,34 @@ to test was never reached. Reordered.
 NOTE: this is the same machinery as LID's semantic-entropy detector. Keep `EntailFn` as an injected
 callable so LID can back it later without touching this module.
 
+**Correction 4, added 2026-09-15: this step left `EntailFn` with no producer,
+and said so nowhere.** Keeping the callable injected was right and is unchanged.
+What the step never assigned is the *other* half - somebody has to supply one -
+and the gap sat open through S5.2, S5.6 and S6.2 until composing `Deps` made it
+one of three members nothing implements. It is the largest of the three by
+weight: §3.2 routes `w_H = 0.35` through the clustering here and `w_src = 0.25`
+through the grounding in S5.2, so **0.60 of `C` arrives through a callable this
+step declared and did not build**.
+
+Built at `llm/entailment.py`, as `LLMEntailer`, on the reasoning §2.2(a) already
+uses for the NLI judge: a cross-encoder means torch, which the default install
+deliberately excludes, so BALANCED-tier LLM first and the local model behind the
+same callable later. It does **not** live in `pipeline/l3_score/` - that package
+is pure by design and this one makes a model call.
+
+Two things the step's own NOTE turned out to decide. `EntailFn` is sync, so an
+async producer cannot be bound directly; this module's docstring already gave
+the answer - "precompute the pairs it needs and pass a lookup" - and
+`LLMEntailer.lookup` is that shape, one batched call returning a closure.
+**Wiring it into `_score_and_decide` is S5.6's file and is not done**, so the
+producer exists and the pipeline still cannot run.
+
+And the lookup **raises** on a pair nobody scored rather than returning 0.0.
+That is this step's own failure mode read forward: S9.1 found a fixed seed that
+made every sample identical, which would have set `H_norm` to 0 - maximum
+confidence - on every candidate forever, with no error anywhere. A default
+return here is that bug with a different cause.
+
 COMMIT: `feat(s5.1): semantic entropy over meaning clusters`
 
 ---
@@ -2785,9 +2813,15 @@ Still missing, and `run()` cannot be called without any of them:
 
 | Missing | What it feeds | Share of `C` |
 |---|---|---|
-| `EntailFn` | §3.1's clustering **and** §3.2's `S_src` | **0.60** (0.35 + 0.25) |
 | `EntityResolver` | incumbents → conflict → `S_con` | 0.15 |
 | `CandidateClassifier` | §3.3's `pii_class`, `irreversibility` → `R` | none, but `run()` needs it |
+
+`EntailFn` was the third and the largest at 0.60, and it has a producer as of
+2026-09-15 - `llm/entailment.py`, see S5.1's correction 4. It is **not** wired:
+the callable is sync and the producer is async, so `_score_and_decide` has to
+assemble a candidate's pairs and await one lookup before scoring it. That is the
+remaining work on this row, and it is wiring rather than a decision - unlike the
+two above, each of which needs an ADR first.
 
 Two more gaps that are not dependencies. The harness has **no `generate`
 subcommand** — `verify`, `template`, `score` and `agreement` ship, and the loop

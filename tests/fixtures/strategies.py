@@ -22,6 +22,7 @@ from __future__ import annotations
 from hypothesis import strategies as st
 
 from guardmem_core.llm.base import LLMResponse, Tier
+from guardmem_core.llm.entailment import EntailmentBatch
 from guardmem_core.memory.vector.base import ScoredAssertion
 from guardmem_core.pipeline.l1_extract.extractor import ExtractionBatch, ExtractionContext
 from guardmem_core.pipeline.l1_extract.noise_filter import (
@@ -356,6 +357,15 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
         latency_ms=st.floats(min_value=0.0, max_value=1e6, allow_nan=False),
         cost_usd=st.floats(min_value=0.0, max_value=1e3, allow_nan=False),
     ),
+    # S5.1's `EntailFn`, finally produced. Beside `LLMResponse` rather than in
+    # `strategy_l3.py` because it belongs to `guardmem_core.llm` - the entailer
+    # makes a model call and `pipeline/l3_score` is pure by design, so the
+    # producer cannot live with the consumer.
+    #
+    # `_UNIT` is [0, 1], which is what the field declares, and the bound is
+    # load-bearing: §3.1 compares against a 0.8 cut and §3.2 multiplies the
+    # result into a composite declared to be in [0, 1].
+    EntailmentBatch: st.builds(EntailmentBatch, scores=st.lists(_UNIT, max_size=4)),
 }
 
 ANY_SCHEMA = st.one_of(*SCHEMA_STRATEGIES.values())

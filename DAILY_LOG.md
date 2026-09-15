@@ -3772,6 +3772,91 @@ running, and as of today nothing but a credential is in its way.
 
 ---
 
+## 2026-09-15 — S5.1 correction 4 (the entailment producer) + a doc-correction pass
+
+**Shipped**
+
+- **`llm/entailment.py` — `EntailFn`'s first and only producer.** S5.1 declared
+  the callable, asked that it stay injected, and never assigned anybody to
+  supply one. Nobody did, through S5.2, S5.6 and S6.2. It is the largest of
+  `Deps`'s three unimplemented members: §3.2 routes `w_H = 0.35` through the
+  clustering and `w_src = 0.25` through the grounding, so **0.60 of `C` was
+  arriving through a callable that did not exist**.
+- **Batched, not per-pair, because `entropy.py` said so.** Its docstring already
+  carried the design - "precompute the pairs it needs and pass a lookup" - and
+  `LLMEntailer.lookup` is that: one BALANCED call over every pair, returning a
+  sync closure. `cluster_meanings` makes up to `K(K-1)` comparisons and a round
+  trip each would have been the slowest thing in the pipeline.
+- **Driven against a real Ollama before being believed**, and
+  `tests/live/test_live_entailment.py` pins what it showed. 100% branch coverage
+  on the module; 1514 tests green, 98.92%.
+- **Four false documentary claims corrected** in a separate commit ahead of it.
+
+**What broke / what I learned**
+
+- **`PHASES_AND_ROADMAP.md` said the notebook has no appendices and that
+  Appendix G "does not exist - so the one document that is supposed to say what
+  to sacrifice says nothing".** PART 6 carries A-G and has since the scaffold
+  commit; `git log -S` puts the cut order in `b108e48`. A 2026-09-14 correction
+  had *introduced* the error while fixing a different pointer, and
+  `docs/README.md` said "the same appendices A-G" the whole time. Two owned
+  documents disagreed and the wrong one won for a day. **The lesson is the
+  cheap one: I read the pointer instead of the notebook.**
+- **"Nothing is in its way now but an API key and a labelling session" was in
+  three places and was never true.** S9.1 closed one of Checkpoint B's four
+  blockers, and its own log entry generalised that to all four. `deps.py` and
+  `MISSING_DEPENDENCIES` both named the other three, unread. A step's closing
+  claim about what remains is the least reliable sentence in the log, because it
+  is written by the person who has just stopped looking.
+- **The gate does not need an API key at all**, and that went unnoticed for four
+  steps while the key was named as the blocker. Ollama runs it for nothing. The
+  sign-off already has a provider line, which is the whole accommodation needed.
+- **A repo guard caught the new model before I did.**
+  `test_every_model_has_a_strategy` failed the moment `EntailmentBatch` existed:
+  every `GMModel` needs a hypothesis strategy, and the walk finds models
+  wherever they are defined. This is S1.6's drift guard doing exactly its job.
+- **Two tests asserted the *contents* of `MISSING_DEPENDENCIES` by spelling
+  them out**, so closing a gap failed them for the wrong reason - they were
+  testing the shape of a sentence, not the property that every gap is named.
+  Both now walk the tuple, the way `test_errors.py` walks the exception
+  hierarchy. They would have broken again at the next closure.
+- **The live run is the part I would not skip again.** Every unit test passes
+  against a model that returns 0.7 for everything, which is CHECKPOINT B's
+  headline failure. The real draw showed the property that matters: 0.95 for a
+  wider claim entailing a narrower one and **0.00 for the same pair reversed**.
+  Without directional discrimination, §3.1's bidirectional clustering is an
+  expensive one-way test.
+- **`llama3.1:8b` answers in coarse steps** - 0.00, 0.80, 0.95, 1.00 - rather
+  than a smooth distribution, and 0.80 is exactly §3.1's `_SAME_MEANING` cut.
+  It lands on the right side (`>= 0.8`), but a scorer whose mass sits *on* the
+  threshold is worth knowing about before reading an AUROC off it. Another
+  reason the sign-off has to name the provider.
+
+**Still open**
+
+- **THE GATE, and it is now two ADRs and one wiring change away** rather than
+  four unknowns. `EntityResolver` and `CandidateClassifier` each need a decision
+  written down before an implementation; the entailer needs `_score_and_decide`
+  to assemble a candidate's pairs and await one lookup.
+- **The harness still has no `generate`**, and the seed transcript is forty
+  turns for one patient supporting 28 facts. 200 candidates needs more
+  transcript - that is corpus work, not code.
+- **`LLMEntailer` does not cache across calls.** Two proposals sharing a pair
+  pay twice. Deliberate: a prompt-keyed cache is S9.4 and belongs in front of
+  the client, not inside one caller of it.
+- No OpenAI chat prices; an Ollama tag is not a digest; S9.2, S9.3 and S10.1
+  unbuilt. The applier (#44) and the four spec questions, unchanged.
+
+**Tomorrow's first step**
+
+**ADR-0008, entity resolution**, then ADR-0009 for the classifier. Not the
+orchestrator wiring - that is the one piece of the three that needs no decision,
+so it is the one that can wait. `deps.py` has argued since S5.6 that a default
+resolver is worse than none; the ADR is where that argument stops being a
+docstring.
+
+---
+
 ---
 
 ---

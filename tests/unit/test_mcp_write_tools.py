@@ -3,8 +3,9 @@
 Split from `test_mcp_tools.py` at `RULES.md` §2.4's 400-line cap, along the seam
 the tool surface already has: `memory.search` and `memory.get_entity` read
 governed memory and work; `memory.propose` and `memory.commit` validate
-everything they can and then refuse, because the decision pipeline has no model
-provider (S9.1), no entity resolver and no candidate classifier.
+everything they can and then refuse, because the decision pipeline has no
+entity resolver, no candidate classifier, and no entailment wiring in the
+orchestrator.
 
 **These are the most important tests in the S6.2 suite.** A `memory.propose`
 that returned `auto_write` with a plausible confidence would be the single most
@@ -24,7 +25,7 @@ from fixtures.assertions import NS, TENANT, WHEN, stored_assertion
 from fixtures.mcp import context, settings, state, store_with
 from mcp_server.tools import _HANDLERS, _summarise, call_tool
 from mcp_server.tools.context import ToolRefusedError, context_for
-from mcp_server.tools.pipeline import run_commit, run_propose
+from mcp_server.tools.pipeline import MISSING_DEPENDENCIES, run_commit, run_propose
 from mcp_server.tools.search import run_search
 
 
@@ -38,18 +39,25 @@ class TestProposeAndCommitRefuseRatherThanInvent:
     """
 
     async def test_propose_names_every_missing_dependency(self) -> None:
+        """Walks `MISSING_DEPENDENCIES` rather than listing its entries.
+
+        The list changes as the gaps close - S9.1 removed `LLMClient` from it -
+        and a test that spelled the entries out failed on that commit for the
+        wrong reason, asserting the shape of a sentence rather than the property
+        that every gap is named. `tests/unit/test_errors.py` walks the exception
+        hierarchy for the same reason.
+        """
         with pytest.raises(ToolRefusedError) as caught:
             await run_propose(context(), {"content": "The patient prefers CVS.", "mode": "strict"})
 
         message = str(caught.value)
-        assert "LLMClient" in message
-        assert "EntityResolver" in message
-        assert "CandidateClassifier" in message
-        assert "S9.1" in message
+        assert MISSING_DEPENDENCIES, "a refusal that names nothing is a shrug"
+        for missing in MISSING_DEPENDENCIES:
+            assert missing in message
 
     async def test_propose_validates_arguments_before_refusing(self) -> None:
         """A caller whose call was *also* malformed should learn that too, and
-        when S9.1 lands these checks are already the right ones."""
+        when the pipeline is wired these checks are already the right ones."""
         with pytest.raises(ToolRefusedError, match="`source_tier` must be one of"):
             await run_propose(context(), {"content": "x", "source_tier": "gossip"})
 

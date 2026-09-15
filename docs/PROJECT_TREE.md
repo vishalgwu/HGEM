@@ -157,6 +157,8 @@ guardmem-ai/
 │   │       ├── llm/                     # S1.7 protocol; providers + router at S9.x
 │   │       │   ├── base.py              # Tier, LLMResponse, LLMClient Protocol
 │   │       │   ├── providers/           # anthropic.py openai.py bedrock.py vertex.py ollama.py
+│   │       │   ├── entailment.py        # S5.1; EntailFn's only producer. Here and not
+│   │       │   │                        #   in l3_score/ because that package is pure
 │   │       │   ├── router.py            # tier routing: FAST | BALANCED | FRONTIER
 │   │       │   ├── fallback.py          # circuit breaker + hedged requests
 │   │       │   ├── cache.py             # prompt-cache headers, semantic response cache

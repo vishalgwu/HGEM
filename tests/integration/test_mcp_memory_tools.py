@@ -5,9 +5,9 @@
 
 **The middle clause cannot be satisfied and this module is where that is
 recorded as a test rather than as a paragraph.** `memory.propose` needs
-`pipeline.run`, which needs an `LLMClient`, an `EntityResolver` and a
-`CandidateClassifier`; none exists (S9.1, and an ADR for the resolver). So the
-step's acceptance splits in two:
+`pipeline.run`, and `Deps` cannot be built: an `EntityResolver` and a
+`CandidateClassifier` have no implementation, and the entailer S5.1 now has is
+not wired into the orchestrator. So the step's acceptance splits in two:
 
 - the half that **is** satisfied - "find it via `memory.search` with its
   provenance" - is asserted here end to end, over the MCP protocol, against the
@@ -15,8 +15,8 @@ step's acceptance splits in two:
   were located in a real transcript by `link_span`, which is what makes this a
   provenance test rather than a fixture test.
 - the half that is not is asserted as a **refusal that names what is missing**,
-  so that the day S9.1 lands this test fails and has to be rewritten into the
-  round trip the step actually asks for. A skip would go green forever.
+  so that the day the pipeline is wired this test fails and has to be rewritten
+  into the round trip the step actually asks for. A skip would go green forever.
 
 Driven over the SDK's in-memory transport for the reason
 `test_mcp_stdio.py` gives: the pipe is the SDK's code, and spawning a
@@ -38,6 +38,7 @@ from mcp.shared.memory import create_client_server_memory_streams
 from fixtures.seed import PATIENT_NAME
 from guardmem_core.settings import get_settings
 from mcp_server.server import build_server
+from mcp_server.tools.pipeline import MISSING_DEPENDENCIES
 
 _TIMEOUT_S: Final = 30.0
 
@@ -265,8 +266,14 @@ class TestTheHalfThatIsBlocked:
 
         assert result.is_error
         text = result.content[0].text
-        assert "LLMClient" in text
-        assert "S9.1" in text
+        # Walks the tuple rather than naming entries: the list shrinks as the
+        # gaps close - S9.1 removed `LLMClient`, S5.1's entailer removed
+        # `EntailFn` - and a spelled-out assertion fails on those commits for
+        # the wrong reason. What must hold is that the refusal reaches a real
+        # MCP client with every remaining gap named.
+        assert MISSING_DEPENDENCIES, "a refusal that names nothing is a shrug"
+        for missing in MISSING_DEPENDENCIES:
+            assert missing in text
 
     async def test_commit_refuses_an_unsourced_write_before_anything_else(
         self, namespace: str

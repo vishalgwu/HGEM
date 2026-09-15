@@ -30,8 +30,17 @@ one alone, and named as a default rather than folded into the protocol.
 **`entail` is S5.1's `EntailFn`, and `run()` needs it for two different
 questions.** §3.1 clusters K samples by meaning, and §3.2's `S_src` asks whether
 a candidate's own verbatim span entails its claim. Both are "does this text
-entail that text"; neither has a producer. Injected, so the LID detector §3.1
-names can back both without this module knowing.
+entail that text". Injected, so the LID detector §3.1 names can back both
+without this module knowing.
+
+It now has a producer - `llm/entailment.py`'s `LLMEntailer` - which is the
+first of these three gaps to close. **Binding it is not a one-line change**, and
+the reason is in `entropy.py`: `EntailFn` is sync, `LLMEntailer` is async, and
+the resolution S5.1 asked for is that a caller "precompute the pairs it needs
+and pass a lookup". So `Deps.entail` stays what it is, and the orchestrator has
+to assemble the pairs for a candidate and await one lookup before scoring it.
+That is a change to `_score_and_decide`, not to this file, and it is the next
+step rather than this one.
 """
 
 from __future__ import annotations
