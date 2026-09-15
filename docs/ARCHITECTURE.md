@@ -321,3 +321,12 @@ CREATE TABLE audit_event (
 (:Assertion {id})-[:SUPERSEDES]->(:Assertion {id})
 (:Assertion {id})-[:SOURCED_FROM]->(:Source {hash, tier})
 ```
+
+**`:Entity.id` is derived, not opaque** (ADR-0008). For a subject-bound
+namespace — `<type>:<id>`, whose type names a declared ontology entity — it is
+`uuid5(NAMESPACE_URL, "guardmem/{tenant_id}/entity/{namespace}")`, so the id of
+"the subject of namespace N in tenant T" is a pure function available before any
+I/O, and creation is idempotent under `ON CONFLICT DO NOTHING`.
+`canonical_name` is the first surface form seen for that entity and is display
+only: **nothing matches on it.** A subject that is neither namespace-bound nor
+named by `hints.subject` is refused rather than guessed at.

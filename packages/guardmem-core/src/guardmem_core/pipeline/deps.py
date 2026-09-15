@@ -6,17 +6,31 @@ is the infrastructure protocols from S1.7 - an `LLMClient`, a `VectorStore`, a
 read. Three are new, and they are new because composing the pipeline is what
 finally showed that they are missing.
 
-**`EntityResolver` is the largest gap in the build and it has no specification.**
+**`EntityResolver` was the largest gap in the build and now has a decision.**
 `MemoryCandidate.subject` is a surface form - "Joan Ellery", as the speaker said
 it - and `retrieve_incumbents` needs a resolved `EntityId`. Nothing turns one
-into the other: not the notebook, not `MEMORY_ENGINE.md`, not `ARCHITECTURE.md`,
-not `PROJECT_TREE.md`. A default that used the surface form as the id would be
-worse than none, because it silently splits one patient across three spellings
-and every incumbent lookup then returns nothing - which reads as "this is a
-novel fact" and writes a duplicate. So it is a `Protocol` with no
-implementation shipped, and `run()` cannot be called without one.
-`MCP_INTEGRATION.md` §2.2's `hints.subject` is where a caller that already knows
-the answer says so.
+into the other, and nothing in the design suite said how: entity resolution
+appeared in exactly one line across every document, `ARCHITECTURE.md` §5's node
+shape.
+
+**ADR-0008 decides it: resolution binds, it does not match.** Three sources in
+order - `hints.subject` when the caller names the entity, the namespace when it
+is subject-bound (`<type>:<id>`, id derived as a pure function of tenant and
+namespace), and otherwise a refusal. No name comparison happens anywhere, which
+is what makes a false *merge* - one person's allergy on another person's record
+- unreachable rather than merely unlikely. A default that used the surface form
+as the id would have been worse than none, for the reason this docstring gave
+before the ADR existed: it splits one patient across three spellings and every
+incumbent lookup then returns nothing, which reads as "this is a novel fact" and
+writes a duplicate.
+
+**Still a `Protocol` with no implementation shipped, and `run()` still cannot be
+called.** Two things the ADR requires and this file does not yet have: `resolve`
+takes an `expected_type` (`PredicateSpec.subject` - the entity type, which is
+`NOT NULL` on the `entity` row and which this signature cannot supply), and
+something has to write that row before the assertion's foreign key will accept
+it. Both are the implementation step; the decision they were waiting on is
+made.
 
 **`CandidateClassifier` supplies the three risk features §3.3 names and defines
 nowhere.** `scope`, `pii_class` and `irreversibility` are in §3.3's table and in
@@ -91,30 +105,52 @@ class CandidateRisk(GMModel):
 
 
 class EntityResolver(Protocol):
-    """Turns a subject surface form into the entity it names.
+    """Says which entity a candidate is about.
 
     Structural, like every other seam in this package. **Nothing implements it
-    here** - see the module docstring. An implementation has to decide what
-    "Joan Ellery" and "Joan E." mean within one tenant, which is a matching
-    problem with a precision/recall trade-off and an audit story, and inventing
-    one inside a retrieval call would bury both.
+    here** - see the module docstring.
+
+    Deliberately *not* "turns a surface form into the entity it names", which is
+    what this said before ADR-0008. Under that decision an implementation does
+    no name matching at all: it reads an explicit binding - the caller's
+    `hints.subject`, or a subject-bound namespace - and refuses when it has
+    neither. Deciding what "Joan Ellery" and "Joan E." mean within one tenant is
+    a matching problem with a precision/recall trade-off and no data here to set
+    it with, and the ADR defers it rather than guessing at a threshold.
+
+    **This signature is one argument short of the ADR and has not been changed
+    yet.** Creating an entity needs `type`, which is `NOT NULL` on the row;
+    `PredicateSpec.subject` carries it, `_decide_one` has the spec in scope, and
+    it is not passed. Adding `expected_type` is the first implementation step.
     """
 
     async def resolve(self, subject: str, *, tenant_id: TenantId, namespace: Namespace) -> EntityId:
-        """Resolve `subject` to an entity within this tenant and namespace.
+        """Resolve which entity `subject` belongs to, within this tenant.
 
         Args:
             subject: The surface form Layer 1 extracted, or the caller's
-                `hints.subject` where one was given.
+                `hints.subject` where one was given. **Recorded, not matched on**
+                - ADR-0008 sets `canonical_name` from it on first creation and
+                never compares it to anything.
             tenant_id: Whose entity graph to resolve against. Required, and not
                 optional: resolving across tenants is the isolation failure the
                 whole product exists to prevent.
-            namespace: The isolation scope the candidate landed in.
+            namespace: The isolation scope the candidate landed in, and under
+                ADR-0008 the thing that usually answers the question - a
+                `<type>:<id>` namespace names one subject.
 
         Returns:
-            The entity id. Implementations are expected to create one for a
-            subject they have not seen, rather than raising - a first mention is
-            the normal case, not an error.
+            The entity id. An implementation creates the entity for a binding it
+            has not seen before, rather than raising: a first mention is the
+            normal case, not an error.
+
+        Raises:
+            ValidationRejected: no binding is available - neither a
+                `hints.subject` nor a subject-bound namespace - so the subject
+                cannot be identified. Refusing is ADR-0008's decision and the
+                message is expected to name both remedies. A resolver that
+                guessed here would attach a fact to the wrong record, which no
+                invariant in this system would catch.
         """
         ...
 

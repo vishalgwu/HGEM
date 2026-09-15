@@ -114,7 +114,8 @@ no record" and "we retired that record," and so should anyone reading the transc
       "mode":      {"enum": ["async","strict"], "default": "async",
                     "description": "strict blocks until decided (~450ms p95); async returns immediately."},
       "hints": {"type": "object", "properties": {
-        "subject": {"type": "string"},
+        "subject": {"type": "string",
+                    "description": "An EntityId, not a name (ADR-0008). Entity resolution binds and never matches, so a surface form here resolves nothing. Omit it when the namespace is subject-bound."},
         "predicates_of_interest": {"type": "array", "items": {"type": "string"}}
       }},
       "idempotency_key": {"type": "string"}

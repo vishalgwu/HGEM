@@ -3857,6 +3857,76 @@ docstring.
 
 ---
 
+## 2026-09-15 — ADR-0008 (entity resolution binds, it does not match)
+
+**Shipped**
+
+- **ADR-0008.** The gap `deps.py` has called "the largest in the build" since
+  S5.6 has a decision. Resolution reads an **explicit binding** and does no name
+  matching: `hints.subject` when the caller names the entity, the namespace when
+  it is subject-bound, and a refusal otherwise.
+- **Amendments in the same commit**, per `RULES.md` §8: `MCP_INTEGRATION.md`
+  §2.2 (`hints.subject` gains the description it never had — it is an entity id,
+  not a name), `ARCHITECTURE.md` §5 (`:Entity.id` is derived, not opaque), both
+  indexes, and `deps.py`'s docstrings, which asserted the opposite of the ADR
+  the moment it was accepted.
+- **No code.** The ADR is the deliverable; the implementation is the next step
+  and the ADR says exactly what it is.
+
+**What broke / what I learned**
+
+- **The protocol signature cannot do the job, and the missing argument was in
+  scope at the call site the whole time.** `resolve` has no way to supply
+  `entity.type`, which is `NOT NULL`. `PredicateSpec.subject` is the entity type
+  — `allergy` declares `subject: Patient` — and `_decide_one` computes `spec`
+  on the line *directly above* the `resolve` call and does not pass it. The seam
+  was drawn one argument too narrow and nothing could have revealed that except
+  trying to write the implementation behind it.
+- **The namespace already answers the question, and that reframes the problem
+  entirely.** `MEMORY_ENGINE.md` documents `patient:8812 | org:acme |
+  session:xyz`; `scope_of_namespace` reads the prefix; the demo tenant is seeded
+  under `patient:7781` with one patient. *Which* subject a proposal concerns is
+  stated by the caller before any text is read. The hard literature problem —
+  is "Joan E." the same person as "Joan Ellery"? — is **not the problem in front
+  of us**, and I spent the first part of this looking at it because the gap had
+  been described as a matching problem for four steps running.
+- **The asymmetry is what settles it.** A false *split* writes a duplicate; a
+  false *merge* puts one person's allergy on another person's record — and no
+  invariant here catches it. I1 holds (the span is real), I2 holds (one live
+  value per predicate, on the wrong entity). For a clinical pack that is the
+  worst available failure, so v1 makes it *unreachable* rather than unlikely.
+- **`entity` has no `namespace` column**, so the scope `resolve` is handed is
+  one storage cannot record. Resolved by encoding it in a derived id rather than
+  by a migration — which matches the derived-id rule every replay path already
+  follows, needs no `RETURNING`, and is race-free. The column-plus-unique-index
+  alternative was close and is written down as such.
+- **The seed and core would have had two id schemes.** The seed derives the
+  patient from `"patient-7781"`; the resolver derives from the namespace
+  `"patient:7781"` and the tenant *uuid* rather than its slug. The seed adopts
+  core's derivation — one scheme, per the convention that a fact lives on the
+  type that owns it — and the cost is `make dev-reset && make seed` once,
+  because the derived id is the primary key.
+
+**Still open**
+
+- **Implementation.** Two pieces the ADR names: `resolve` gains
+  `expected_type` (one call site, `orchestrator.py:309`), and something has to
+  INSERT the `entity` row before the assertion's FK will accept it. The grants
+  already permit it; no entity writer exists on either store protocol.
+- **ADR-0009, the candidate classifier** — `pii_class` and `irreversibility`.
+  The last decision between here and a runnable `run()`.
+- **The entailment wiring**, unchanged: `_score_and_decide` assembles a
+  candidate's pairs and awaits one lookup.
+- **`checkpoint_b generate`** and a wider transcript. Unchanged.
+
+**Tomorrow's first step**
+
+**ADR-0009.** Then the three implementation pieces together, since they all land
+in `_decide_one` and splitting them would mean touching one function three
+times.
+
+---
+
 ---
 
 ---

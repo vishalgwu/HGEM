@@ -50,7 +50,8 @@ guardmem-ai/
 │   │   ├── 0004-semantic-entropy-as-confidence-primitive.md
 │   │   ├── 0005-mcp-as-primary-agent-surface.md
 │   │   ├── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
-│   │   └── 0007-provenance-records-its-span-alignment.md
+│   │   ├── 0007-provenance-records-its-span-alignment.md
+│   │   └── 0008-entity-resolution-binds-not-matches.md
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
