@@ -2772,7 +2772,20 @@ Decision:
 Notes:
 ```
 
-**Recorded 2026-09-14: BLOCKED, not yet attempted.**
+**Recorded 2026-09-14: BLOCKED. UNBLOCKED 2026-09-15 by S9.1 — still not run.**
+
+S9.1 shipped the three provider adapters, so the structural blocker above is
+gone: `LLMClient` has implementations and the pipeline can be driven by a real
+model. What has *not* happened is the gate itself — 200 candidates from real
+extraction, human-labelled, scored. That needs `GM_ANTHROPIC_API_KEY`, which is
+still blank, and a labelling session.
+
+**Read correction 1 on S9.1 before running it.** Anthropic has no temperature
+parameter at all, so §1.2's 0-then-0.7 spread is not what is drawn there; the
+entropy term measures the model's own variance rather than a tuned one. That
+does not invalidate the gate, but it does mean an AUROC measured against
+Anthropic and one measured against a local Ollama model are two different
+numbers, and the sign-off has to say which provider produced it.
 
 ```
 CHECKPOINT B: BLOCKED (discrimination test not runnable until S9.1)
@@ -3038,6 +3051,54 @@ COMMIT: `feat(s8.4): async evaluation path`
 TIME: 60 min. Anthropic, OpenAI, Ollama, all behind `LLMClient`. Pin model ids from settings; never
 use floating aliases (RULES 3).
 DONE WHEN: the same prompt runs against all three in an integration test.
+
+**Five corrections to this step, found by building it.**
+
+1. **`anthropic` 1.4.0's `messages.create` HAS NO `temperature`, `top_p` OR `top_k`.** Sampling
+   controls were removed on the current Claude models and the SDK dropped the parameters with them
+   — verified by introspecting the installed SDK, not recalled. `LLMResponse.temperature` is
+   therefore `float | None`, the same shape and the same reasoning as `seed`: recording the value a
+   *caller asked for* on a request that never carried one would put a number in the audit record
+   that no provider ever saw.
+
+   **This changes what CHECKPOINT B is measuring.** `MEMORY_ENGINE.md` §1.2 draws the canonical
+   sample at temperature 0 and the other K-1 at 0.7, and §3.1 takes semantic entropy over that
+   spread. On Anthropic neither number can be sent. The measurement survives — K independent
+   requests to a non-deterministic model do vary — but the variance is *the model's own, not a
+   spread this system tuned*, and `H_norm` on Anthropic and on Ollama are not the same instrument.
+   An AUROC that mixes them is comparing two.
+2. **A FIXED SEED MAKES EVERY SAMPLE IN A DRAW IDENTICAL, AND NOTHING RAISES.** The first Ollama
+   adapter sent one seed on every request in a K-sample draw. Ollama honours a seed exactly:
+   measured, at temperature 0.7 with K=3, the three "independent" samples came back
+   **character-identical**. That is one meaning cluster, so `H_norm` is 0, so §3.2's
+   `w_H(1 - H_norm)` term scores maximum confidence on every candidate forever — which is
+   word-for-word the failure this notebook's own CHECKPOINT B list calls "a scorer that produces
+   plausible numbers with no discriminative power ... invisible to unit tests". It was invisible to
+   unit tests. **Only a real model call found it.** Sample `i` is now seeded `BASE_SEED + i`, which
+   keeps the draw reproducible *and* the samples independent.
+3. **`guardmem-core` had to declare `anthropic` and `openai`, and would have failed CI without it.**
+   Both were pinned in `requirements/llm.txt` — the human inventory — and neither was a dependency
+   of the *package*, so neither was in `uv.lock`, so CI's `uv sync --locked --dev` would not have
+   installed them and every import of `llm/providers/` would have failed there while passing
+   locally. Exactly the `types-pyyaml` failure from S1.7, in a new place.
+   `test_no_dependency_is_documented_as_deferred_once_it_is_used` caught the related half (`httpx`
+   left in the "DECLARED AND NOT YET IMPORTED" block); the missing declarations it could not see.
+4. **The DONE WHEN cannot run live in CI, and a skip would have been the wrong repair.** Two of the
+   three providers bill per token and need a secret. `RULES.md` §5 says LLM calls are "mocked with
+   recorded fixtures in unit, live only in the nightly eval job" *and* that the integration suite is
+   green **with no skips**. Both hold by mocking at the **transport** — the vendors' own SDKs still
+   parse, validate and type every response, so what is replaced is the socket — plus a `live` marker
+   in `pyproject.toml` that **deselects** rather than skips. `uv run pytest -m live` calls the real
+   providers; S27.1's nightly job is what should select it.
+5. **OpenAI returns quota exhaustion and plain rate limiting on the SAME 429**, and `exc.body` is
+   the *inner* error object (`{"message", "code"}`), not the envelope. A breaker reading the status
+   alone retries an empty account until its attempt cap, every time; the first version of the code
+   that was supposed to prevent that walked `body["error"]["code"]` and so always returned `None`.
+   `exc.code` is the SDK's own parsed attribute and is what it reads now.
+
+Also settled here: a 400/401/403/404 from either vendor SDK **propagates unwrapped** rather than
+becoming `ProviderUnavailable`. Those are configuration errors, and a wrong API key dressed as
+"retryable" is one S9.3's circuit breaker would retry forever.
 COMMIT: `feat(s9.1): provider adapters`
 
 ### S9.2 -- Tier routing

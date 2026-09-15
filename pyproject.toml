@@ -32,7 +32,7 @@ dependencies = [
 members = ["packages/*", "services/*"]
 
 # Holds `uv lock` to the versions `requirements.lock.txt` already pins, for the
-# four transitive dependencies S6.1's `mcp[cli]` brought in.
+# transitive dependencies S6.1's `mcp[cli]` and S9.1's provider SDKs brought in.
 #
 # `tests/unit/test_dependency_consistency.py` is what found this, on the first
 # `uv lock` after adding the MCP SDK, and it found exactly the failure it was
@@ -57,6 +57,8 @@ constraint-dependencies = [
   "httpcore2==2.12.0",
   "pyjwt==2.13.0",
   "uvicorn==0.52.4",
+  # S9.1, via `anthropic`/`openai`: the JSON parser both SDKs use.
+  "jiter==0.16.0",
 ]
 
 [tool.uv.sources]
@@ -245,8 +247,24 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-q --strict-markers"
+# `-m "not live"` DESELECTS rather than skips, and the difference is the point.
+# S9.1 added `tests/live/`, which calls real model providers - Ollama on
+# localhost, Anthropic and OpenAI on a real key. `RULES.md` §5 requires the
+# integration suite to be "green with no skips on main", and a `skipif` on a
+# missing provider would put a permanent skip in every run. A deselected test is
+# not a skipped one: it is not collected, the suite stays clean, and
+# `uv run pytest -m live` runs them deliberately.
+#
+# `RULES.md` §5 also says LLM calls are "live only in the nightly eval job",
+# which is what this marker is for when S27.1 builds that job.
+addopts = "-q --strict-markers -m 'not live'"
 testpaths = ["tests"]
+
+# `--strict-markers` above makes an unregistered marker an error, which is what
+# stops a typo'd `@pytest.mark.liv` from silently running in CI.
+markers = [
+  "live: calls a real model provider. Deselected by default; run with `-m live`.",
+]
 
 # The repository root, on `sys.path`, for every invocation of pytest.
 #

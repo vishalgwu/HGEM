@@ -181,12 +181,15 @@ hash-chained audit log, and the orchestrator that runs a proposal through all of
 it — and **Day 6 is at S6.2**: the MCP server, its four core tools, and the
 first user-facing surface this project has had.
 
-Two things that sound like they are built and are not, stated here because
-everything below assumes you know: **nothing has ever called a real model**
-(every LLM path is a test double, and the provider adapters are S9.1), and
-**nothing writes an assertion** (the pipeline returns decisions and applies
-none). Checkpoint B, the gate that would say whether the scoring works at all,
-is blocked on the first of those — see "The gate that has not run yet".
+**S9.1 is in**, out of order and deliberately: Anthropic, OpenAI and Ollama
+behind one `LLMClient`. That retires the first of the two caveats this section
+used to open with — the engine can call a real model now, and does.
+
+One remains, and everything below assumes you know it: **nothing writes an
+assertion.** The pipeline returns decisions and applies none; the applier needs
+an ADR, and so does entity resolution. Checkpoint B — the gate that would say
+whether the scoring separates good writes from bad — is no longer *blocked*, but
+it still **has not run**. See "The gate that has not run yet".
 
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
@@ -485,9 +488,19 @@ candidate classifier. **They do not return an invented decision.** The whole cla
 of this project is that a fact was governed before it was believed, and a tool
 that says so without having done it would be worse than no tool at all.
 
-The next step is **S9.1**, out of order and deliberately. Three things are now
-stacked behind it: Checkpoint B, S6.2's write half, and S6.3 — which is "have a
-conversation that writes a fact", and nothing writes a fact yet.
+S9.1 adds the three provider adapters, and the interesting part is what they do
+*not* agree about: `n`, `temperature`, `seed`, structured output and every usage
+field name differ across the three, and a caller sees one `LLMResponse`
+regardless. One prompt runs through all three in CI.
+
+Building it turned up the kind of bug this project exists to be afraid of. A
+fixed sampling seed made every sample in a K-sample draw come back identical, so
+the semantic-entropy term would have scored **maximum confidence on every
+candidate, forever** — no error, no exception, a plausible number. Every mock
+passed; only a call to a real model showed it.
+
+The next step is **Checkpoint B itself**. Nothing is in its way now but an API
+key and a labelling session.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

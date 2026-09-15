@@ -29,8 +29,6 @@ dependencies = [
   # Re-check this block whenever one of those steps lands: a dependency that is
   # still unused two steps after its owner shipped is genuinely dead.
   #
-  # `httpx`     S9.1  provider adapters. RULES.md 2.2: one AsyncClient per
-  #                   provider, created in lifespan, never per-request.
   # `structlog` S13.1 observability. RULES.md 6: structured JSON logging only,
   #                   every line carrying trace_id, tenant_id and namespace.
   # `anyio`     S9.1  CPU-bound work off the event loop. RULES.md 2.2 routes it
@@ -44,9 +42,34 @@ dependencies = [
   #                   cross-encoder still needs this, behind the NLIJudge
   #                   protocol, but "week 2" is not a step id and S9.1 is the
   #                   nearer honest one. Kept, not removed.
-  "httpx>=0.27",
   "structlog>=24.4",
   "anyio>=4.6",
+  # --- model providers, imported today -------------------------------------
+  # S9.1. `llm/providers/` is the first code in this package to call a model at
+  # all - until it landed, CHECKPOINT B was BLOCKED and `memory.propose`
+  # declined, both for want of an `LLMClient` implementation.
+  #
+  # Both vendor SDKs rather than raw HTTP: each owns its own retry policy,
+  # connection handling and typed exception hierarchy, and reimplementing those
+  # over `httpx` would be three of the four done worse. `requirements/llm.txt`
+  # pins the same two and says why Ollama is the exception - "Ollama needs no
+  # SDK - it is called over its HTTP API with httpx", which is what `httpx`
+  # below is now imported for.
+  #
+  # Pinned exactly rather than floored, matching `requirements/llm.txt`: a
+  # provider SDK is the one dependency whose minor releases change request
+  # shapes, and `anthropic` 1.4.0 dropping `temperature` from `messages.create`
+  # is the example this step ran into.
+  "anthropic==1.4.0",
+  "openai==3.11.0",
+  # S9.1. The Ollama adapter speaks its HTTP API directly. Moved out of the
+  # deferred block above by the guard in
+  # tests/unit/test_dependency_consistency.py, which is the rule that block
+  # states about itself - and which fired on the first run of this step.
+  #
+  # Plain `httpx`, not `httpx2`: both vendor SDKs are built on `httpx2` and own
+  # their own transports, and the two never meet.
+  "httpx>=0.27",
   # --- numerics, imported today --------------------------------------------
   # S5.1. `pipeline/l3_score/entropy.py` takes MEMORY_ENGINE.md 3.1's entropy
   # over cluster sizes. Moved out of the deferred block above the moment it

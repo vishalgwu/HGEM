@@ -17,6 +17,26 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **A fixed seed made every sample in a K-sample draw identical, and nothing
+  raised.** The first Ollama adapter sent one seed per draw; Ollama honours a
+  seed exactly, so at temperature 0.7 with K=3 the three "independent" samples
+  came back **character-identical**. That is one meaning cluster, so
+  `MEMORY_ENGINE.md` §3.1's `H_norm` is 0, so §3.2's `w_H(1 - H_norm)` term
+  scores maximum confidence on every candidate forever. CHECKPOINT B's own
+  failure list calls that "a scorer that produces plausible numbers with no
+  discriminative power ... invisible to unit tests" — and it was invisible to
+  unit tests, because a mock transport returns whatever it is told. **Only
+  running a real model found it.** Sample `i` is now seeded `BASE_SEED + i`.
+- **`guardmem-core` imported `anthropic` and `openai` without declaring them.**
+  Both were pinned in `requirements/llm.txt` and neither was a dependency of the
+  *package*, so neither reached `uv.lock` — CI's `uv sync --locked --dev` would
+  not have installed them, and every import of `llm/providers/` would have failed
+  there while passing locally. The same shape as S1.7's `types-pyyaml` failure.
+- **OpenAI quota exhaustion was being classified as a rate limit.** Both arrive
+  as **429**, and the code meant to separate them read
+  `exc.body["error"]["code"]` — but `body` is the *inner* error object, so it
+  always returned `None`. Every exhausted account would have been retried with
+  backoff until the attempt cap. `exc.code` is the SDK's own parsed attribute.
 - **`memory.get_entity` passed a zero query vector, and pgvector answers `NaN`.**
   Cosine distance is undefined against a vector of zero magnitude, so
   `1 - NaN = NaN` and `ScoredAssertion`'s bound rejected it — surfacing to the
@@ -92,6 +112,29 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S9.1 — provider adapters, and the first real model calls this repository has
+  ever made.** `AnthropicClient`, `OpenAIClient` and `OllamaClient`, all behind
+  `LLMClient`: the official SDKs for the two vendors (each owns its retry
+  policy, connection handling and typed exceptions) and raw `httpx` for Ollama,
+  which `requirements/llm.txt` already said needs no SDK.
+- **The structural blocker under CHECKPOINT B is gone.** The gate was recorded
+  BLOCKED because no `LLMClient` implementation existed. Three do now. The gate
+  itself still has not run — it needs `GM_ANTHROPIC_API_KEY`, still blank, and a
+  labelling session — but it is no longer blocked on code.
+- **One prompt through all three, in CI.**
+  `tests/integration/test_provider_contract.py` runs the same prompt and the
+  same schema through three APIs that disagree about `n`, `temperature`, `seed`,
+  structured output and every usage field name, and asserts the `LLMResponse` is
+  the same object. Mocked at the **transport**, so the vendors' own SDKs still
+  parse and validate every response; what is replaced is the socket.
+- **A `live` marker that deselects rather than skips.** `RULES.md` §5 wants the
+  integration suite green with no skips *and* LLM calls live only in the nightly
+  job. `-m 'not live'` in `addopts` satisfies both — `uv run pytest -m live`
+  calls real providers, and S27.1's nightly job is what should select it.
+- **`VectorStore`-style honesty about what each provider can do.**
+  `LLMResponse.temperature` is now `float | None`, matching `seed`: Anthropic has
+  no temperature parameter, and recording a requested value the request never
+  carried would put a number in the audit record no provider ever saw.
 - **S6.2 — the four core tools, and the honest split between them.**
   `memory.search`, `memory.propose`, `memory.commit` and `memory.get_entity`,
   with `MCP_INTEGRATION.md` §2.1-§2.4's schemas and descriptions copied exactly

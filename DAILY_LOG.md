@@ -3690,6 +3690,88 @@ CHECKPOINT B gate, S6.2's write half, and S6.3. It also needs
 
 ---
 
+## 2026-09-15 — S9.1 (provider adapters) — the first real model calls
+
+**Shipped**
+
+- **Three adapters behind one `LLMClient`**: Anthropic and OpenAI through their
+  official SDKs, Ollama over `httpx`, as `requirements/llm.txt` specified.
+- **S9.1's DONE WHEN, in CI.** One prompt, one schema, three APIs that agree
+  about almost nothing, one `LLMResponse`. Mocked at the transport so the
+  vendors' SDKs still do the parsing.
+- **`tests/live/`**, deselected by default via a `live` marker rather than
+  skipped — and driven for real against a local Ollama 0.34.0.
+- **CHECKPOINT B is no longer structurally blocked.** 1380 unit and property
+  tests plus 108 integration.
+
+**What broke / what I learned**
+
+- **The single most valuable thing I did today was run the code against a real
+  model, and it took four minutes.** Every mock I had written passed. The live
+  draw returned three character-identical samples at temperature 0.7, because I
+  had sent one fixed seed for the whole draw and Ollama honours a seed exactly.
+  `H_norm` would have been **0 on every candidate this system ever scored**, and
+  §3.2 would have read that as maximum confidence. CHECKPOINT B's own failure
+  list describes this exactly — "plausible numbers with no discriminative
+  power ... invisible to unit tests" — and I had walked straight into it while
+  building the thing that was supposed to unblock that gate.
+  The unit test I added afterwards asserts the *cause* (the seeds differ),
+  because a mock cannot reproduce the symptom.
+- **`anthropic` 1.4.0 has no `temperature`, `top_p` or `top_k` at all.** I
+  checked the SDK signature before writing rather than after, which is the only
+  reason this was a design decision instead of a 400 at runtime. Sampling
+  controls are gone on the current Claude models.
+  The consequence is not cosmetic: §1.2's "canonical at 0, spread at 0.7" is
+  **not what gets drawn on Anthropic**. K independent calls to a
+  non-deterministic model still vary, so entropy is still measurable — but it is
+  the model's own variance, not one this system set. An AUROC measured on
+  Anthropic and one measured on Ollama are two different numbers, and the
+  CHECKPOINT B sign-off now has to name the provider.
+- **`LLMResponse.temperature` became `float | None`, and `seed` showed me how.**
+  Its docstring already said `None` means "the provider does not support one -
+  a statement about reproducibility". Temperature is the same statement. Writing
+  the requested 0.7 into the audit record would have been a number no provider
+  ever saw.
+- **I imported two packages the workspace did not declare.** `anthropic` and
+  `openai` were in `requirements/llm.txt` — the human inventory — and not in
+  `guardmem-core`'s own dependencies, so they were absent from `uv.lock` and CI
+  would have failed on import while every local run passed. The `types-pyyaml`
+  failure from S1.7, in a new place. The deferred-dependency guard caught the
+  `httpx` half; nothing could have caught the other half but looking.
+- **I guessed an SDK error shape and was wrong.** `exc.body["error"]["code"]`
+  always returned `None`, because `body` is the *inner* error object. The effect
+  was that OpenAI quota exhaustion — which arrives on the same **429** as plain
+  rate limiting — was classified as retryable. Caught only because I wrote the
+  test with a realistic body rather than a hand-built exception.
+- **The DONE WHEN could not be taken literally in CI**, and the honest repair
+  was a marker that *deselects* rather than a `skipif`. `RULES.md` §5 wants no
+  skips on main and live calls only in the nightly job; deselection gives both.
+
+**Still open**
+
+- **THE GATE ITSELF, STILL.** Unblocked, not run. It needs
+  `GM_ANTHROPIC_API_KEY` — blank since S0.2 — and 200 hand-labelled candidates.
+  **This is now the highest-value thing left in the project**: everything from
+  Day 6 onward assumes the scoring discriminates.
+- **S6.2's write half, S6.3 and S6.4** are unblocked on the *model* and still
+  blocked on entity resolution and the applier, both of which need an ADR.
+- **No OpenAI chat prices in the table.** No `GM_MODEL_*` is an OpenAI id, so
+  every price would have been written from memory against a model nothing
+  selects. Add them in the commit that first points a tier at OpenAI.
+- **An Ollama tag is not a digest.** The adapter refuses `:latest`; `llama3.1:8b`
+  can still be re-pulled to a different build, so an audit record naming it is
+  weaker evidence than one naming a Claude id.
+- S9.2 (routing), S9.3 (breaker + fallback) and S10.1 (the cost ledger) are what
+  these adapters were built to sit under. None of them exists yet.
+
+**Tomorrow's first step**
+
+**Put a key in `GM_ANTHROPIC_API_KEY` and run CHECKPOINT B.** Not S9.2. The gate
+has been the answer to "what is the highest-value next thing" for four steps
+running, and as of today nothing but a credential is in its way.
+
+---
+
 ---
 
 ---

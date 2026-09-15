@@ -72,7 +72,22 @@ class LLMResponse(GMModel):
             Recorded rather than derived from the tier, because a fallback
             (`ARCHITECTURE.md` §2.8) can serve a FAST call from another
             provider entirely and replay has to know which one did.
-        temperature: What was actually used.
+        temperature: What was actually used, or `None` where the provider has
+            **no temperature parameter to use**. The second case is not
+            hypothetical and S9.1 is where it landed: `anthropic` 1.4.0's
+            `messages.create` has no `temperature`, `top_p` or `top_k` argument
+            at all - sampling controls were removed on the current Claude models
+            (Opus 5, Sonnet 5, and the 4.7/4.8 family), and the SDK reflects it.
+            Recording the value a *caller asked for* on a request that never
+            carried one would put a number in the audit record that no provider
+            ever saw, which is the failure `RULES.md` §3 exists to prevent.
+
+            The same reasoning as `seed` below, and deliberately the same
+            shape - `None` is a statement about what could be controlled, and it
+            has a consequence worth reading before trusting an entropy score:
+            see `providers/anthropic_client.py` on what `MEMORY_ENGINE.md`
+            §1.2's temperature-0.7 spread means on a model that has no
+            temperature.
         seed: The seed, where the provider supports one. `None` means it does
             not - which is a statement about reproducibility, so it is recorded
             rather than defaulted to zero.
@@ -88,7 +103,7 @@ class LLMResponse(GMModel):
 
     samples: list[str] = Field(min_length=1)
     model: str
-    temperature: float = Field(ge=0.0)
+    temperature: float | None = Field(default=None, ge=0.0)
     seed: int | None
     tokens_in: int = Field(ge=0)
     tokens_out: int = Field(ge=0)
