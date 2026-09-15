@@ -30,11 +30,17 @@ So this ships as everything except generation:
 
 **Correction, 2026-09-15.** This docstring used to end "the day S9.1 lands the
 only new thing needed is the loop that fills one". S9.1 has landed and that is
-not true. `run()` takes a `Deps` whose `EntailFn`, `EntityResolver` and
-`CandidateClassifier` still have no implementation - see `pipeline/deps.py`,
-which explains why a default for the last two would be worse than none - so the
-loop has nothing to call yet. The corpus also has to come from more than the
-seed transcript, which is forty turns for one patient.
+not true: `run()` takes a `Deps` that cannot be built yet, so the loop has
+nothing to call. What is left, after three decisions taken the same day:
+
+- `EntailFn` has a producer (`llm/entailment.py`) and is not wired - sync
+  callable, async producer, so the orchestrator assembles the pairs.
+- `EntityResolver` has a decision (ADR-0008) and no implementation.
+- `CandidateClassifier` has a decision (ADR-0009) and is being deleted, not
+  implemented.
+
+The corpus also has to come from more than the seed transcript, which is forty
+turns for one patient.
 """
 
 from __future__ import annotations

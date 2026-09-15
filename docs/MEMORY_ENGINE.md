@@ -175,8 +175,8 @@ a drop in recall rather than a bug. See ADR-0006.
 ## 2. Layer 2 — Entity Schema Validation & Conflict Detection
 
 ### 2.1 Schema gate
-The tenant ontology declares entity types, predicates, value types, cardinality, impact level, and
-allowed source tiers:
+The tenant ontology declares entity types, predicates, value types, cardinality, impact level,
+allowed source tiers, and the two §3.3 risk features that are policy rather than observation:
 
 ```yaml
 # ontology/clinical.yaml
@@ -186,6 +186,8 @@ predicates:
     object: {type: coded, system: RxNorm}
     cardinality: many
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: verified_user
     requires_corroboration: true
   primary_care_provider:
@@ -193,12 +195,25 @@ predicates:
     object: {type: entity_ref, entity: Provider}
     cardinality: one
     impact: medium
+    pii_class: direct
+    irreversibility: partial
+    min_source_tier: verified_user
   preferred_pharmacy:
     subject: Patient
     object: {type: entity_ref, entity: Pharmacy}
     cardinality: one_per_time
     impact: low
+    pii_class: quasi_identifier
+    irreversibility: reversible
+    min_source_tier: unverified_user
 ```
+
+`pii_class` and `irreversibility` are **required**, like `min_source_tier` and for the same reason
+(ADR-0009): both map to 0.0 at their lowest value, so a default would silently score an
+unclassified predicate as the least dangerous thing in the pack. They are declared per predicate
+because that is the granularity at which they are answerable — `irreversibility` asks whether what
+an *agent did* on a belief can be undone, which has not happened yet when `R` is computed, so what
+is stated is the prior for the predicate rather than an observation about the candidate.
 
 Unknown predicate → `quarantine` namespace (retrievable, flagged, never promoted without review).
 Type coercion failure → `REJECT(reason=SCHEMA)`. Ontologies are versioned; a schema change is an
@@ -311,10 +326,10 @@ R = max(R_raw, floor[impact_level])        floors: low .15, medium .35, high .60
 |---|---|---|
 | `impact_declared` | ontology impact mapped {0,.33,.66,1} | 2.20 |
 | `mutation_type` | coexist 0, refine .3, supersede .7, delete/retract 1 | 1.60 |
-| `scope` | session .1, user .5, org 1.0 (shared blast radius) | 1.30 |
+| `scope` | session .1, user .5, org 1.0 (shared blast radius) — read off the namespace prefix | 1.30 |
 | `graph_fanout` | `min(1, log(1+deg(subject))/log(1+50))` — how much depends on this node | 0.90 |
-| `pii_class` | none 0, quasi-identifier .5, direct .8, special-category 1 | 1.10 |
-| `irreversibility` | can this be practically undone downstream? {0,.5,1} | 1.40 |
+| `pii_class` | none 0, quasi-identifier .5, direct .8, special-category 1 — **declared per predicate** (§2.1) | 1.10 |
+| `irreversibility` | can this be practically undone downstream? {0,.5,1} — **declared per predicate** (§2.1) | 1.40 |
 | `source_tier_risk` | 1 − trust multiplier | 1.00 |
 | `novelty` | 1 − max cosine to existing memory (unprecedented claims are riskier) | 0.50 |
 | bias | | −3.40 |

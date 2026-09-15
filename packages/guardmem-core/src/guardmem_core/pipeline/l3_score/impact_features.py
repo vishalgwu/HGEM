@@ -9,15 +9,18 @@ class or a new mutation kind, and the betas change when
 `scripts/threshold_tuner.py` refits them from reviewer labels. Different
 reasons, different cadences.
 
-**Three of the eight have no producer anywhere in this repository, and they are
-enums here rather than bare floats for that reason.** `scope`, `pii_class` and
-`irreversibility` are named by §3.3 and defined by nothing - no ontology field
-declares them, no extractor emits them, no other spec mentions them. Typing them
-as `StrEnum`s with the spec's own values does three things a `float` argument
-would not: it makes the vocabulary reviewable in one place, it makes a caller
-that has not decided yet say so explicitly, and it means the day an ontology
-field appears the mapping has somewhere to live. Until then S5.6 passes them,
-and `PROJECT_TREE.md` records the gap.
+**Three of the eight had no producer, and typing them as enums is what made the
+answer findable.** `scope`, `pii_class` and `irreversibility` were named by §3.3
+and defined by nothing. This docstring used to end "the day an ontology field
+appears the mapping has somewhere to live" - ADR-0009 is that day, for two of
+them, and the mapping did not have to move: `PredicateSpec` gains `pii_class`
+and `irreversibility` as required fields carrying exactly these vocabularies,
+and `risk_feature` converts them unchanged. `scope` is read off the namespace
+prefix by `deps.scope_of_namespace`.
+
+Had these been `float` arguments, the ontology would have had to declare numbers
+and §3.3's mapping would now exist in two places. That is the argument for the
+enums, made concrete.
 
 **Five do have producers, and they are functions here so the mapping is written
 once.** `impact_declared` is `ImpactLevel.risk_feature`; `source_tier_risk`
@@ -84,8 +87,10 @@ class PiiClass(StrEnum):
 
     The four are the vocabulary of data-protection law rather than this
     project's invention - "special category" is GDPR Article 9's term, and a
-    clinical pack is made almost entirely of it. Nothing classifies a predicate
-    today; see the module docstring.
+    clinical pack is made almost entirely of it. Declared per predicate in the
+    ontology (ADR-0009), never inferred: whether something is Article 9 data is
+    a compliance answer, and a compliance answer should be a file somebody
+    signed off rather than a completion.
     """
 
     NONE = "none"
@@ -114,8 +119,13 @@ class Irreversibility(StrEnum):
     irreversible - `ARCHITECTURE.md` §0 makes supersession the only way a fact
     stops being believed, and the prior one stays readable. What is not
     reversible is what an *agent* did while holding the wrong belief: an email
-    sent, a prescription filed, a payment made. That is what this feature is
-    asking about, and it is why no field in this repository can answer it.
+    sent, a prescription filed, a payment made.
+
+    **None of which has happened when `R` is computed**, which is why this can
+    never be an observation about a candidate. What is stated is a prior for the
+    predicate - if an agent acted on this, how recoverable would that be? An
+    allergy drives a prescription; a preferred language drives a letter
+    template. ADR-0009 makes it a declared field for exactly that reason.
     """
 
     REVERSIBLE = "reversible"

@@ -51,7 +51,8 @@ guardmem-ai/
 │   │   ├── 0005-mcp-as-primary-agent-surface.md
 │   │   ├── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
 │   │   ├── 0007-provenance-records-its-span-alignment.md
-│   │   └── 0008-entity-resolution-binds-not-matches.md
+│   │   ├── 0008-entity-resolution-binds-not-matches.md
+│   │   └── 0009-pii-class-and-irreversibility-are-ontology-fields.md
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
@@ -117,9 +118,10 @@ guardmem-ai/
 │   │       │       │                    #   its version. Pure - no I/O, no model call
 │   │       │       ├── impact.py        # S5.3; §3.3's linear score, sigmoid, then the
 │   │       │       │                    #   impact floor - which is the safety property
-│   │       │       ├── impact_features.py  # S5.3; the eight features. Three of them
-│   │       │       │                    #   (scope, pii_class, irreversibility) are named
-│   │       │       │                    #   by §3.3 and produced by NOTHING yet
+│   │       │       ├── impact_features.py  # S5.3; the eight features. The three §3.3
+│   │       │       │                    #   named and nothing produced now have sources:
+│   │       │       │                    #   scope off the namespace, the other two
+│   │       │       │                    #   declared per predicate (ADR-0009)
 │   │       │       ├── decision.py      # S5.4; §3.4's twelve cells + the escalation
 │   │       │       │                    #   clamp. Pure, total, deterministic (I4)
 │   │       │       └── overrides.py     # S5.4; the seven hard overrides. `tighten` is

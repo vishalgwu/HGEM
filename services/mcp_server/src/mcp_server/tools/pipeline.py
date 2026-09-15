@@ -10,11 +10,13 @@ same call into `guardmem_core.pipeline.run`.
 `Deps`, and it cannot be built yet. Two members have no implementation anywhere
 in this repository and a third is implemented but not wired:
 
-- `EntityResolver` - turning `"Joan Ellery"` into an `EntityId`. Specified in no
-  document: not the notebook, not `MEMORY_ENGINE.md`, not `ARCHITECTURE.md`.
-  `pipeline/deps.py` explains at length why a default would be worse than none.
-- `CandidateClassifier` - §3.3's `pii_class` and `irreversibility`, which are
-  policy decisions a deploying organisation makes.
+- `EntityResolver` - saying which entity a candidate is about. **Decided by
+  ADR-0008 and not yet implemented**: resolution binds rather than matches, so
+  it reads `hints.subject` or a subject-bound namespace and refuses otherwise.
+- `CandidateClassifier` - §3.3's `pii_class` and `irreversibility`. **Decided
+  by ADR-0009 and not yet implemented**: they become required `PredicateSpec`
+  fields and this protocol is deleted, because a deploying organisation's policy
+  is what the ontology already holds.
 - `EntailFn` now has a producer - `llm/entailment.py`'s `LLMEntailer` - and is
   still not injectable here, because the callable is sync and the producer is
   async. `entropy.py` names the resolution: the caller precomputes the pairs and
@@ -73,7 +75,8 @@ _MODES: Final = frozenset({"async", "strict"})
 # the two that need a decision first, then the one that needs only wiring.
 MISSING_DEPENDENCIES: Final = (
     "EntityResolver (surface form to EntityId; specified in no document, needs an ADR)",
-    "CandidateClassifier (§3.3's pii_class and irreversibility; deployment policy)",
+    "CandidateClassifier (§3.3's pii_class and irreversibility; ADR-0009 moves "
+    "both onto PredicateSpec and deletes this protocol)",
     "the orchestrator's entailment wiring (LLMEntailer exists; `_score_and_decide` "
     "has to assemble the pairs and await one lookup before scoring)",
 )

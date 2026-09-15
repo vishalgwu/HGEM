@@ -32,14 +32,24 @@ something has to write that row before the assertion's foreign key will accept
 it. Both are the implementation step; the decision they were waiting on is
 made.
 
-**`CandidateClassifier` supplies the three risk features §3.3 names and defines
-nowhere.** `scope`, `pii_class` and `irreversibility` are in §3.3's table and in
-no ontology field, no extractor output, and no other document. Two of the three
-are genuinely policy: whether a predicate is special-category data, and whether
-what an agent did on a belief can be undone, are decisions a deploying
-organisation makes. `Scope` is the exception - `MEMORY_ENGINE.md` line 50
-documents the namespace convention it follows - so a default is shipped for that
-one alone, and named as a default rather than folded into the protocol.
+**`CandidateClassifier` is scheduled for deletion by ADR-0009 and is still
+here.** It was built to supply the three risk features §3.3 names and defined
+nowhere - `scope`, `pii_class` and `irreversibility`. They turned out to be
+three problems rather than one, and none of them is this protocol's:
+
+- `scope` is read off the namespace prefix by `scope_of_namespace`, below, and
+  always was.
+- `pii_class` and `irreversibility` are predicate-level policy, and the ontology
+  is already where predicate-level policy lives. `impact` is the same kind of
+  judgement by the same people, feeding the same §3.3 score through the same
+  `{0, .33, .66, 1}` shape, and it is a declared field. Nothing separated them
+  except that one was written down and two were not. ADR-0009 makes them
+  required fields on `PredicateSpec`.
+
+Which leaves this protocol with no implementation, no possible implementation
+that is not "read the spec", and one consumer. **It goes, along with
+`CandidateRisk`**, when `PredicateSpec` gains the two fields - the same
+implementation step. Kept until then so that `Deps` type-checks.
 
 **`entail` is S5.1's `EntailFn`, and `run()` needs it for two different
 questions.** §3.1 clusters K samples by meaning, and §3.2's `S_src` asks whether
@@ -158,8 +168,10 @@ class EntityResolver(Protocol):
 class CandidateClassifier(Protocol):
     """Answers §3.3's three undeclared features for one candidate.
 
-    Structural, and nothing implements it here for two of the three. See
-    `scope_of_namespace` for the one that can be derived.
+    **Deleted by ADR-0009, which this has not caught up with yet.** Two of the
+    three are becoming required `PredicateSpec` fields and the third was always
+    `scope_of_namespace`'s, so nothing is left for a protocol to answer. Do not
+    implement this; see the module docstring.
     """
 
     async def classify(self, candidate: MemoryCandidate) -> CandidateRisk:

@@ -10,12 +10,13 @@ sentence come true would give the first user-facing surface in the project a
 scripted model behind it, which is the one thing a governed-memory server must
 not have.
 
-`pipeline.Deps` follows it for the same reason plus two more: `EntityResolver`
-and `CandidateClassifier` are Protocols that nothing implements either
-(`pipeline/deps.py` explains at length why neither gets a default), so `Deps`
-cannot be constructed at all today. That is what S6.2 is actually blocked on -
-not on writing tool handlers - and it is better known now than discovered
-halfway through the step.
+`pipeline.Deps` follows it for the same reason plus one more: `EntityResolver`
+is a Protocol that nothing implements, so `Deps` cannot be constructed at all
+today. (`CandidateClassifier` was the second until ADR-0009, which deletes it
+rather than implements it - two of §3.3's three undeclared features become
+ontology fields and the third always came off the namespace.) That is what S6.2
+is actually blocked on - not on writing tool handlers - and it is better known
+now than discovered halfway through the step.
 
 **Why a pool opens for a server that serves no tools.** Because the alternative
 makes S6.1's DONE WHEN check nothing. "The inspector connects and lists zero

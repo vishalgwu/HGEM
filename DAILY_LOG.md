@@ -3927,6 +3927,79 @@ times.
 
 ---
 
+## 2026-09-15 — ADR-0009 (the classifier is deleted, not implemented)
+
+**Shipped**
+
+- **ADR-0009.** §3.3's three undeclared features turned out to be three problems
+  with three different answers, not one gap behind one protocol. `scope` was
+  always `scope_of_namespace`'s. `pii_class` and `irreversibility` become
+  **required `PredicateSpec` fields**. `CandidateClassifier` and `CandidateRisk`
+  are deleted.
+- **`MEMORY_ENGINE.md` §2.1 and §3.3 amended** in the same commit, per
+  `RULES.md` §8 — §2.1's worked YAML now carries both fields on all three
+  example predicates, and §3.3's table says where each of the three comes from.
+- **No code.** Same shape as ADR-0008: decision first, and every docstring that
+  now contradicts it corrected — `deps.py`, `impact_features.py`, `inputs.py`,
+  `lifespan.py`, the MCP write tools, `checkpoint_b.py`.
+
+**What broke / what I learned**
+
+- **The argument for the ontology was sitting in `PredicateSpec` the whole
+  time.** It already declares `impact`, `min_source_tier` and
+  `requires_corroboration` — three policy judgements by the deploying
+  organisation, validated at load, versioned. `deps.py` justified the protocol
+  by saying `pii_class` and `irreversibility` "are decisions a deploying
+  organisation makes", which is *equally true of `impact`*, and `impact` feeds
+  the same §3.3 score through the same `{0,.33,.66,1}` shape. No principle
+  separated them. One got written down and two didn't, and the protocol was
+  built around the omission rather than the omission being noticed.
+- **`irreversibility` cannot be a per-candidate question, and its own docstring
+  said so without drawing the conclusion.** It asks whether what an *agent did*
+  on a belief can be undone — an email sent, a prescription filed. None of that
+  has happened when `R` is computed. There is no observation to classify, only a
+  prior to declare. I had read that docstring twice before without noticing it
+  ruled out the design it was attached to.
+- **This ADR removes a gap rather than filling one**, which I did not expect
+  going in. Best outcome available: `run()`'s unimplemented dependencies go from
+  two to one, and the one left has ADR-0008 behind it.
+- **The close call was keeping the protocol as an override seam.** Rejected
+  because S11.3's PII detector fits a different shape — a declared *floor* that
+  evidence can raise, like `impact` already does to `R` — and because an empty
+  protocol in `Deps` is indistinguishable from the outside from the
+  unimplemented one that has blocked `run()` for four steps.
+- **A test loses its instrument and I would not have predicted which one.**
+  `test_orchestrator.py`'s concurrency probe counts overlapping scorings by
+  wrapping the classifier, precisely because `_decide_one` awaits it once per
+  candidate. Delete the classifier and the probe needs a new per-candidate
+  await. The assertion doesn't change; the instrument does.
+- **The quiet win is the audit record.** `RiskFeatures` is persisted verbatim so
+  the review UI can show why something was flagged. Two of the eight numbers
+  would have traced back to whatever a classifier returned; now they trace to a
+  named field in a versioned file, and "why special-category?" is answerable by
+  reading one line.
+
+**Still open**
+
+- **Implementation, now one coherent change.** `PredicateSpec` gains two
+  required fields; `clinical.yaml` gains thirty lines and goes to version 2;
+  `CandidateClassifier`/`CandidateRisk` and `Deps.classifier` are deleted;
+  `risk_features` takes the spec and namespace; `resolve` gains `expected_type`;
+  an entity writer appears; `_score_and_decide` awaits one entailment lookup.
+  All of it lands in `_decide_one` and the two files either side of it.
+- **§2.1's revalidation sweep does not exist** (open item #28), so the pack's
+  version bump re-checks nothing. Not introduced here, but this is the first
+  change that would have wanted it.
+- **`checkpoint_b generate`** and a wider transcript. Unchanged.
+
+**Tomorrow's first step**
+
+**Implement all three decisions in one commit**, ontology fields first, because
+the classifier deletion falls out of them and the other two are independent. No
+more decisions are in the way of a runnable `run()`.
+
+---
+
 ---
 
 ---

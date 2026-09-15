@@ -146,9 +146,12 @@ def risk_features(
 
     Args:
         candidate: The fact. Only its citation is read here - the three features
-            that would need more of it are the three `CandidateClassifier`
-            answers, which is the whole reason that protocol exists.
-        classified: The three §3.3 names and defines nowhere.
+            that would need more of it are declared rather than inferred, two on
+            the predicate and one on the namespace (ADR-0009).
+        classified: The three §3.3 named and defined nowhere. **This argument is
+            replaced by the spec and the namespace when ADR-0009 lands**; it is
+            still here because `PredicateSpec` does not carry the two fields
+            yet.
         kind: Layer 2's finding, which decides `mutation_type`.
         impact: The predicate's declared impact.
         degree: Live edges touching the subject, from `GraphStore.degree`.
