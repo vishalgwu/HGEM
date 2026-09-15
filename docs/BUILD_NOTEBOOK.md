@@ -2884,6 +2884,48 @@ DONE WHEN: from the Inspector you can propose a fact, get a decision back, and t
 
 COMMIT: `feat(s6.2): core mcp tools`
 
+**Five corrections to this step, found by building it.**
+
+1. **THE DONE WHEN IS HALF-SATISFIABLE, AND THIS IS THE STEP THAT PROVES IT.** "Find it via
+   `memory.search` with its provenance" works and is mechanised against the seeded tenant, over the
+   protocol, in CI. "Propose a fact, get a decision back" **cannot happen**: `memory.propose` is a
+   call into `pipeline.run`, which needs an `LLMClient` (**S9.1**), an `EntityResolver` (specified
+   in no document; needs an ADR) and a `CandidateClassifier` (deployment policy). `memory.commit`
+   needs the same three plus the applier, which is its own ADR. So **two of the four tools work and
+   two decline**, and the declining two name every missing dependency rather than returning an
+   invented decision — a `memory.propose` that answered `auto_write` with a plausible confidence
+   would be the most harmful thing this repository could ship, because the product's whole claim is
+   that a fact was governed before it was believed. **Do S9.1 before S6.3.**
+2. **`memory.search` could not answer §2.1 at all until the store grew a read path.** §2.1 publishes
+   an `excluded` array so an agent can tell "we have no record" from "we retired that record" — and
+   invariant I6 means `search` must *never* return a retired assertion, `search(as_of=...)` selects
+   rows whose validity contains an instant (so asking about now returns exactly the live set), and
+   `valid_to IS NOT NULL` is not a filter it can express. `excluded` would have been permanently
+   empty. S6.2 therefore adds **`VectorStore.retired`**, which answers the other question in its own
+   field and is also what §2.5's `memory.timeline` will need.
+3. **Scope `excluded` by the predicates the caller asked about.** Found by driving the seeded tenant
+   by hand: an unscoped version told a search for `allergy` that two facts had been retired, and both
+   were a `home_address` and a `preferred_pharmacy`. A footnote that is usually wrong is worse than
+   no footnote, and §2.1's whole point is that this field be *trustworthy*.
+4. **The server needs `GM_MCP_TENANT_ID` and `GM_MCP_DEFAULT_NAMESPACE`, because authentication does
+   not exist.** §1's `GUARDMEM_API_KEY` is what a tenant is resolved from in the finished system, by
+   the gateway (S8.1) and its RLS middleware (S8.2). Neither is built and this server talks straight
+   to Postgres, so the tenant is configuration and the tools **refuse** without it — a default would
+   be a cross-tenant read that succeeds and returns the wrong rows.
+5. **Four fields §2.1-§2.2 publish have no producer, and each is named rather than faked.**
+   `reviewed_by`/`reviewed_at` need the review queue (**S18.3**) and are omitted rather than emitted
+   as `null`, which would claim the fact was *not* reviewed. `token_budget` is trimmed against a
+   deliberately pessimistic character estimate, because the real packer is **S14.3** and the obvious
+   interim — `tiktoken` — is OpenAI's tokenizer *and* downloads its BPE ranks on first use, which is
+   the wrong failure for a stdio server inside a desktop app. `mode: async` is §2.2's default and is
+   refused, since "return now, decide later" needs the worker from **S8.4** and with no queue the
+   second half never happens. `review_task_id`/`eta_minutes` need **S18.1**.
+
+Also worth knowing: **`memory.get_entity`'s `neighbors` is empty in a fresh process**, because
+`NetworkXGraphStore` holds the graph in memory and a seeded database has no undispatched outbox
+events to replay. The response carries `graph_backed: false` so a caller cannot read a limitation as
+a finding; **S7.1** is the fix.
+
 ---
 
 ### S6.3 -- Connect Claude Desktop

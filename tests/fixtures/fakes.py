@@ -130,6 +130,38 @@ class FakeLLM:
         return self.responses[index]
 
 
+# The closed vocabulary `PgVectorStore._FILTER_COLUMNS` publishes. Duplicated
+# here rather than imported, and the duplication is the lesser evil: importing it
+# would make the unit suite's fake depend on the concrete Postgres store, which
+# is the dependency direction `PROJECT_TREE.md` and the import-linter contract
+# both exist to forbid. `test_the_fake_refuses_the_filter_keys_the_store_refuses`
+# is what keeps the two lists in step.
+_SEARCHABLE = frozenset({"subject_id", "predicate"})
+
+
+def _check_filters(filters: dict[str, object]) -> None:
+    """Refuse a filter key the real store would refuse.
+
+    Raises:
+        KeyError: the key is outside `_SEARCHABLE`.
+
+    S1.7's rule about fakes, applied to a divergence that had gone unnoticed:
+    `PgVectorStore` raises `KeyError` on an unknown filter key - deliberately,
+    because a caller-supplied key reaching a query string is how `RULES.md` §4's
+    parameterised-SQL rule gets broken by accident - while this fake matched it
+    with `getattr(..., None)` and quietly returned nothing. A typo'd filter
+    therefore passed the unit suite as "no results" and failed the integration
+    suite as an error, which is the wrong way round: the cheap suite should
+    catch it.
+    """
+    unknown = sorted(set(filters) - _SEARCHABLE)
+    if unknown:
+        raise KeyError(
+            f"{unknown} is not a searchable column; allowed: {sorted(_SEARCHABLE)}. "
+            "This fake refuses exactly what PgVectorStore refuses."
+        )
+
+
 def _is_valid_at(assertion: StoredAssertion, as_of: datetime | None) -> bool:
     """Is this assertion believed now, or was it true at `as_of`?
 
@@ -201,6 +233,7 @@ class FakeVectorStore:
         - belongs in the integration suite, against a store that actually
         computed one.
         """
+        _check_filters(filters)
         matches = [
             assertion
             for assertion in reversed(list(self.assertions.values()))
@@ -214,6 +247,48 @@ class FakeVectorStore:
             )
         ]
         return [ScoredAssertion(assertion=match, cosine=_FAKE_COSINE) for match in matches[:k]]
+
+    async def retired(
+        self,
+        *,
+        namespace: Namespace,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StoredAssertion]:
+        """Return retired assertions in `namespace`, newest retirement first.
+
+        The exact complement of `search`'s temporal condition - `valid_to` set
+        rather than unset - and deliberately **not** filtered on `visible`, which
+        matches the store: a row superseded between its write and its relay pass
+        is retired and was never readable, and somebody asking "what happened to
+        that fact?" needs to see it.
+
+        Raises:
+            KeyError: `filters` named something outside the searchable set.
+
+        The sort is by `valid_to` descending, as the store's `ORDER BY`. Ties
+        keep insertion order, which `sorted` guarantees by being stable - two
+        assertions retired at the same instant is exactly what a supersession of
+        two facts in one transaction produces, so it is the normal case rather
+        than a pathological one.
+        """
+        _check_filters(filters)
+        matches = [
+            assertion
+            for assertion in self.assertions.values()
+            if assertion.namespace == namespace
+            and assertion.valid_to is not None
+            and all(
+                getattr(assertion, attribute, None) == expected
+                for attribute, expected in filters.items()
+            )
+        ]
+        newest_first = sorted(
+            matches,
+            key=lambda a: a.valid_to or datetime.min,
+            reverse=True,
+        )
+        return newest_first[:limit]
 
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
         """Retire `old_id` in favour of `new_id`, without deleting anything.

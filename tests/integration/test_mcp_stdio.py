@@ -7,6 +7,12 @@ a browser, which is the right way to *see* it working and the wrong way to keep
 it working - so this is the same claim asked by a real MCP client over a real
 session, in CI, on every commit.
 
+**S6.2 made it four tools rather than zero**, and this module deliberately kept
+the rest: what it tests is that a client *connects* - `Settings` validated, the
+DSN reachable, the ontology parsed, the handshake completed - which is the part
+an operator gets wrong and the part no unit test can reach. What the tools then
+do is `test_mcp_memory_tools.py`.
+
 **Why this is an integration test.** The server's lifespan opens a Postgres pool
 (`lifespan.py` explains why a tool-less server does), so "it connects" is a
 statement about configuration as much as about the protocol: `Settings`
@@ -122,12 +128,24 @@ class TestTheDoneWhen:
 
             assert initialized.server_info.name == SERVER_NAME
 
-    async def test_it_lists_zero_tools_without_error(self) -> None:
-        """The literal sentence. `tools/list` over the wire, not a direct call."""
+    async def test_it_lists_its_tools_without_error(self) -> None:
+        """S6.1's sentence was "lists zero tools"; S6.2 put four there.
+
+        What survives from S6.1 - and is the half this module is for - is
+        "without error": the whole startup path ran, the handler answered over
+        the wire, and the listing is what a client will actually see. The tools'
+        *contents* belong to `test_mcp_memory_tools.py`, which asks them to do
+        something.
+        """
         async with connected() as session:
             result = await asyncio.wait_for(session.list_tools(), timeout=_SESSION_TIMEOUT_S)
 
-            assert result.tools == []
+            assert [tool.name for tool in result.tools] == [
+                "memory.search",
+                "memory.propose",
+                "memory.commit",
+                "memory.get_entity",
+            ]
 
     async def test_listing_resources_and_prompts_also_succeeds(self) -> None:
         """Both are advertised, so both must answer.

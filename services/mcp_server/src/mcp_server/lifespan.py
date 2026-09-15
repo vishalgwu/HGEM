@@ -52,6 +52,8 @@ from guardmem_core.settings import Settings, get_settings
 if TYPE_CHECKING:
     import asyncpg
 
+    from guardmem_core.memory.graph.base import GraphStore
+    from guardmem_core.memory.vector.base import Embedder
     from guardmem_core.schemas.ontology import Ontology
 
 __all__ = ["DEFAULT_ONTOLOGY", "ConfigurationError", "ServerState", "lifespan", "preflight"]
@@ -96,10 +98,14 @@ class ServerState:
             `PgVectorStore` binds a tenant, and the tenant comes from an
             authenticated request - so the pool is what lives here and the store
             is not.
-        graph: The entity graph. In-process and therefore lost on restart, which
-            `NetworkXGraphStore` says of itself; the outbox is what rebuilds it,
-            and S7.1's Neo4j backend is the first durable one.
-        embedder: Write-side embedding. **`HashEmbedder` models no semantics** -
+        graph: The entity graph. Typed as the `GraphStore` protocol, because
+            S7.1 swaps Neo4j in behind it by configuration; today `lifespan`
+            binds the NetworkX one, which is in-process and therefore lost on
+            restart - the outbox is what rebuilds it, and S7.1's backend is the
+            first durable one.
+        embedder: Write-side embedding, typed as the `Embedder` protocol for
+            the reason `graph` is. **The `HashEmbedder` bound today models no
+            semantics** -
             it hashes text, so identical text retrieves identically and nothing
             else does. It is here because it is the only `Embedder` in the
             package until S9.1, and naming it in the state is better than a
@@ -108,6 +114,18 @@ class ServerState:
         ontology: The validated predicate pack, loaded once. `load_ontology` is
             itself cached, so this field is about making the dependency visible
             rather than about avoiding a second parse.
+        graph_durable: Whether `graph` survives this process. **False today**,
+            and `memory.get_entity` reports it so an empty neighbour list is
+            readable as "this process has no graph" rather than "this entity is
+            isolated" - which matters, because that list feeds
+            `MEMORY_ENGINE.md` §3.3's blast-radius score.
+
+            A flag rather than an `isinstance` check at the point of use, and
+            that is the whole reason it exists. Only the composition root knows
+            which backend it chose; a tool asking `isinstance(graph,
+            NetworkXGraphStore)` has to name a concrete class, gets the answer
+            wrong for any third implementation, and quietly reports a *test
+            double* as durable. S7.1 sets this true where it binds Neo4j.
 
     Frozen, because none of it may be swapped while a session is open: a handler
     that saw a different pool halfway through a request would be reading a
@@ -116,9 +134,10 @@ class ServerState:
 
     settings: Settings
     pool: asyncpg.Pool
-    graph: NetworkXGraphStore
-    embedder: HashEmbedder
+    graph: GraphStore
+    embedder: Embedder
     ontology: Ontology
+    graph_durable: bool = False
 
 
 def preflight() -> Settings:
@@ -216,6 +235,11 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
             graph=NetworkXGraphStore(),
             embedder=HashEmbedder(),
             ontology=load_ontology(DEFAULT_ONTOLOGY),
+            # NetworkX holds the graph in memory, so it is empty in every new
+            # process and nothing repopulates it - the outbox rebuilds by
+            # replaying, and a seeded database has no undispatched events. S7.1
+            # binds Neo4j here and sets this true.
+            graph_durable=False,
         )
     finally:
         await pool.close()

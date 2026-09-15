@@ -245,6 +245,59 @@ class VectorStore(Protocol):
         """
         ...
 
+    async def retired(
+        self,
+        *,
+        namespace: Namespace,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StoredAssertion]:
+        """Return assertions this namespace once believed and has since retired.
+
+        Args:
+            namespace: Isolation scope, a separate required argument for the
+                reason `search` gives.
+            filters: The same closed vocabulary `search` takes, and an
+                implementation must reject an unknown key the same way. Narrow
+                by `subject_id` and `predicate` to ask "what did we retire *in
+                place of* this?"; pass none to ask "what has this namespace
+                retired lately?".
+            limit: How many, most recently retired first.
+
+        Returns:
+            Assertions with `valid_to` set, newest retirement first, each
+            carrying its full provenance and its `superseded_by`. Empty when the
+            namespace has retired nothing matching.
+
+        Raises:
+            StoreUnavailable: The store is unreachable. Retryable.
+
+        **This is the one read path that is allowed to return what `search` must
+        not.** Invariant I6 says a tombstoned assertion never appears in
+        *retrieval* results, and that is what `search` enforces - a retired fact
+        leaking into the context an agent reasons from is the product's central
+        failure. This answers a different question, asked deliberately and
+        returned in its own field: `MCP_INTEGRATION.md` §2.1 publishes an
+        `excluded` array next to the results precisely so "we have no record"
+        and "we retired that record" stop being indistinguishable, and §2.5's
+        `memory.timeline` is the same capability asked over one subject.
+
+        Added at S6.2, the step that first serves §2.1. Before it there was no
+        way to read a retired row at all: `search(as_of=...)` selects rows whose
+        validity *contains* an instant, so asking it about now returns exactly
+        the live set, and `valid_to IS NOT NULL` is not a filter it can express.
+        `excluded` would have had to be a permanently empty array.
+
+        **Not vector-ranked, and that is the deliberate part.** Ordering by
+        retirement time rather than by similarity to a query makes the result
+        explainable - "here is what this namespace stopped believing, most
+        recent first" - and it is what the caller can act on. It also avoids a
+        sequential scan with a distance computation over every dead row: the
+        `assertion_hnsw` index is partial on `valid_to IS NULL AND visible`, so
+        nothing retired is in it, by construction.
+        """
+        ...
+
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
         """Retire `old_id` in favour of `new_id`, with a tombstone.
 

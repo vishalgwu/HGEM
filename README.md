@@ -178,7 +178,8 @@ gate, incumbent retrieval, conflict detection, and the resolution matrix with th
 merge behind it — **Day 5 is complete (S5.1 – S5.6)**: semantic entropy, the
 confidence composite, the impact-risk score, the decision matrix, the
 hash-chained audit log, and the orchestrator that runs a proposal through all of
-it — and **S6.1** adds the MCP server skeleton, the first user-facing surface.
+it — and **Day 6 is at S6.2**: the MCP server, its four core tools, and the
+first user-facing surface this project has had.
 
 Two things that sound like they are built and are not, stated here because
 everything below assumes you know: **nothing has ever called a real model**
@@ -467,18 +468,26 @@ That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
 push.
 
-S6.1 is the newest step: a process that speaks MCP over stdio, starts its pool,
-loads the ontology, advertises what it can serve, and offers **zero tools** —
-which is the step's own acceptance criterion rather than a placeholder. The four
-tools in `MCP_INTEGRATION.md` §2 are S6.2, and building this surface is what made
-plain that S6.2 is blocked on S9.1: a `memory.propose` tool is a call into the
-pipeline, and the pipeline cannot run without a model client, an entity resolver
-and a candidate classifier — none of which exist. That is recorded as correction
-1 on S6.1 in the notebook.
+S6.1 and S6.2 are the newest steps: a process that speaks MCP over stdio, starts
+its pool, loads the ontology, and serves the four tools `MCP_INTEGRATION.md` §2
+publishes — `memory.search`, `memory.propose`, `memory.commit` and
+`memory.get_entity`.
 
-The next step is **S9.1**, out of order and deliberately: it unblocks Checkpoint
-B, S6.2 and Day 6 together, and running the gate before building further on the
-assumption that it passes is the whole reason the gate is placed where it is.
+**Two of the four work and two decline, and that is the honest state rather than
+an unfinished one.** `memory.search` and `memory.get_entity` read governed memory
+end to end: point one at the seeded demo tenant and it returns believed facts
+with the verbatim source span each came from, and lists separately what has been
+*retired* — which is the difference between "we have no record" and "we no longer
+believe that". `memory.propose` and `memory.commit` validate every published
+constraint and then refuse, naming what is missing: the decision pipeline needs a
+model provider (S9.1), an entity resolver (specified in no document) and a
+candidate classifier. **They do not return an invented decision.** The whole claim
+of this project is that a fact was governed before it was believed, and a tool
+that says so without having done it would be worse than no tool at all.
+
+The next step is **S9.1**, out of order and deliberately. Three things are now
+stacked behind it: Checkpoint B, S6.2's write half, and S6.3 — which is "have a
+conversation that writes a fact", and nothing writes a fact yet.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

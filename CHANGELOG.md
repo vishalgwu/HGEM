@@ -17,6 +17,32 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **`memory.get_entity` passed a zero query vector, and pgvector answers `NaN`.**
+  Cosine distance is undefined against a vector of zero magnitude, so
+  `1 - NaN = NaN` and `ScoredAssertion`'s bound rejected it — surfacing to the
+  client as JSON-RPC "Invalid request parameters", which blames the caller for a
+  server bug. The entity's own id is embedded instead. The ordering is still
+  meaningless and nothing reads it; the vector is now merely *defined*.
+- **An unexpected exception in a tool reached the client as `-32602`.** The SDK
+  turns an uncaught handler exception into that code, whose message is "Invalid
+  request parameters" — so a server bug was reported as the caller's mistake,
+  with no detail, and the real error was visible only by calling the handler
+  directly. Every exception is now a `CallToolResult`: a `GuardMemError` reports
+  its own `code` and whether it is retryable (which for `StoreUnavailable` is
+  genuinely actionable by an agent), and anything else gets a short safe message
+  while the traceback goes to the log, per `RULES.md` §1.5.
+- **`excluded` was not scoped to the query.** Driving the seeded tenant by hand:
+  a search for `allergy` came back with three allergies and "2 retired and
+  excluded", and the two retired facts were a `home_address` and a
+  `preferred_pharmacy`. §2.1 publishes that field so it can be *trusted*.
+- **`FakeVectorStore` accepted filter keys `PgVectorStore` refuses.** The real
+  store raises `KeyError` on an unknown key — deliberately, because a
+  caller-supplied key reaching a query string is how `RULES.md` §4's
+  parameterised-SQL rule gets broken by accident — while the fake matched it with
+  `getattr(..., None)` and quietly returned nothing. So a typo'd filter passed the
+  unit suite as "no results" and failed the integration suite as an error, which
+  is the wrong way round: the cheap suite should catch it. S1.7's rule about
+  fakes, applied to a divergence that had gone unnoticed.
 - **CI was red on `main` and the cause was one missing line of pytest
   configuration.** `pythonpath = ["."]` is now set in `pyproject.toml`. Two jobs
   were failing — `integration` since S5.6 and `gates` since the CHECKPOINT B
@@ -66,6 +92,40 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **S6.2 — the four core tools, and the honest split between them.**
+  `memory.search`, `memory.propose`, `memory.commit` and `memory.get_entity`,
+  with `MCP_INTEGRATION.md` §2.1-§2.4's schemas and descriptions copied exactly
+  into `tools/schemas.py` — which is one file because a tool description is read
+  by a *model*, so rewording one changes behaviour for every agent using the
+  server.
+- **Two of the four work and two decline, deliberately.** `memory.search` and
+  `memory.get_entity` read governed memory end to end. `memory.propose` and
+  `memory.commit` validate every published constraint and then refuse, naming
+  each missing dependency: `LLMClient` (S9.1), `EntailFn` (S9.1),
+  `EntityResolver` (specified in no document, needs an ADR) and
+  `CandidateClassifier` (deployment policy). **They do not return an invented
+  decision.** The product's claim is that a fact was governed before it was
+  believed; a tool that says so without having done it is worse than no tool.
+- **S6.2's DONE WHEN is therefore half-satisfiable, and both halves are tested.**
+  "Find it via `memory.search` with its provenance" runs in CI against the
+  twenty-eight assertions `make seed` writes — real spans located in a real
+  transcript by `link_span`. "Propose a fact, get a decision back" is asserted as
+  a *refusal that names what is missing*, so the day S9.1 lands the test fails
+  and has to be rewritten into the round trip the step actually asks for. A skip
+  would have gone green forever.
+- **`VectorStore.retired`** — the first read path that may return a retired
+  assertion, and the reason `memory.search` can answer §2.1 at all. That section
+  publishes an `excluded` array so an agent can tell "we have no record" from "we
+  retired that record"; invariant I6 keeps retired rows out of `search`,
+  `search(as_of=...)` asked about now returns exactly the live set, and
+  `valid_to IS NOT NULL` is not a filter it can express — so `excluded` could
+  only ever have been empty. Implemented on both the Postgres store and the fake,
+  and §2.5's `memory.timeline` needs the same capability.
+- **`GM_MCP_TENANT_ID` and `GM_MCP_DEFAULT_NAMESPACE`**, because authentication
+  does not exist: §1's API key is what a tenant is resolved from once the gateway
+  (S8.1) and its RLS middleware (S8.2) are built. The tools **refuse** without a
+  configured tenant rather than defaulting, since a default would be a
+  cross-tenant read that succeeds and returns the wrong rows.
 - **S6.1 — the MCP server skeleton, and the first user-facing surface.**
   `services/mcp_server/` speaks MCP over stdio, starts a Postgres pool, loads the
   clinical ontology, advertises tools, resources and prompts, and lists **zero**

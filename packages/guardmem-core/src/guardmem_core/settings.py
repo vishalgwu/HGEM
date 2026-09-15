@@ -126,6 +126,31 @@ class Settings(BaseSettings):
     # of the five above moves, or the audit cannot tell two runs apart.
     thresholds_version: str = "v1"
 
+    # --- mcp server (S6.2) --------------------------------------------------
+    # Which tenant and namespace the MCP server acts for.
+    #
+    # **These exist because authentication does not.** `MCP_INTEGRATION.md` §1
+    # carries a `GUARDMEM_API_KEY`, and in the finished system that key is what a
+    # request's tenant is resolved from - by the gateway (S8.1) and its auth and
+    # RLS-context middleware (S8.2). Neither exists, and this server talks
+    # straight to Postgres, so there is nothing to resolve a tenant *from*. A
+    # server that guessed would be a cross-tenant read, which is the isolation
+    # failure the product exists to prevent, so it is stated in configuration
+    # instead and the tools refuse to run without it.
+    #
+    # Empty by default, and deliberately not required: `Settings` has nine
+    # required fields and every one of them is needed by *every* entry point,
+    # while these two are needed by one service. A blank value is the honest
+    # representation of "this process is not configured to serve memory tools",
+    # and `mcp_server/context.py` turns it into a refusal that names the
+    # variable rather than a query that returns somebody else's rows.
+    #
+    # `mcp_default_namespace` is §2.1's "defaults to server-configured
+    # namespace" and §1's `GUARDMEM_DEFAULT_NAMESPACE`. A tool call may always
+    # name its own.
+    mcp_tenant_id: str = ""
+    mcp_default_namespace: str = ""
+
     # --- pipeline tuning ----------------------------------------------------
     # K is 1, 3 or 5 by risk hint (MEMORY_ENGINE 1.2); this is the default arm.
     # The upper bound is a sanity rail, not a spec value - K scales cost

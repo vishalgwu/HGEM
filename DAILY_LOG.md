@@ -3614,6 +3614,82 @@ would compound it for no gain.
 
 ---
 
+## 2026-09-14 — Day 6 · S6.2 (the four core tools)
+
+**Shipped**
+
+- **All four tools**, with §2.1-§2.4's schemas and descriptions copied exactly
+  into `tools/schemas.py`. `memory.search` and `memory.get_entity` work end to
+  end; `memory.propose` and `memory.commit` validate everything and decline.
+- **`VectorStore.retired`** — without it §2.1's `excluded` could only ever have
+  been an empty array. Implemented on the Postgres store and the fake.
+- **`GM_MCP_TENANT_ID` / `GM_MCP_DEFAULT_NAMESPACE`**, with the tools refusing
+  rather than defaulting.
+- **1426 tests, 2 skipped, 99.05% coverage.** `pipeline.py`, `search.py` and
+  `schemas.py` at 100%.
+
+**What broke / what I learned**
+
+- **I was asked to build S6.2 having twice said it was blocked, so I built
+  everything that is not.** The split is not a compromise, it is the finding:
+  `search` and `get_entity` need a store and an embedder, both of which exist;
+  `propose` and `commit` are calls into `run()`, which needs three things that
+  do not. Writing the refusal so it names all four missing dependencies at once
+  matters — an operator who fixed `LLMClient` alone would hit the next one and
+  reasonably conclude the work was open-ended.
+- **The thing I am most sure about: no invented decision.** It would have been
+  easy, and plausible-looking, to return `auto_write` with a confidence. That is
+  the one output this product must never fabricate, because the entire claim is
+  that a fact was governed before it was believed.
+- **§2.1's `excluded` had no producer and I nearly missed it.** `search` must
+  never return a retired assertion (I6), `as_of` asked about now is the live
+  set, and `valid_to IS NOT NULL` is not an expressible filter. The field would
+  have shipped permanently empty and looked implemented. It is the one place
+  where "copy the schema exactly" forced a change to a *core protocol*.
+- **Then I got `excluded` wrong in a way only real data showed.** Driving the
+  seeded tenant: a search for `allergy` returned three allergies and "2 retired
+  and excluded" — a `home_address` and a `preferred_pharmacy`. Scoped by
+  predicate now. A footnote that is usually wrong is worse than no footnote, and
+  the unit tests I had written would never have caught it, because I had written
+  them against one predicate.
+- **A zero vector is not an inert vector.** `get_entity` passed `[0.0] * dim`
+  because "the protocol wants one and the order is not read". Cosine distance
+  against zero magnitude is `NaN`, `ScoredAssertion`'s bound rejected it, and the
+  *client* saw JSON-RPC "Invalid request parameters" — a server bug reported as
+  the caller's mistake. Two fixes: embed the entity id, and stop letting any
+  unexpected exception reach a client as a bare protocol error.
+- **The fake accepted filter keys the real store refuses.** `PgVectorStore`
+  raises `KeyError` on an unknown filter key; the fake matched it with `getattr`
+  and returned nothing. So a typo passed the fast suite and failed the slow one.
+  Exactly S1.7's rule about fakes, and it had been wrong since S1.7.
+- **I hit the 400-line cap three times in one step** — `pgvector_store.py`,
+  `search.py`, `test_mcp_tools.py` — and every split improved the code, which is
+  the cap working. `queries.py` in particular: SQL *composition* is where
+  `RULES.md` §4 could be broken, and it is now forty lines that can be read for
+  that rather than four hundred.
+- **And I reintroduced open item #35's exact trap**, naming a unit and an
+  integration module `test_mcp_tools.py`. mypy refused the pair outright and
+  pytest's collection broke. Renamed; the item was right that it would recur.
+
+**Still open**
+
+- **S6.3 and S6.4 are blocked behind S9.1**, same as S6.2's write half. S6.3 is
+  "have a conversation that writes a fact", and nothing writes a fact.
+- **THE CHECKPOINT B GATE.** Unchanged, and now with a tool surface on top.
+- **An agent cannot search by a patient's name.** `subject` is a `uuid` filter;
+  entity resolution is specified nowhere. This is the most user-visible
+  consequence of that gap and there is now a test that says so.
+- **`memory.get_entity` returns no neighbours in a fresh process** (S7.1).
+- The applier (#44), and the four spec questions (52, 57, 61, 62), unchanged.
+
+**Tomorrow's first step**
+
+**S9.1.** For the third time, and now with three steps stacked behind it: the
+CHECKPOINT B gate, S6.2's write half, and S6.3. It also needs
+`GM_ANTHROPIC_API_KEY`, which is still blank.
+
+---
+
 ---
 
 ---

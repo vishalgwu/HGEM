@@ -70,15 +70,30 @@ def capabilities() -> types.ServerCapabilities:
 
 
 class TestTheDoneWhen:
-    """ "...connects and lists zero tools without error"."""
+    """S6.1 was "...connects and lists zero tools without error".
 
-    async def test_it_lists_zero_tools(self) -> None:
+    **S6.2 changed the first half and that is the point of this class now.**
+    The file that shipped at S6.1 said this was "the one that changes at S6.2,
+    where this file's expectations should be updated rather than deleted", so:
+    the tools are asserted here as a *count*, and their contents belong to
+    `test_mcp_tools.py`. What has not changed - and is the half worth keeping -
+    is "without error": listing still answers, resources and prompts still list
+    empty, and the capability block still says what the server can honour.
+    """
+
+    async def test_it_lists_the_four_core_tools(self) -> None:
         result = await _list_tools(_NO_CONTEXT, None)
 
-        assert result.tools == []
+        assert [tool.name for tool in result.tools] == [
+            "memory.search",
+            "memory.propose",
+            "memory.commit",
+            "memory.get_entity",
+        ]
 
-    async def test_it_offers_no_next_page_over_an_empty_listing(self) -> None:
-        """A cursor over nothing is an invitation to ask again for nothing."""
+    async def test_it_offers_no_next_page_over_a_complete_listing(self) -> None:
+        """A cursor over a finished list is an invitation to ask again for
+        nothing. Four tools is one page."""
         result = await _list_tools(_NO_CONTEXT, None)
 
         assert result.next_cursor is None
@@ -162,15 +177,17 @@ class TestServerIdentity:
     def test_the_instructions_say_what_is_not_there_yet(self) -> None:
         """Read by the model, not only rendered for the human.
 
-        An agent told it has governed memory and then offered no tools should be
-        able to see why from the handshake alone, rather than concluding the
-        server is broken and working around it.
+        An agent whose `memory.propose` call is going to be declined should be
+        able to see why from the handshake, rather than concluding the server is
+        broken and working around it - and, more importantly, should not treat
+        anything as remembered on the strength of a tool that exists.
         """
         options = build_server().create_initialization_options()
 
         assert options.instructions == INSTRUCTIONS
-        assert "S6.2" in INSTRUCTIONS
         assert "memory.search" in INSTRUCTIONS
+        assert "decline" in INSTRUCTIONS
+        assert "Treat nothing as remembered" in INSTRUCTIONS
 
 
 class TestConstructionIsPure:

@@ -4,16 +4,19 @@ S6.1's DONE WHEN, verbatim: `npx @modelcontextprotocol/inspector uv run
 guardmem-mcp` "connects and lists zero tools without error". That sentence is
 the specification for this module, and both halves of it are load-bearing.
 
-**Zero tools, and they are empty rather than absent.** Three list handlers are
-registered and each returns an empty list, which is what makes the capability
-block say `tools`, `resources` and `prompts` at all - the SDK derives
-`ServerCapabilities` from the handlers that exist, so a server with no
-`tools/list` handler advertises no tool capability and an inspector has nothing
-to list rather than a list of nothing. Those are different answers to different
-questions and only the second one is true here. The tools themselves are S6.2
-and the resources and prompts are S6.4; `MCP_INTEGRATION.md` §2's descriptions
-are prompt engineering rather than documentation, so a placeholder tool carrying
-the right name and no behaviour would be actively worse than this.
+**S6.2 replaced the empty tool list with the four core tools.** They are
+`MCP_INTEGRATION.md` §2.1-§2.4, copied exactly - see `tools/schemas.py`, which
+owns the wording, because a tool description is read by a model rather than by a
+person and changing one changes behaviour. Resources and prompts still list
+empty: they are S6.4, and a list handler that exists returning nothing is what
+makes the capability advertised and honest at the same time.
+
+**Two of the four do work and two refuse, on purpose.** `memory.search` and
+`memory.get_entity` read governed memory and are complete. `memory.propose` and
+`memory.commit` validate everything they can and then decline, naming each
+missing dependency - `tools/pipeline.py` has the list and the argument for why a
+plausible-looking invented decision would be the worst thing this repository
+could ship.
 
 **1 correction to this step, found by building it.**
 
@@ -46,6 +49,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from mcp_server.lifespan import ConfigurationError, ServerState, lifespan, preflight
+from mcp_server.tools import TOOLS, call_tool
 
 if TYPE_CHECKING:
     from mcp.server.context import ServerRequestContext
@@ -80,9 +84,13 @@ INSTRUCTIONS: Final = (
     "fact is extracted with a verbatim source span, checked against what is "
     "already believed, scored for confidence and blast radius, and either "
     "written, queued for human review, or rejected - with an audit record "
-    "either way. This build serves no tools yet; the four core tools "
-    "(memory.search, memory.propose, memory.commit, memory.get_entity) arrive "
-    "at build step S6.2."
+    "either way. Call memory.search before answering anything that depends on "
+    "facts about a subject; it returns only currently-believed assertions, each "
+    "with the source span it came from, and lists separately what has been "
+    "retired. In this build memory.propose and memory.commit decline: the "
+    "decision pipeline needs a model provider that is not wired yet, and they "
+    "will not invent a decision to look complete. Treat nothing as remembered "
+    "until a write path exists."
 )
 
 
@@ -90,13 +98,33 @@ async def _list_tools(
     _ctx: ServerRequestContext[ServerState],
     _params: types.PaginatedRequestParams | None,
 ) -> types.ListToolsResult:
-    """No tools, which is S6.1's DONE WHEN rather than a placeholder.
+    """The four core tools, in S6.2's implementation order.
 
     Returns:
-        An empty result. `nextCursor` is left unset: there is no next page, and
-        a cursor over an empty list is a client's invitation to ask again.
+        Every published tool. `nextCursor` is left unset - four tools is one
+        page, and a cursor over a complete list is a client's invitation to ask
+        again for nothing.
     """
-    return types.ListToolsResult(tools=[])
+    return types.ListToolsResult(tools=list(TOOLS))
+
+
+async def _call_tool(
+    ctx: ServerRequestContext[ServerState],
+    params: types.CallToolRequestParams,
+) -> types.CallToolResult:
+    """Run one tool.
+
+    Returns:
+        The result, or a refusal carrying `isError` - `tools/__init__.py` owns
+        that distinction and the reasoning behind it.
+
+    The lifespan context is where the pool, the graph, the embedder and the
+    ontology come from, which is why the handler takes `ctx` rather than
+    reaching for a module-level singleton: two sessions in one process must not
+    be able to see each other's state, and on stdio today there is one session
+    only *by accident of the transport*.
+    """
+    return await call_tool(ctx.lifespan_context, params.name, params.arguments)
 
 
 async def _list_resources(
@@ -141,6 +169,7 @@ def build_server() -> Server[ServerState]:
         instructions=INSTRUCTIONS,
         lifespan=lambda _server: lifespan(),
         on_list_tools=_list_tools,
+        on_call_tool=_call_tool,
         on_list_resources=_list_resources,
         on_list_prompts=_list_prompts,
     )

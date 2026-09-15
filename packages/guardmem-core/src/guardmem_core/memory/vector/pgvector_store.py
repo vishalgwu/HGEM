@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 import asyncpg
 
@@ -41,8 +41,13 @@ from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.outbox import INSERT_OUTBOX, outbox_params
 from guardmem_core.memory.vector.base import ScoredAssertion, embed_text
 from guardmem_core.memory.vector.pool import tenant_transaction
+from guardmem_core.memory.vector.queries import (
+    SUPERSEDE,
+    nearest_statement,
+    predicates,
+    retired_statement,
+)
 from guardmem_core.memory.vector.rowmap import (
-    ASSERTION_COLUMNS,
     EMBEDDING_DIM,
     INSERT_ASSERTION,
     INSERT_PROVENANCE,
@@ -63,27 +68,6 @@ if TYPE_CHECKING:
     from guardmem_core.schemas.receipt import Provenance
 
 __all__ = ["PgVectorStore"]
-
-# `filters` on the protocol is `dict[str, object]`, which is to say it arrives
-# from a caller. `RULES.md` §4 forbids string-built SQL, and the way that rule
-# gets broken by accident is a dict key reaching an f-string as a column name.
-# This maps the vocabulary a caller may use onto the columns it is allowed to
-# mean; anything else is a programming error and is raised as one.
-#
-# `subject_id` and `predicate` are what `MEMORY_ENGINE.md` §2.2's incumbent
-# lookup needs, and together with `namespace` they are exactly what
-# `assertion_live_idx` covers. Widening this set is a deliberate act that should
-# arrive with the index to support it.
-_FILTER_COLUMNS: Final[dict[str, str]] = {"subject_id": "subject_id", "predicate": "predicate"}
-_UUID_FILTERS: Final = frozenset({"subject_id"})
-
-# The S3.2 statement, verbatim from the notebook apart from the casts asyncpg
-# needs. `WHERE valid_to IS NULL` is the concurrency control - see `supersede`.
-_SUPERSEDE: Final = """
-    UPDATE assertion
-    SET valid_to = $1, superseded_by = $2::uuid
-    WHERE id = $3::uuid AND valid_to IS NULL
-"""
 
 
 class PgVectorStore:
@@ -218,15 +202,11 @@ class PgVectorStore:
         about what was true last March is neither hot nor improved by an
         approximate answer.
         """
-        clauses, params = self._predicates(namespace, filters, as_of)
+        clauses, params = predicates(namespace, filters, as_of)
         params.append(embedding)
         vector_param = f"${len(params)}"
         params.append(k)
-        statement = (
-            f"SELECT {ASSERTION_COLUMNS}, embedding <=> {vector_param} AS distance "  # noqa: S608
-            f"FROM assertion WHERE {' AND '.join(clauses)} "
-            f"ORDER BY distance LIMIT ${len(params)}"
-        )
+        statement = nearest_statement(clauses, vector_param, f"${len(params)}")
         async with self._transaction() as connection:
             rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
             citations = await self._citations(connection, [row["id"] for row in rows])
@@ -239,6 +219,56 @@ class PgVectorStore:
             )
             for row in rows
         ]
+
+    async def retired(
+        self,
+        *,
+        namespace: Namespace,
+        filters: dict[str, object],
+        limit: int,
+    ) -> list[StoredAssertion]:
+        """Return what this namespace has stopped believing, newest first.
+
+        Args:
+            namespace: Isolation scope.
+            filters: Keys drawn from `_FILTER_COLUMNS`, as `search`. Anything
+                else raises.
+            limit: How many.
+
+        Returns:
+            Retired assertions, each hydrated with its full provenance.
+
+        Raises:
+            StoreUnavailable: Postgres is unreachable.
+            KeyError: `filters` named something outside the vocabulary.
+
+        `_predicates` builds the shared clauses and is reused rather than
+        copied - the tenant is applied by `SET LOCAL` on the transaction and the
+        namespace and filter binding are identical, so a second hand-written
+        WHERE here would be a second place for the isolation rules to drift.
+        What differs is the temporal predicate, and it is the exact complement of
+        the live one: `valid_to IS NOT NULL`.
+
+        `ORDER BY valid_to DESC` rather than by distance, for the reason the
+        protocol gives - and for a physical one. `assertion_hnsw` is partial on
+        `valid_to IS NULL AND visible`, so no retired row is in it; ranking these
+        by similarity would mean a sequential scan computing a distance against
+        every dead row in the namespace, which is the wrong cost for a
+        secondary field on a read.
+
+        Deliberately not filtered on `visible`. A row can be superseded between
+        its write and its relay pass, and such a row is retired and was never
+        readable - which is exactly the kind of thing somebody asking "what
+        happened to that fact?" needs to see. It cannot leak into retrieval,
+        because retrieval is `search`.
+        """
+        clauses, params = predicates(namespace, filters, None)
+        params.append(limit)
+        statement = retired_statement(clauses, f"${len(params)}")
+        async with self._transaction() as connection:
+            rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
+            citations = await self._citations(connection, [row["id"] for row in rows])
+        return [assertion_from_row(row, citations[row["id"]]) for row in rows]
 
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
         """Retire `old_id` in favour of `new_id`. Never deletes.
@@ -266,7 +296,7 @@ class PgVectorStore:
         """
         async with self._transaction() as connection:
             status = await connection.execute(
-                _SUPERSEDE, at, new_id, old_id, timeout=self._timeout_s
+                SUPERSEDE, at, new_id, old_id, timeout=self._timeout_s
             )
         if status.rsplit(" ", maxsplit=1)[-1] == "0":
             raise ConcurrencyConflict(
@@ -315,43 +345,6 @@ class PgVectorStore:
                     f"assertion.embedding is VECTOR({EMBEDDING_DIM}). Check GM_EMBED_MODEL."
                 )
         return vectors
-
-    def _predicates(
-        self, namespace: Namespace, filters: dict[str, object], as_of: datetime | None
-    ) -> tuple[list[str], list[object]]:
-        """Build the WHERE clauses and the values they bind.
-
-        Returns:
-            The clause fragments and their positional parameters. Every fragment
-            is a literal from this module; every *value* is bound.
-
-        Raises:
-            KeyError: a filter key is outside `_FILTER_COLUMNS`.
-        """
-        params: list[object] = [namespace]
-        clauses = ["namespace = $1", "visible", "retracted_at IS NULL", "embedding IS NOT NULL"]
-        if as_of is None:
-            clauses.append("valid_to IS NULL")
-        else:
-            params.append(as_of)
-            # Half-open [valid_from, valid_to), the same convention `Provenance`
-            # uses for spans - so the intervals `supersede` leaves abutting have
-            # no gap and no overlap at the instant they meet.
-            position = len(params)
-            clauses.append(
-                f"valid_from <= ${position} AND (valid_to IS NULL OR valid_to > ${position})"
-            )
-        for key, value in filters.items():
-            if key not in _FILTER_COLUMNS:
-                raise KeyError(
-                    f"{key!r} is not a searchable column; allowed: {sorted(_FILTER_COLUMNS)}. "
-                    "Widen _FILTER_COLUMNS together with the index that supports it, "
-                    "never by interpolating the key."
-                )
-            params.append(value)
-            cast = "::uuid" if key in _UUID_FILTERS else ""
-            clauses.append(f"{_FILTER_COLUMNS[key]} = ${len(params)}{cast}")
-        return clauses, params
 
     async def _citations(
         self, connection: Conn, ids: Sequence[object]
