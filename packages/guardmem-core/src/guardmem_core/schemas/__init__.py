@@ -14,7 +14,7 @@ dependency order explicit and leaves no room for an import cycle:
 `turn` (S2.1) hangs off `base` alone rather than extending that chain: it is
 Layer 1's *input* vocabulary, and nothing it describes has been extracted yet.
 `ontology` (S3.5) hangs off the far end of it - it needs `Cardinality` from
-`entity`, `ImpactLevel` from `verdict` and `SourceTier` from `receipt`, which is
+`entity`, `ImpactLevel` from `risk` and `SourceTier` from `receipt`, which is
 the shape of the thing: a predicate declaration is a statement about all three.
 
 Which module owns what follows `PROJECT_TREE.md`. Two things it lists are still
@@ -35,13 +35,15 @@ from guardmem_core.schemas.candidate import (
     MemoryCandidate,
 )
 from guardmem_core.schemas.entity import Cardinality, Edge, Entity, StoredAssertion
-from guardmem_core.schemas.ontology import (
+from guardmem_core.schemas.object_spec import (
     CodedObject,
     EntityRefObject,
     ObjectSpec,
+    ScalarObject,
+)
+from guardmem_core.schemas.ontology import (
     Ontology,
     PredicateSpec,
-    ScalarObject,
     load_ontology,
     parse_ontology,
 )
@@ -59,6 +61,7 @@ from guardmem_core.schemas.review import (
     ReviewStatus,
     ReviewTask,
 )
+from guardmem_core.schemas.risk import ImpactLevel, Irreversibility, PiiClass
 from guardmem_core.schemas.turn import (
     DecidedBy,
     DroppedTurn,
@@ -73,7 +76,6 @@ from guardmem_core.schemas.verdict import (
     ConflictReport,
     Decision,
     DecisionRecord,
-    ImpactLevel,
     RiskVerdict,
     Thresholds,
 )
@@ -97,6 +99,7 @@ __all__ = [
     "ExtractionResult",
     "GMModel",
     "ImpactLevel",
+    "Irreversibility",
     "MemoryCandidate",
     "NoiseReason",
     "NoiseResult",
@@ -105,6 +108,7 @@ __all__ = [
     "Obligation",
     "ObligationKind",
     "Ontology",
+    "PiiClass",
     "PredicateSpec",
     "Provenance",
     "ReviewAction",

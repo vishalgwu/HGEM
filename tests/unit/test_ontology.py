@@ -52,6 +52,10 @@ NAMED_BY_THE_STEP = (
     "consent_flag",
 )
 
+# Every required field, and no optional one: `requires_corroboration` is absent
+# because a test below asserts it defaults to false. `pii_class` and
+# `irreversibility` are here because ADR-0009 made them required - a pack
+# missing either does not load, which is the whole point of requiring them.
 MINIMAL = """
 name: tiny
 version: 1
@@ -62,6 +66,8 @@ predicates:
     object: {type: text}
     cardinality: many
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: verified_user
 """
 
@@ -281,6 +287,8 @@ class TestRefusals:
     object: {type: text}
     cardinality: one
     impact: low
+    pii_class: none
+    irreversibility: reversible
     min_source_tier: retrieved_web
 """,
                 source="t",

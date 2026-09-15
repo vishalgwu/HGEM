@@ -23,7 +23,8 @@ from guardmem_core.pipeline.l3_score import (
     source_tier_risk,
 )
 from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.verdict import ConflictKind, ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel
+from guardmem_core.schemas.verdict import ConflictKind
 
 
 class TestTheVocabularies:

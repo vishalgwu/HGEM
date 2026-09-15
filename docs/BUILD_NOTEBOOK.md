@@ -1,3 +1,27 @@
+**As of 2026-09-15 every dependency is implemented**, and `run()` has been
+driven end to end against a real Postgres and a real local model: one candidate
+in, one `HITL_REVIEW` out at `C = 0.837`, `R = 0.924`, with a real entity row
+written through the assertion's foreign key. `EntailFn` is `llm/entailment.py`
+(S5.1 correction 4), `EntityResolver` is `memory/entities.py` (ADR-0008), and
+`CandidateClassifier` was deleted rather than implemented (ADR-0009) — its two
+remaining features are `PredicateSpec` fields and the third always came off the
+namespace.
+
+What is left is not architectural:
+
+- **Extraction cannot run on Ollama.** `ExtractedFact.verbatim` carries
+  `maxLength: 2000` and llama.cpp's grammar compiler refuses the schema; the
+  same schema compiles with that one keyword removed (bisected against
+  `llama3.1:8b`). `EntailmentBatch` compiles fine, so the entailer runs locally
+  and the extractor does not. **This corrects the line below that said the gate
+  needs no API key** — it needs either a key, or a change to the Ollama adapter
+  that strips generation-only keywords from the grammar it sends. The reply is
+  validated against the full schema by the caller either way, so nothing is lost
+  by dropping `maxLength` from the *grammar*.
+- **The harness still has no `generate` subcommand.**
+- **The corpus needs more transcript**: forty turns for one patient supporting
+  28 facts is not 200 candidates.
+
 # GuardMem AI — Master Build Notebook
 
 **A step-by-step, do-this-then-that guide to building the whole system.**
@@ -2829,9 +2853,12 @@ that fills a corpus does not. And step 1 says "200 candidates from the seed
 transcript": that transcript is forty turns for one patient supporting 28
 facts, so the corpus needs widening before 200 is reachable at all.
 
-**It does not need an API key.** `GM_ANTHROPIC_API_KEY` has been blank since
-S0.2, and a local Ollama model runs this gate for nothing. Correction 1 below is
-why that is not a compromise so much as a different instrument.
+**On the API key.** `GM_ANTHROPIC_API_KEY` has been blank since S0.2. A local
+Ollama model was expected to run this gate for nothing, and the block above is
+why that turned out not to be true as things stand — extraction is the first
+step and its schema will not compile to a grammar on llama.cpp. Correction 1
+below still applies to whichever provider is used, and the sign-off still has to
+name it.
 
 **Read correction 1 on S9.1 before running it.** Anthropic has no temperature
 parameter at all, so §1.2's 0-then-0.7 spread is not what is drawn there; the

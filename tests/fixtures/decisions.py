@@ -19,11 +19,11 @@ from typing import Final
 
 from guardmem_core.pipeline.l3_score import MutationType, OverrideSignals
 from guardmem_core.schemas.receipt import SourceTier
+from guardmem_core.schemas.risk import ImpactLevel
 from guardmem_core.schemas.verdict import (
     ConfidenceReport,
     ConflictKind,
     ConflictReport,
-    ImpactLevel,
     RiskVerdict,
     Thresholds,
 )

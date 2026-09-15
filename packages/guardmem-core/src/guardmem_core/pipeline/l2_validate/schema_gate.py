@@ -39,13 +39,14 @@ from typing import TYPE_CHECKING, Final
 
 from guardmem_core.schemas.base import GMModel, ObjectValue
 from guardmem_core.schemas.candidate import MemoryCandidate
-from guardmem_core.schemas.ontology import CodedObject, EntityRefObject, ScalarObject
+from guardmem_core.schemas.object_spec import CodedObject, EntityRefObject, ScalarObject
 from guardmem_core.types import Namespace
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from guardmem_core.schemas.ontology import ObjectSpec, Ontology
+    from guardmem_core.schemas.object_spec import ObjectSpec
+    from guardmem_core.schemas.ontology import Ontology
 
 __all__ = ["GateOutcome", "GatedCandidate", "SchemaGateResult", "gate"]
 

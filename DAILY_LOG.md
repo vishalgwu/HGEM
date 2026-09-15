@@ -4000,6 +4000,88 @@ more decisions are in the way of a runnable `run()`.
 
 ---
 
+## 2026-09-15 — ADR-0008 and ADR-0009 implemented; `run()` runs
+
+**Shipped**
+
+- **`memory/entities.py`** — `NamespaceEntityResolver`, ADR-0008. Binds, never
+  matches. Derived id, `ON CONFLICT DO NOTHING`, refuses when there is no
+  binding. 14 integration tests against real Postgres.
+- **`pii_class` and `irreversibility` on `PredicateSpec`**, all fifteen clinical
+  predicates classified, pack to version 2. **`CandidateClassifier` and
+  `CandidateRisk` deleted.**
+- **The entailment wiring** — `_confidence_for` assembles every pair and awaits
+  one batched lookup.
+- **`run()` executed end to end against real infrastructure**: one candidate in,
+  `HITL_REVIEW` out at `C = 0.837`, `R = 0.924`, a real entity row written
+  through the assertion's foreign key, real Ollama answering the entailment.
+  `pii=1.0 irrev=1.0` off the ontology, `scope=0.5` off the namespace.
+- 1538 tests, 98.89%.
+
+**What broke / what I learned**
+
+- **THE GATE CANNOT RUN ON OLLAMA, and I had told myself twice that it could.**
+  `ExtractedFact.verbatim` carries `maxLength: 2000`; llama.cpp's grammar
+  compiler refuses the whole schema with "failed to parse grammar". Bisected
+  against `llama3.1:8b`: remove that one keyword and the same schema compiles.
+  `EntailmentBatch` compiles fine, which is why the entailer ran locally on
+  2026-09-15 and looked like proof the extractor would. **It was not.** The fix
+  is in the adapter, not the schema — a grammar is a *generation* constraint and
+  the caller still validates the reply against the full schema, so dropping
+  `maxLength` from the grammar loses nothing. Not done here; it is not one of
+  the three decisions and deserves its own commit.
+- **I deleted `EntityResolver` by accident** and the compiler told me
+  immediately. Slicing `deps.py` from `class CandidateRisk` to
+  `def scope_of_namespace` took out everything between, and `EntityResolver` was
+  between. Ruff's "Protocol imported but unused" was the tell. A slice by
+  landmark is only as good as knowing what is inside it.
+- **`RULES.md` §2.4's caps fired four times and every split is better.**
+  `schemas/risk.py` is the one that matters: the three enums the *ontology*
+  declares now sit apart from what the *pipeline* concluded, which is a seam I
+  would not have found by looking. `pipeline/per_candidate.py` is the other —
+  and `orchestrator.py`'s own docstring had already described that line
+  ("Layer 1 runs once for the proposal; Layers 2 and 3 run per candidate")
+  before the cap made it structural.
+- **`schemas/candidate.py` already existed**, so the first name for the new
+  module gave a parametrised test id of `candidate.py0`. Renamed
+  `per_candidate.py` before it became open item #35's third recurrence.
+- **A test of mine failed in exactly the way a broken write would.** Reading the
+  entity row back through a bare `pool.acquire()` with
+  `set_config(..., is_local=true)` returns `None`: `SET LOCAL` outside a
+  transaction block is a no-op, so RLS sees no tenant. The row was there the
+  whole time. Now read through `tenant_transaction`, same as production.
+- **Classifying fifteen predicates is a real exercise, not a fill-in.**
+  `dietary_restriction` is special-category because a restriction proxies for
+  religious belief; `preferred_language` is a quasi-identifier because language
+  proxies for ethnic origin. And `weight_kg` is `impact: low` with PARTIAL
+  irreversibility, because weight drives dose calculations — the one predicate
+  that shows the two fields are independent by design.
+- **The decision came out right and that is worth stating.** A critical allergy
+  at `R = 0.924` went to HITL_REVIEW, not AUTO_WRITE. The matrix is being fed
+  real declared features now and it still refuses to auto-write the thing that
+  can hurt someone.
+
+**Still open**
+
+- **The Ollama grammar fix** — one adapter change, and the gate's cheapest route
+  back.
+- **`checkpoint_b generate`**, and a transcript wider than forty turns.
+- **The applier (#44).** `run()` reaches a decision and still writes nothing;
+  that needs its own ADR and is the last structural gap in the write path.
+- **`make dev-reset && make seed` is required once** — ADR-0008 changed the
+  seeded patient's entity id and the derived id is the primary key, so an
+  existing database keeps its old rows.
+- §2.1's revalidation sweep still does not exist, and the pack just went to
+  version 2.
+
+**Tomorrow's first step**
+
+**Fix the Ollama adapter's grammar**, then `checkpoint_b generate`. The gate has
+been the highest-value thing in the project for six steps and nothing
+architectural is in front of it any more.
+
+---
+
 ---
 
 ---

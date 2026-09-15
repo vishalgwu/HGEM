@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
 
@@ -28,14 +29,14 @@ import pytest
 from fixtures.extraction import ALLERGY, CONTENT, PHARMACY, response
 from fixtures.fakes import FakeGraphStore, FakeLLM, FakeVectorStore
 from guardmem_core.llm.base import Tier
+from guardmem_core.llm.entailment import EntailmentPair
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
-from guardmem_core.pipeline.deps import CandidateRisk, Deps, scope_of_namespace
+from guardmem_core.pipeline.deps import Deps
 from guardmem_core.pipeline.l2_validate import Judgement
 from guardmem_core.pipeline.l3_score import (
     V1_BETAS,
     V1_WEIGHTS,
-    Irreversibility,
-    PiiClass,
+    EntailFn,
 )
 from guardmem_core.pipeline.orchestrator import CandidateFailure, Proposal, run
 from guardmem_core.schemas import load_ontology
@@ -45,7 +46,7 @@ from guardmem_core.schemas.verdict import Decision, Thresholds
 from guardmem_core.types import EntityId, Namespace, TenantId, TraceId, TurnId
 
 if TYPE_CHECKING:
-    from guardmem_core.schemas.candidate import MemoryCandidate
+    pass
 
 TENANT: Final = TenantId("11111111-1111-1111-1111-111111111111")
 NS: Final = Namespace("patient:8812")
@@ -68,29 +69,19 @@ class ScriptedResolver:
     def __init__(self, entity: EntityId = SUBJECT) -> None:
         self.entity = entity
         self.asked: list[str] = []
+        self.expected_types: list[str] = []
 
-    async def resolve(self, subject: str, *, tenant_id: TenantId, namespace: Namespace) -> EntityId:
-        self.asked.append(subject)
-        return self.entity
-
-
-class ScriptedClassifier:
-    """A `CandidateClassifier` answering §3.3's three undeclared features."""
-
-    def __init__(
+    async def resolve(
         self,
-        pii: PiiClass = PiiClass.SPECIAL_CATEGORY,
-        reversible: Irreversibility = Irreversibility.REVERSIBLE,
-    ) -> None:
-        self.pii = pii
-        self.reversible = reversible
-
-    async def classify(self, candidate: MemoryCandidate) -> CandidateRisk:
-        return CandidateRisk(
-            scope=scope_of_namespace(Namespace(candidate.namespace)),
-            pii_class=self.pii,
-            irreversibility=self.reversible,
-        )
+        subject: str,
+        *,
+        tenant_id: TenantId,
+        namespace: Namespace,
+        expected_type: str,
+    ) -> EntityId:
+        self.asked.append(subject)
+        self.expected_types.append(expected_type)
+        return self.entity
 
 
 class ScriptedJudge:
@@ -106,14 +97,24 @@ class ScriptedJudge:
         return [Judgement(entail_fwd=0.1, entail_rev=0.1, contradiction=0.0)] * len(incumbents)
 
 
-def agreeing_entail(premise: str, hypothesis: str) -> float:
-    """An `EntailFn` that says every text entails every other.
+class AgreeingEntailer:
+    """An `EntailLookup` whose every answer is 1.0, recording what it was asked.
 
-    Deliberately generous, and the tests that care assert around it. Its effect
-    is that identical draws cluster and the grounding term scores 1.0, so what
-    the composition tests measure is the wiring rather than a judgement.
+    Deliberately generous, and the tests that care assert around it: identical
+    draws cluster and the grounding term scores 1.0, so what the composition
+    tests measure is the wiring rather than a judgement.
+
+    It records `batches` because the *shape* of the call is the thing ADR-0009's
+    sibling change is about - one awaited lookup per candidate covering every
+    pair, rather than a round trip per comparison.
     """
-    return 1.0
+
+    def __init__(self) -> None:
+        self.batches: list[list[EntailmentPair]] = []
+
+    async def __call__(self, pairs: Sequence[EntailmentPair], *, trace_id: TraceId) -> EntailFn:
+        self.batches.append(list(pairs))
+        return lambda premise, hypothesis: 1.0
 
 
 def turns(*texts: str) -> list[Turn]:
@@ -133,9 +134,8 @@ def deps(**overrides: object) -> Deps:
         "graph": FakeGraphStore(),
         "embedder": HashEmbedder(),
         "nli": ScriptedJudge(),
-        "entail": agreeing_entail,
+        "entail": AgreeingEntailer(),
         "resolver": ScriptedResolver(),
-        "classifier": ScriptedClassifier(),
         "ontology": load_ontology("clinical"),
         "thresholds": THRESHOLDS,
         "weights": V1_WEIGHTS,
@@ -263,7 +263,12 @@ class TestFailuresAreAttributedRatherThanLosingTheBatch:
 
         class HalfBroken(ScriptedResolver):
             async def resolve(
-                self, subject: str, *, tenant_id: TenantId, namespace: Namespace
+                self,
+                subject: str,
+                *,
+                tenant_id: TenantId,
+                namespace: Namespace,
+                expected_type: str,
             ) -> EntityId:
                 self.asked.append(subject)
                 if len(self.asked) == 1:
@@ -281,7 +286,12 @@ class TestFailuresAreAttributedRatherThanLosingTheBatch:
 
         class Broken(ScriptedResolver):
             async def resolve(
-                self, subject: str, *, tenant_id: TenantId, namespace: Namespace
+                self,
+                subject: str,
+                *,
+                tenant_id: TenantId,
+                namespace: Namespace,
+                expected_type: str,
             ) -> EntityId:
                 raise RuntimeError("deliberate")
 
@@ -317,31 +327,32 @@ class TestWhatItDoesNotDo:
         assert all(record.escalated_from is None for record in result.decisions)
 
 
-class _CountingClassifier:
-    """A `CandidateClassifier` that records how many scorings overlapped.
+class _CountingEntailer:
+    """An `EntailLookup` that records how many scorings overlapped.
 
-    The classifier is the natural probe: `_decide_one` awaits it once per
-    candidate, inside the semaphore, so the peak depth it observes *is* the
-    number of candidates the bound let run at once. Yielding to the loop with
-    `sleep(0)` is what makes overlap possible at all - without it each coroutine
-    would run to completion before the next was scheduled, and the count would
-    be 1 for every bound.
+    **This was `_CountingClassifier` until ADR-0009**, which deleted the
+    protocol it wrapped. The probe has to be something `_decide_one` awaits
+    exactly once per candidate inside the semaphore, so the peak depth it
+    observes *is* the number of candidates the bound let run at once. The
+    entailment lookup is now that call, and it is a better probe than the
+    classifier was: it is on the critical path of both §3.1 and §3.2 rather
+    than of one risk feature.
+
+    Yielding with `sleep(0)` is what makes overlap possible at all - without it
+    each coroutine would run to completion before the next was scheduled, and
+    the count would be 1 for every bound.
     """
 
     def __init__(self) -> None:
         self.depth = 0
         self.peak = 0
 
-    async def classify(self, candidate: MemoryCandidate) -> CandidateRisk:
+    async def __call__(self, pairs: Sequence[EntailmentPair], *, trace_id: TraceId) -> EntailFn:
         self.depth += 1
         self.peak = max(self.peak, self.depth)
         await asyncio.sleep(0)
         self.depth -= 1
-        return CandidateRisk(
-            scope=scope_of_namespace(Namespace(candidate.namespace)),
-            pii_class=PiiClass.SPECIAL_CATEGORY,
-            irreversibility=Irreversibility.REVERSIBLE,
-        )
+        return lambda premise, hypothesis: 1.0
 
 
 class TestTheConcurrencyBoundIsTheConfiguredOne:
@@ -355,19 +366,19 @@ class TestTheConcurrencyBoundIsTheConfiguredOne:
     """
 
     async def test_a_bound_of_one_serialises_the_batch(self) -> None:
-        classifier = _CountingClassifier()
+        entailer = _CountingEntailer()
 
-        result, _ = await run(proposal(), deps(classifier=classifier, max_concurrent_scores=1))
+        result, _ = await run(proposal(), deps(entail=entailer, max_concurrent_scores=1))
 
         assert len(result.decisions) == 2, "two candidates, so overlap was possible"
-        assert classifier.peak == 1
+        assert entailer.peak == 1
 
     async def test_a_wider_bound_lets_them_overlap(self) -> None:
         """The control. Without it the test above would pass against a pipeline
         that had lost its concurrency altogether."""
-        classifier = _CountingClassifier()
+        entailer = _CountingEntailer()
 
-        result, _ = await run(proposal(), deps(classifier=classifier, max_concurrent_scores=8))
+        result, _ = await run(proposal(), deps(entail=entailer, max_concurrent_scores=8))
 
         assert len(result.decisions) == 2
-        assert classifier.peak == 2
+        assert entailer.peak == 2

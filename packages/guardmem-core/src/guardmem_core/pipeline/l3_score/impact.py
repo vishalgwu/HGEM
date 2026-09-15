@@ -48,7 +48,7 @@ from guardmem_core.schemas.verdict import RiskVerdict
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from guardmem_core.schemas.verdict import ImpactLevel
+    from guardmem_core.schemas.risk import ImpactLevel
 
 __all__ = ["V1_BETAS", "RiskBetas", "RiskFeatures", "score_impact"]
 

@@ -12,15 +12,21 @@ reasons, different cadences.
 **Three of the eight had no producer, and typing them as enums is what made the
 answer findable.** `scope`, `pii_class` and `irreversibility` were named by §3.3
 and defined by nothing. This docstring used to end "the day an ontology field
-appears the mapping has somewhere to live" - ADR-0009 is that day, for two of
-them, and the mapping did not have to move: `PredicateSpec` gains `pii_class`
-and `irreversibility` as required fields carrying exactly these vocabularies,
-and `risk_feature` converts them unchanged. `scope` is read off the namespace
-prefix by `deps.scope_of_namespace`.
+appears the mapping has somewhere to live" - ADR-0009 is that day, and the
+mapping did not have to change, only move: `PiiClass` and `Irreversibility` are
+now `PredicateSpec` fields, so they live in `schemas/verdict.py` beside
+`ImpactLevel`, which is there for exactly the same reason. **The ontology may
+not import from the pipeline**, which is what forced the move and is the right
+direction anyway. They are re-exported here so §3.3's eight features can still
+be read in one place.
 
 Had these been `float` arguments, the ontology would have had to declare numbers
 and §3.3's mapping would now exist in two places. That is the argument for the
 enums, made concrete.
+
+`Scope` stays defined here: it is the one of the three that is a fact about the
+*write* rather than a declaration about the predicate, and nothing in the
+ontology names it.
 
 **Five do have producers, and they are functions here so the mapping is written
 once.** `impact_declared` is `ImpactLevel.risk_feature`; `source_tier_risk`
@@ -36,6 +42,7 @@ import math
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from guardmem_core.schemas.risk import Irreversibility, PiiClass
 from guardmem_core.schemas.verdict import ConflictKind
 
 if TYPE_CHECKING:
@@ -79,69 +86,6 @@ _SCOPE_FEATURES: dict[Scope, float] = {
     Scope.SESSION: 0.1,
     Scope.USER: 0.5,
     Scope.ORG: 1.0,
-}
-
-
-class PiiClass(StrEnum):
-    """What kind of personal data the claim carries.  §3.3
-
-    The four are the vocabulary of data-protection law rather than this
-    project's invention - "special category" is GDPR Article 9's term, and a
-    clinical pack is made almost entirely of it. Declared per predicate in the
-    ontology (ADR-0009), never inferred: whether something is Article 9 data is
-    a compliance answer, and a compliance answer should be a file somebody
-    signed off rather than a completion.
-    """
-
-    NONE = "none"
-    QUASI_IDENTIFIER = "quasi_identifier"  # re-identifying in combination
-    DIRECT = "direct"  # names, numbers, addresses
-    SPECIAL_CATEGORY = "special_category"  # health, biometrics, beliefs
-
-    @property
-    def risk_feature(self) -> float:
-        """§3.3's mapping: none 0, quasi-identifier .5, direct .8, special 1."""
-        return _PII_FEATURES[self]
-
-
-_PII_FEATURES: dict[PiiClass, float] = {
-    PiiClass.NONE: 0.0,
-    PiiClass.QUASI_IDENTIFIER: 0.5,
-    PiiClass.DIRECT: 0.8,
-    PiiClass.SPECIAL_CATEGORY: 1.0,
-}
-
-
-class Irreversibility(StrEnum):
-    """Can this be practically undone downstream?  §3.3
-
-    Note "practically" and "downstream". Nothing inside this system is
-    irreversible - `ARCHITECTURE.md` §0 makes supersession the only way a fact
-    stops being believed, and the prior one stays readable. What is not
-    reversible is what an *agent* did while holding the wrong belief: an email
-    sent, a prescription filed, a payment made.
-
-    **None of which has happened when `R` is computed**, which is why this can
-    never be an observation about a candidate. What is stated is a prior for the
-    predicate - if an agent acted on this, how recoverable would that be? An
-    allergy drives a prescription; a preferred language drives a letter
-    template. ADR-0009 makes it a declared field for exactly that reason.
-    """
-
-    REVERSIBLE = "reversible"
-    PARTIAL = "partial"
-    IRREVERSIBLE = "irreversible"
-
-    @property
-    def risk_feature(self) -> float:
-        """§3.3's mapping: {0, .5, 1}."""
-        return _IRREVERSIBILITY_FEATURES[self]
-
-
-_IRREVERSIBILITY_FEATURES: dict[Irreversibility, float] = {
-    Irreversibility.REVERSIBLE: 0.0,
-    Irreversibility.PARTIAL: 0.5,
-    Irreversibility.IRREVERSIBLE: 1.0,
 }
 
 

@@ -32,24 +32,23 @@ something has to write that row before the assertion's foreign key will accept
 it. Both are the implementation step; the decision they were waiting on is
 made.
 
-**`CandidateClassifier` is scheduled for deletion by ADR-0009 and is still
-here.** It was built to supply the three risk features §3.3 names and defined
-nowhere - `scope`, `pii_class` and `irreversibility`. They turned out to be
-three problems rather than one, and none of them is this protocol's:
+**`CandidateClassifier` is gone, and ADR-0009 is why.** It was built to supply
+the three risk features §3.3 names and defines nowhere - `scope`, `pii_class`
+and `irreversibility`. They turned out to be three problems rather than one, and
+none of them was this protocol's:
 
 - `scope` is read off the namespace prefix by `scope_of_namespace`, below, and
   always was.
 - `pii_class` and `irreversibility` are predicate-level policy, and the ontology
   is already where predicate-level policy lives. `impact` is the same kind of
   judgement by the same people, feeding the same §3.3 score through the same
-  `{0, .33, .66, 1}` shape, and it is a declared field. Nothing separated them
-  except that one was written down and two were not. ADR-0009 makes them
-  required fields on `PredicateSpec`.
+  `{0, .33, .66, 1}` shape, and it was a declared field the whole time. Nothing
+  separated them except that one had been written down. They are now required
+  `PredicateSpec` fields.
 
-Which leaves this protocol with no implementation, no possible implementation
-that is not "read the spec", and one consumer. **It goes, along with
-`CandidateRisk`**, when `PredicateSpec` gains the two fields - the same
-implementation step. Kept until then so that `Deps` type-checks.
+So the protocol had no implementation, no possible implementation that was not
+"read the spec", and one consumer. `CandidateRisk` went with it: three field
+reads do not need a model to group them.
 
 **`entail` is S5.1's `EntailFn`, and `run()` needs it for two different
 questions.** §3.1 clusters K samples by meaning, and §3.2's `S_src` asks whether
@@ -72,46 +71,59 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from guardmem_core.pipeline.l3_score.impact_features import Irreversibility, PiiClass, Scope
-from guardmem_core.schemas.base import GMModel
+from guardmem_core.pipeline.l3_score.impact_features import Scope
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from guardmem_core.llm.base import LLMClient
+    from guardmem_core.llm.entailment import EntailmentPair
     from guardmem_core.memory.graph.base import GraphStore
     from guardmem_core.memory.vector.base import Embedder, VectorStore
     from guardmem_core.pipeline.l2_validate import NLIJudge
     from guardmem_core.pipeline.l3_score import ConfidenceWeights, EntailFn, RiskBetas
-    from guardmem_core.schemas.candidate import MemoryCandidate
     from guardmem_core.schemas.ontology import Ontology
     from guardmem_core.schemas.verdict import Thresholds
-    from guardmem_core.types import EntityId, Namespace, TenantId
+    from guardmem_core.types import EntityId, Namespace, TenantId, TraceId
 
 __all__ = [
-    "CandidateClassifier",
-    "CandidateRisk",
     "Deps",
+    "EntailLookup",
     "EntityResolver",
     "scope_of_namespace",
 ]
 
 
-class CandidateRisk(GMModel):
-    """The three §3.3 features a deployment has to decide for itself.
+class EntailLookup(Protocol):
+    """Scores a batch of entailment pairs and hands back the sync callable.
 
-    Attributes:
-        scope: How widely shared the namespace is.
-        pii_class: What kind of personal data the claim carries.
-        irreversibility: Whether what an agent did on this belief can be undone.
+    **The shape `entropy.py` asked for.** `EntailFn` is a plain sync callable -
+    what a local cross-encoder is - and S5.1 kept it that way so LID's detector
+    could back it later. An async backend cannot satisfy that directly, and its
+    own docstring says what to do instead: "precompute the pairs it needs and
+    pass a lookup, because every comparison here is independent and none of them
+    need to be sequential." This is that seam.
 
-    Grouped into one model rather than three arguments because they are answered
-    together, by the same policy, about the same candidate - and because a
-    protocol returning a tuple of three enums is a protocol whose arguments get
-    transposed.
+    `LLMEntailer.lookup` is the implementation. A Protocol rather than a
+    `Callable` alias because `trace_id` is keyword-only, which `Callable` cannot
+    express - and because the local cross-encoder that replaces it should be
+    held to the same contract rather than to a structural accident.
     """
 
-    scope: Scope
-    pii_class: PiiClass
-    irreversibility: Irreversibility
+    async def __call__(self, pairs: Sequence[EntailmentPair], *, trace_id: TraceId) -> EntailFn:
+        """Score `pairs` and return a callable that answers from them.
+
+        Args:
+            pairs: Every pair the caller is about to ask about.
+            trace_id: The proposal's trace, for provider and injection errors.
+
+        Returns:
+            An `EntailFn` total over `pairs`. It is expected to **raise** on a
+            pair it was not given rather than return a default: a number nothing
+            measured, inside a confidence score, is the failure CHECKPOINT B
+            exists to catch.
+        """
+        ...
 
 
 class EntityResolver(Protocol):
@@ -128,13 +140,20 @@ class EntityResolver(Protocol):
     a matching problem with a precision/recall trade-off and no data here to set
     it with, and the ADR defers it rather than guessing at a threshold.
 
-    **This signature is one argument short of the ADR and has not been changed
-    yet.** Creating an entity needs `type`, which is `NOT NULL` on the row;
-    `PredicateSpec.subject` carries it, `_decide_one` has the spec in scope, and
-    it is not passed. Adding `expected_type` is the first implementation step.
+    `NamespaceEntityResolver` in `memory/entities.py` is the implementation.
+    This stays a Protocol because ADR-0008 explicitly defers the matching
+    problem: a resolver that does compare names arrives behind this same seam,
+    with an eval behind it.
     """
 
-    async def resolve(self, subject: str, *, tenant_id: TenantId, namespace: Namespace) -> EntityId:
+    async def resolve(
+        self,
+        subject: str,
+        *,
+        tenant_id: TenantId,
+        namespace: Namespace,
+        expected_type: str,
+    ) -> EntityId:
         """Resolve which entity `subject` belongs to, within this tenant.
 
         Args:
@@ -148,6 +167,10 @@ class EntityResolver(Protocol):
             namespace: The isolation scope the candidate landed in, and under
                 ADR-0008 the thing that usually answers the question - a
                 `<type>:<id>` namespace names one subject.
+            expected_type: The entity type the predicate declares its subject to
+                be, `PredicateSpec.subject`. Required because `entity.type` is
+                `NOT NULL` and nothing else in this signature could supply it -
+                the gap that made the protocol unimplementable until ADR-0008.
 
         Returns:
             The entity id. An implementation creates the entity for a binding it
@@ -161,29 +184,6 @@ class EntityResolver(Protocol):
                 message is expected to name both remedies. A resolver that
                 guessed here would attach a fact to the wrong record, which no
                 invariant in this system would catch.
-        """
-        ...
-
-
-class CandidateClassifier(Protocol):
-    """Answers §3.3's three undeclared features for one candidate.
-
-    **Deleted by ADR-0009, which this has not caught up with yet.** Two of the
-    three are becoming required `PredicateSpec` fields and the third was always
-    `scope_of_namespace`'s, so nothing is left for a protocol to answer. Do not
-    implement this; see the module docstring.
-    """
-
-    async def classify(self, candidate: MemoryCandidate) -> CandidateRisk:
-        """Classify a candidate's scope, PII class and reversibility.
-
-        Args:
-            candidate: The proposed fact, after the schema gate has admitted it.
-
-        Returns:
-            The three features, each already a member of its vocabulary rather
-            than a float - so a wrong answer is a wrong *category* and shows up
-            in the audit record as one.
         """
         ...
 
@@ -230,10 +230,12 @@ class Deps:
         embedder: The one the store was built with - retrieval compares vectors
             from a single model or the distances mean nothing.
         nli: §2.2(a)'s judge.
-        entail: §3.1's and §3.2's entailment function. See the module docstring
-            on why one callable answers two questions.
+        entail: §3.1's and §3.2's entailment, as the batch-then-lookup seam
+            `EntailLookup` describes. One awaited call per candidate covers
+            both questions - the clustering's `K(K-1)` comparisons and the
+            one grounding pair - because `inputs.entail_pairs` assembles
+            them together.
         resolver: Surface form to `EntityId`.
-        classifier: §3.3's three undeclared features.
         ontology: The tenant's pack, already validated.
         thresholds: §3.4's five cut points and their version. Built by
             `Settings.thresholds()`, never read inside `decide()`.
@@ -260,9 +262,8 @@ class Deps:
     graph: GraphStore
     embedder: Embedder
     nli: NLIJudge
-    entail: EntailFn
+    entail: EntailLookup
     resolver: EntityResolver
-    classifier: CandidateClassifier
     ontology: Ontology
     thresholds: Thresholds
     weights: ConfidenceWeights

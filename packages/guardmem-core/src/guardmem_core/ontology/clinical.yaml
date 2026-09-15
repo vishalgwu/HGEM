@@ -19,13 +19,31 @@
 #                The weakest source that may assert this at all. Required on
 #                every predicate - there is no safe default, so the file states
 #                it fifteen times rather than assuming it once.
+#   pii_class    What kind of personal data the value is: none, quasi-identifier,
+#                direct, special-category. §3.3 weighs it at 1.10. Required, for
+#                min_source_tier's reason - `none` scores 0.0, so a default
+#                would price an unclassified predicate as carrying no personal
+#                data at all.
+#   irreversibility
+#                Whether what an AGENT DID on this belief can be undone - a
+#                prescription filed, a letter sent, records disclosed. §3.3
+#                weighs it at 1.40. Required. Note this is not about retracting
+#                the fact: supersession always works, and none of the downstream
+#                action has happened when R is computed, so what is stated is
+#                the predicate's prior rather than a candidate's observation.
+#
+# `pii_class` and `irreversibility` arrived with ADR-0009, which took them off a
+# `CandidateClassifier` protocol that nothing implemented. They are independent
+# of `impact` on purpose - §3.3 weighs eight features separately, and
+# `weight_kg` is the predicate that shows it: low impact, PARTIAL
+# irreversibility, because weight drives dose calculations.
 #
 # `requires_corroboration` defaults to false and is stated only where it is
 # true: §3.2's `S_cor` then demands more than one independent source, which is
 # the defence against a single poisoned document setting a dangerous field.
 
 name: clinical
-version: 1
+version: 2
 
 # Closed list. Every `subject` and every `entity_ref` target below is checked
 # against it at load, so a typo is a load error rather than a predicate nothing
@@ -48,6 +66,8 @@ predicates:
     object: {type: coded, system: RxNorm}
     cardinality: many
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: verified_user
     requires_corroboration: true
 
@@ -56,6 +76,8 @@ predicates:
     object: {type: coded, system: RxNorm}
     cardinality: many
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: verified_user
     requires_corroboration: true
 
@@ -66,6 +88,8 @@ predicates:
     object: {type: coded, system: ICD-10-CM}
     cardinality: one
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: trusted_system
     requires_corroboration: true
 
@@ -74,6 +98,8 @@ predicates:
     object: {type: coded, system: SNOMED-CT}
     cardinality: one
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: trusted_system
     requires_corroboration: true
 
@@ -85,6 +111,9 @@ predicates:
     object: {type: boolean}
     cardinality: one
     impact: critical
+    # Records shared on a wrong consent cannot be un-shared.
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: verified_user
     requires_corroboration: true
 
@@ -95,6 +124,8 @@ predicates:
     object: {type: entity_ref, entity: Document}
     cardinality: one_per_time
     impact: critical
+    pii_class: special_category
+    irreversibility: irreversible
     min_source_tier: trusted_system
     requires_corroboration: true
 
@@ -105,6 +136,10 @@ predicates:
     object: {type: entity_ref, entity: Provider}
     cardinality: one
     impact: medium
+    # DIRECT rather than special-category: it names a person. The care
+    # relationship it implies is sensitive, the value itself is an identity.
+    pii_class: direct
+    irreversibility: partial
     min_source_tier: verified_user
 
   preferred_pharmacy:
@@ -112,6 +147,8 @@ predicates:
     object: {type: entity_ref, entity: Pharmacy}
     cardinality: one_per_time
     impact: low
+    pii_class: quasi_identifier
+    irreversibility: partial
     min_source_tier: unverified_user
 
   # HIGH rather than medium: a wrong payer is a denied claim, and corroborated
@@ -121,6 +158,10 @@ predicates:
     object: {type: entity_ref, entity: Payer}
     cardinality: one_per_time
     impact: high
+    # Plan plus postcode plus date of birth re-identifies; the plan alone does
+    # not, which is exactly what quasi-identifier means.
+    pii_class: quasi_identifier
+    irreversibility: partial
     min_source_tier: trusted_system
     requires_corroboration: true
 
@@ -132,6 +173,11 @@ predicates:
     object: {type: entity_ref, entity: Person}
     cardinality: many
     impact: high
+    # IRREVERSIBLE because the failure is a disclosure: ringing the wrong person
+    # in an emergency tells them something about the patient's health, and that
+    # cannot be withdrawn.
+    pii_class: direct
+    irreversibility: irreversible
     min_source_tier: verified_user
 
   # --- descriptive state ----------------------------------------------------
@@ -141,6 +187,8 @@ predicates:
     object: {type: text}
     cardinality: one
     impact: medium
+    pii_class: special_category
+    irreversibility: partial
     min_source_tier: trusted_system
 
   # ONE_PER_TIME, like every address: the previous one is not wrong, it is
@@ -150,6 +198,10 @@ predicates:
     object: {type: text}
     cardinality: one_per_time
     impact: high
+    # Same disclosure argument as emergency_contact - a letter sent to a stranger
+    # at the old address is not recallable.
+    pii_class: direct
+    irreversibility: irreversible
     min_source_tier: verified_user
 
   preferred_language:
@@ -157,6 +209,11 @@ predicates:
     object: {type: text}
     cardinality: one
     impact: low
+    # QUASI_IDENTIFIER, not none: language can proxy for ethnic origin, which is
+    # Article 9 data. The mitigation is that acting on it wrongly means resending
+    # a letter, so this is the pack's only REVERSIBLE predicate.
+    pii_class: quasi_identifier
+    irreversibility: reversible
     min_source_tier: unverified_user
 
   dietary_restriction:
@@ -164,6 +221,11 @@ predicates:
     object: {type: text}
     cardinality: many
     impact: medium
+    # SPECIAL_CATEGORY: a restriction proxies for religious belief or a health
+    # condition. Allergies are their own predicate, so the failure here is a meal
+    # served wrong rather than a reaction - PARTIAL, not irreversible.
+    pii_class: special_category
+    irreversibility: partial
     min_source_tier: unverified_user
 
   # The only numeric predicate in the pack, and it exists partly to keep the
@@ -174,4 +236,9 @@ predicates:
     object: {type: number}
     cardinality: one_per_time
     impact: low
+    # PARTIAL despite `impact: low`, and the pair is deliberate: weight drives
+    # dose calculations. The two fields are independent by design (§3.3 weighs
+    # eight features) and this is the predicate that shows it.
+    pii_class: special_category
+    irreversibility: partial
     min_source_tier: verified_user

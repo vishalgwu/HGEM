@@ -35,13 +35,13 @@ from fixtures.strategy_primitives import (
 )
 from guardmem_core.schemas import GMModel
 from guardmem_core.schemas.policy import ObligationKind
+from guardmem_core.schemas.risk import ImpactLevel
 from guardmem_core.schemas.verdict import (
     ConfidenceReport,
     ConflictKind,
     ConflictReport,
     Decision,
     DecisionRecord,
-    ImpactLevel,
     RiskVerdict,
     Thresholds,
 )

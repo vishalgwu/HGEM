@@ -18,7 +18,7 @@ from typing import Final
 import pytest
 
 from guardmem_core.pipeline.l3_score import V1_BETAS, RiskBetas, RiskFeatures, score_impact
-from guardmem_core.schemas.verdict import ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel
 
 _FIELDS: Final = (
     "impact_declared",

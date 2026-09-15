@@ -186,11 +186,11 @@ behind one `LLMClient`. That retires the first of the two caveats this section
 used to open with — the engine can call a real model now, and does.
 
 One remains, and everything below assumes you know it: **nothing writes an
-assertion.** The pipeline returns decisions and applies none; the applier needs
-an ADR, and so does entity resolution. Checkpoint B — the gate that would say
-whether the scoring separates good writes from bad — **has not run**, and S9.1
-removed one of the four things standing in its way rather than all four. See
-"The gate that has not run yet", which now lists the other three.
+assertion.** The pipeline reaches a decision and applies none; the applier needs
+an ADR. Entity resolution has one now — ADR-0008 — and so do §3.3's undeclared
+risk features, ADR-0009. Checkpoint B — the gate that would say whether the
+scoring separates good writes from bad — **still has not run**. See "The gate
+that has not run yet" for what is left, which is no longer a design question.
 
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
@@ -461,29 +461,23 @@ mistake — the same problem the "no model grading" rule exists to prevent — a
 scoring against the test double would measure scripted answers.
 
 Until S9.1 there was no adapter to a real model provider at all, and that was
-the whole of the explanation. It is no longer. `pipeline.run()` takes four
-dependencies this repository did not supply; two are still open, and
-`pipeline/deps.py` says why for each:
+the whole of the explanation. It is no longer, and as of ADR-0008 and ADR-0009
+**every dependency `pipeline.run()` needs is implemented**. `run()` has been
+driven end to end against a real Postgres and a real local model: one candidate
+in, one `HITL_REVIEW` out at `C = 0.837`, `R = 0.924`, with a real entity row
+written through the assertion's foreign key.
 
-| Missing | What it feeds | Share of `C` |
-|---|---|---|
-| `EntityResolver` | incumbent retrieval → conflict → `S_con` | 0.15 |
-| `CandidateClassifier` | §3.3's `pii_class` and `irreversibility` → `R` | none, but `run()` will not execute without it |
+What is still in the way is narrower and was found by trying it. **Extraction
+cannot run on Ollama**: `ExtractedFact.verbatim` carries `maxLength: 2000`, and
+llama.cpp's grammar compiler refuses the schema outright — bisected, and the
+same schema compiles once that one keyword is removed. So the local-model route
+to the gate needs a small change to the Ollama adapter (strip generation-only
+keywords from the grammar; the reply is still validated against the full schema
+by the caller), or an API key.
 
-Each needs an ADR before an implementation — the first is a matching problem
-with a precision/recall trade-off that no document specifies, the second is
-deployment policy.
-
-The other two are closed. `LLMClient` at S9.1, and `EntailFn` — the largest at
-0.60 of `C`, feeding both §3.1's meaning clustering and §3.2's grounding — by
-`LLMEntailer`, which scores a whole batch of text pairs in one BALANCED call and
-hands back a lookup. It is built and **not yet wired**: the callable the scorer
-takes is synchronous and the producer is not, so the orchestrator has to collect
-a candidate's pairs and await one lookup before scoring it.
-
-Two further gaps are not dependencies but are equally in the way. The harness
-has no `generate` subcommand, so nothing fills a corpus; and the seed transcript
-is forty turns for one patient supporting 28 facts, which is not 200 candidates.
+Two further gaps are not dependencies. The harness has no `generate`
+subcommand, so nothing fills a corpus; and the seed transcript is forty turns
+for one patient supporting 28 facts, which is not 200 candidates.
 
 So what is built is the *measurement*, not the thing measured: the metric, the
 diagnostics, the label format, the self-consistency check on the labels, and a
@@ -523,14 +517,10 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself** — via the three dependencies listed
-under "The gate that has not run yet", which S9.1 did not supply.
-
-It does **not** need an API key. `GM_ANTHROPIC_API_KEY` has been blank since
-S0.2 and a local Ollama model runs the gate for nothing, which is why the
-sign-off block has a line for the provider: an AUROC measured on Ollama and one
-measured on Claude are two different numbers, and a stated provider is the
-difference between a cheap result and a misleading one.
+The next step is **Checkpoint B itself**, and for the first time nothing
+architectural is in front of it — no missing dependency, no undecided design.
+What remains is one adapter fix or an API key, a corpus generator, a wider
+transcript, and a labelling session.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

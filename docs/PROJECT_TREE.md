@@ -72,6 +72,10 @@ guardmem-ai/
 │   │       │   ├── base.py              # GMModel (extra=forbid/frozen/strict) + ObjectValue
 │   │       │   ├── candidate.py         # MemoryCandidate, ExtractedFact, ExtractionResult
 │   │       │   ├── entity.py            # Cardinality, Entity, StoredAssertion, Edge
+│   │       │   ├── risk.py              # ADR-0009; ImpactLevel, PiiClass, Irreversibility
+│   │       │   │                        #   - what a PREDICATE declares about its danger
+│   │       │   ├── object_spec.py       # S3.5; the ObjectSpec union, split out of
+│   │       │   │                        #   ontology.py at RULES 2.4's cap
 │   │       │   ├── verdict.py           # ImpactLevel, Conflict*, ConfidenceReport,
 │   │       │   │                        #   RiskVerdict, Decision, DecisionRecord
 │   │       │   ├── policy.py            # ObligationKind, Obligation; Rule + PolicyPack at S12.2
@@ -96,9 +100,13 @@ guardmem-ai/
 │   │       │   │   ├── noise_filter.py  # S2.1; rules tier + one batched FAST call
 │   │       │   │   ├── noise_rules.py   # S2.1; the deterministic half - pure, no I/O
 │   │       │   │   └── span_linker.py   # S2.3; SpanMatch, exact then fuzzy >= 92, snapped
+│   │       │   ├── per_candidate.py  # S5.6; Layers 2-3 for ONE candidate, split at
+│   │       │   │                    #   RULES 2.4's cap along the seam run() already
+│   │       │   │                    #   described: per-proposal vs per-candidate
 │   │       │   ├── orchestrator.py   # S5.6; run() - one proposal, every layer. Writes
 │   │       │   │                    #   NOTHING: the audit/write transaction is unowned
-│   │       │   ├── deps.py           # S5.6; Deps + the 3 protocols NOTHING implements
+│   │       │   ├── deps.py           # S5.6; Deps + EntityResolver and EntailLookup.
+│   │       │   │                    #   CandidateClassifier was here until ADR-0009
 │   │       │   ├── inputs.py         # S5.6; the joins between stages, each pure
 │   │       │   ├── l2_validate/
 │   │       │   │   ├── schema_gate.py   # S4.1; pass / coerce / quarantine / reject against
@@ -133,6 +141,8 @@ guardmem-ai/
 │   │       │   ├── toxicity.py
 │   │       │   └── policy_engine.py     # OPA/Rego-compatible rule evaluation
 │   │       ├── memory/
+│   │       │   ├── entities.py          # ADR-0008; NamespaceEntityResolver. Binds a
+│   │       │   │                        #   subject to an entity and NEVER matches names
 │   │       │   ├── router.py            # S3.3; StoreRouter — write entry point, tenant + visibility guards
 │   │       │   ├── outbox.py            # S3.3; the `outbox` table's shape, both directions
 │   │       │   ├── relay.py             # S3.3; drains the outbox: graph side, then visible=true

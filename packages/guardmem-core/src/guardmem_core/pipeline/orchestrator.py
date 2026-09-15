@@ -16,6 +16,11 @@ composition owning one connection, and building it here would mean either
 widening the protocol or teaching the store about audit. Both are ADR-sized
 (`RULES.md` §8). What ships is the decision layer, complete and replayable.
 
+**Layers 2 and 3 live in `candidate.py`.** This module is the per-*proposal*
+half - noise filter, extraction, schema gate, and the bounded fan-out - and
+that split is the one the paragraph below already described before
+`RULES.md` §2.4's cap made it structural.
+
 **Candidates are scored concurrently and the bound is explicit.** S5.6's sketch
 says "bounded by semaphore, TaskGroup" and `RULES.md` §2.2 says the same for any
 fan-out. Each candidate costs up to three model calls - the judge, and `entail`
@@ -41,26 +46,14 @@ failures beside the results.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from guardmem_core.llm.base import Tier
-from guardmem_core.pipeline.inputs import (
-    claim_text,
-    draws_for,
-    override_signals,
-    render_content,
-    risk_features,
-)
+from guardmem_core.pipeline.inputs import render_content
 from guardmem_core.pipeline.l1_extract.extractor import ExtractionContext, extract
 from guardmem_core.pipeline.l1_extract.noise_filter import filter_noise
-from guardmem_core.pipeline.l2_validate import detect, gate, retrieve_incumbents
-from guardmem_core.pipeline.l3_score import (
-    cluster_meanings,
-    decide,
-    score_confidence,
-    score_impact,
-)
+from guardmem_core.pipeline.l2_validate import gate
+from guardmem_core.pipeline.per_candidate import CandidateFailure, score_candidate
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.receipt import SourceTier
 from guardmem_core.schemas.turn import Turn
@@ -71,16 +64,12 @@ from guardmem_core.schemas.verdict import DecisionRecord
 # built, and a `TYPE_CHECKING`-only import leaves the model "not fully defined"
 # until somebody calls `model_rebuild()`. The `NewType` ids and `Turn` are
 # therefore imported here rather than below.
-from guardmem_core.types import CandidateId, EntityId, Namespace, TenantId, TraceId
+from guardmem_core.types import Namespace, TenantId, TraceId
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from guardmem_core.pipeline.deps import Deps
-    from guardmem_core.pipeline.l2_validate import GatedCandidate, IncumbentSet
-    from guardmem_core.schemas.candidate import ExtractedFact
-    from guardmem_core.schemas.ontology import PredicateSpec
-    from guardmem_core.schemas.verdict import ConflictReport
 
 __all__ = ["CandidateFailure", "PipelineResult", "Proposal", "run"]
 
@@ -117,25 +106,6 @@ class Proposal(GMModel):
     k: int
     tier: Tier
     subject_hint: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateFailure:
-    """One candidate that could not be scored, and why.
-
-    Attributes:
-        candidate_id: Which one.
-        error: The exception itself. Carried rather than its message, so a
-            caller can retry on `ProviderUnavailable` and quarantine on
-            `InjectionDetected` without parsing strings.
-
-    A dataclass rather than a `GMModel` because it holds an exception, which is
-    not a JSON value - and this never reaches an audit payload. What does is a
-    `DecisionRecord`, and a candidate that failed produced none.
-    """
-
-    candidate_id: CandidateId
-    error: Exception
 
 
 class PipelineResult(GMModel):
@@ -205,7 +175,7 @@ async def run(proposal: Proposal, deps: Deps) -> tuple[PipelineResult, list[Cand
     limit = asyncio.Semaphore(deps.max_concurrent_scores)
     scored = await asyncio.gather(
         *(
-            _score_one(verdict, extracted.samples, proposal, deps, limit)
+            score_candidate(verdict, extracted.samples, proposal, deps, limit)
             for verdict in admitted.admitted
         )
     )
@@ -259,134 +229,4 @@ def _context(proposal: Proposal, kept: Sequence[Turn]) -> ExtractionContext:
         trace_id=proposal.trace_id,
         source_tier=proposal.source_tier,
         captured_at=min(stamps),
-    )
-
-
-async def _score_one(
-    verdict: GatedCandidate,
-    samples: Sequence[Sequence[ExtractedFact]],
-    proposal: Proposal,
-    deps: Deps,
-    limit: asyncio.Semaphore,
-) -> DecisionRecord | CandidateFailure:
-    """Layers 2 and 3 for one candidate, under the concurrency bound.
-
-    Returns:
-        The decision record, or a `CandidateFailure` naming the exception.
-
-    Catching `Exception` is deliberate and is the narrowest thing that works
-    here: a candidate is one unit of work among many, and the alternative is a
-    batch that loses nineteen good results to one bad provider response. The
-    exception is carried rather than swallowed - what a `BudgetExceeded` means
-    is the caller's decision, not this function's.
-    """
-    async with limit:
-        try:
-            return await _decide_one(verdict, samples, proposal, deps)
-        except Exception as exc:
-            return CandidateFailure(candidate_id=verdict.candidate.candidate_id, error=exc)
-
-
-async def _decide_one(
-    verdict: GatedCandidate,
-    samples: Sequence[Sequence[ExtractedFact]],
-    proposal: Proposal,
-    deps: Deps,
-) -> DecisionRecord:
-    """Layer 2 for one candidate, then Layer 3 over what it found.
-
-    Split at that seam rather than run as one function: Layer 2 asks what is
-    already believed and needs two stores and a judge, Layer 3 asks what to
-    think of the candidate given the answer and needs none of them. It is also
-    where `RULES.md` §2.4's 50-line cap fell, which is the cap working - the
-    two halves read better apart.
-    """
-    candidate = verdict.candidate
-    spec = deps.ontology.predicate(candidate.predicate)
-    if spec is None:  # pragma: no cover - `gate` admits only known predicates.
-        raise ValueError(f"{candidate.predicate} is not in the ontology")
-
-    subject_id = await deps.resolver.resolve(
-        proposal.subject_hint or candidate.subject,
-        tenant_id=proposal.tenant_id,
-        namespace=proposal.namespace,
-    )
-    incumbents = await retrieve_incumbents(
-        candidate,
-        subject_id=subject_id,
-        vector=deps.vector,
-        graph=deps.graph,
-        embedder=deps.embedder,
-    )
-    conflict = await detect(candidate, incumbents, spec, deps.nli)
-    return await _score_and_decide(
-        verdict,
-        samples,
-        deps,
-        spec=spec,
-        subject_id=subject_id,
-        incumbents=incumbents,
-        conflict=conflict,
-    )
-
-
-async def _score_and_decide(
-    verdict: GatedCandidate,
-    samples: Sequence[Sequence[ExtractedFact]],
-    deps: Deps,
-    *,
-    spec: PredicateSpec,
-    subject_id: EntityId,
-    incumbents: IncumbentSet,
-    conflict: ConflictReport,
-) -> DecisionRecord:
-    """All of Layer 3, given what Layer 2 found."""
-    candidate = verdict.candidate
-    confidence = score_confidence(
-        entropy=cluster_meanings(draws_for(samples, candidate), deps.entail).entropy,
-        # 3.2's `S_src`: does the cited span entail the claim it is cited for?
-        # Both texts are the candidate's own, which is what makes this a
-        # grounding check rather than a second opinion about the world.
-        span_entailment=deps.entail(candidate.provenance.verbatim, claim_text(candidate)),
-        tier=candidate.provenance.source_tier,
-        alignment=candidate.provenance.alignment,
-        schema_fit=verdict.schema_fit,
-        # A fresh candidate rests on exactly one citation. It becomes more than
-        # one only through 2.4's merge, which raises the *incumbent's*
-        # `corroboration_count` - and a merge produces no new candidate to score.
-        sources=1,
-        conflict=conflict,
-        weights=deps.weights,
-    )
-    risk = score_impact(
-        risk_features(
-            candidate,
-            classified=await deps.classifier.classify(candidate),
-            kind=conflict.kind,
-            impact=spec.impact,
-            degree=await deps.graph.degree(subject_id),
-            incumbents=incumbents,
-        ),
-        spec.impact,
-        # Empty until S12.2 builds the policy engine. `ObligationKind` is the
-        # vocabulary and `RiskVerdict` validates against it; nothing evaluates a
-        # pack yet, so an obligation here would be one this step invented.
-        obligations=[],
-        betas=deps.betas,
-    )
-    return decide(
-        confidence,
-        risk,
-        conflict,
-        deps.thresholds,
-        # No escalation loop yet. 3.4's ESCALATE means "re-run Layer 3 on the
-        # FRONTIER tier with K=5 and the incumbent context", which is a second
-        # pass this function does not make - so every candidate is a first pass
-        # and an ESCALATE is returned for the caller to act on. S9.1 gives the
-        # tiers real providers and is where a loop could be measured rather than
-        # guessed.
-        False,
-        override_signals(
-            candidate, spec=spec, policy_version=deps.policy_version, kind=conflict.kind
-        ),
     )

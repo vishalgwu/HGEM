@@ -22,7 +22,8 @@ from fixtures.decisions import DEFAULTS, confidence, conflict, risk, signals
 from guardmem_core.pipeline.l3_score import MutationType, decide, tighten
 from guardmem_core.schemas.policy import ObligationKind
 from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.verdict import Decision, DecisionRecord, ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel
+from guardmem_core.schemas.verdict import Decision, DecisionRecord
 
 # S_cor at two independent sources.
 _TWO_SOURCES = 0.5507

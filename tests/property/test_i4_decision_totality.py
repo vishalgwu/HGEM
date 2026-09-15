@@ -35,7 +35,8 @@ from fixtures.decisions import confidence, conflict, risk, signals
 from guardmem_core.pipeline.l3_score import MutationType, decide
 from guardmem_core.schemas.policy import ObligationKind
 from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.verdict import Decision, ImpactLevel, Thresholds
+from guardmem_core.schemas.risk import ImpactLevel
+from guardmem_core.schemas.verdict import Decision, Thresholds
 
 # `RULES.md` §5: property tests "must hold for 500 examples".
 _EXAMPLES: Final = 500

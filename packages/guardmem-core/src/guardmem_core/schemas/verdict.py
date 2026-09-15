@@ -9,6 +9,12 @@ that fills these in is Day 5 (S5.1-S5.4); this module is only their shape.
 verdict about a candidate and `DecisionRecord` composes all three - splitting
 them out would put half of one record in another module for no gain.
 
+**The three enums the ontology declares moved to `risk.py`** when ADR-0009
+made `PiiClass` and `Irreversibility` predicate fields beside `ImpactLevel`.
+They are what a *predicate* says about itself; everything left here is what
+the pipeline concluded about a *candidate*. `RULES.md` §2.4's cap is what
+surfaced the seam, which is the cap working.
+
 `Thresholds` **is** here, and the docstring said it would not be. S5.4 was to
 "settle its shape", and settling it turned up the reason it belongs in a schema
 module rather than in `l3_score/decision.py`: `Settings` already enforces
@@ -28,6 +34,7 @@ from pydantic import Field, field_validator, model_validator
 
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.policy import ObligationKind
+from guardmem_core.schemas.risk import ImpactLevel
 from guardmem_core.types import AssertionId
 
 __all__ = [
@@ -36,79 +43,9 @@ __all__ = [
     "ConflictReport",
     "Decision",
     "DecisionRecord",
-    "ImpactLevel",
     "RiskVerdict",
     "Thresholds",
 ]
-
-
-class ImpactLevel(StrEnum):
-    """Declared blast radius of a predicate, from the tenant ontology.
-
-    Sets the floor under `RiskVerdict.risk` (`MEMORY_ENGINE.md` §3.3: low .15,
-    medium .35, high .60, critical .80), which is what keeps a confident write
-    to a critical field out of the auto-write path.
-    """
-
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-    @property
-    def risk_floor(self) -> float:
-        """The floor this impact level puts under `RiskVerdict.risk`.
-
-        Returns:
-            `MEMORY_ENGINE.md` §3.3's value: low .15, medium .35, high .60,
-            critical .80.
-
-        §3.3 computes `R = max(R_raw, floor[impact])`, so these four numbers are
-        what stop a confidently-scored write to a critical field reaching the
-        auto-write path. They were prose in this docstring and a dict literal in
-        a seed script until the S3.6 audit - the same four numbers written twice,
-        one of which nothing checked. `l3_score/impact.py` is the consumer that
-        makes this a property rather than a lookup table somebody else owns.
-        """
-        return _RISK_FLOORS[self]
-
-    @property
-    def risk_feature(self) -> float:
-        """This level as §3.3's `impact_declared` feature.
-
-        Returns:
-            `MEMORY_ENGINE.md` §3.3's mapping: low 0, medium .33, high .66,
-            critical 1.
-
-        **Not the same numbers as `risk_floor`, and the difference is the
-        point.** This one is an *input* to the linear score, weighted at
-        `beta = 2.20` and traded off against seven other features; the floor is
-        applied afterwards and cannot be traded off against anything. A
-        critical-impact write is therefore expensive twice over - once because
-        it pushes `z` up, and once because `R` can never land below .80
-        whatever the other features say.
-        """
-        return _RISK_FEATURES[self]
-
-
-# Defined after the class because a `StrEnum` body cannot hold a non-member
-# mapping keyed by its own members. Private: `ImpactLevel.risk_floor` is the
-# interface, so a caller cannot reach for a floor by string and miss the enum.
-_RISK_FLOORS: dict[ImpactLevel, float] = {
-    ImpactLevel.LOW: 0.15,
-    ImpactLevel.MEDIUM: 0.35,
-    ImpactLevel.HIGH: 0.60,
-    ImpactLevel.CRITICAL: 0.80,
-}
-
-# §3.3's `impact_declared` feature scale. Evenly spaced where the floors are
-# not, because this one enters a weighted sum and the floors are a safety net.
-_RISK_FEATURES: dict[ImpactLevel, float] = {
-    ImpactLevel.LOW: 0.0,
-    ImpactLevel.MEDIUM: 0.33,
-    ImpactLevel.HIGH: 0.66,
-    ImpactLevel.CRITICAL: 1.0,
-}
 
 
 class Thresholds(GMModel):

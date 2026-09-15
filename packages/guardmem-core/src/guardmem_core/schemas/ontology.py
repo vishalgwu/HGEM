@@ -32,23 +32,20 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
-from typing import Annotated, Final, Literal
+from typing import Final
 
 import yaml
 from pydantic import Field, model_validator
 
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.entity import Cardinality
+from guardmem_core.schemas.object_spec import EntityRefObject, ObjectSpec
 from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.verdict import ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel, Irreversibility, PiiClass
 
 __all__ = [
-    "CodedObject",
-    "EntityRefObject",
-    "ObjectSpec",
     "Ontology",
     "PredicateSpec",
-    "ScalarObject",
     "load_ontology",
     "parse_ontology",
 ]
@@ -60,65 +57,6 @@ _PACK_ROOT: Final = Path(__file__).resolve().parent.parent / "ontology"
 # resolve `../../..`, and `load_ontology` is a public function of a library
 # package - the same hole `prompts/loader.py` closed for the same reason.
 _PACK_NAME: Final = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
-
-
-class ScalarObject(GMModel):
-    """An object that is a bare value of a JSON type.
-
-    Attributes:
-        type: Which of `ObjectValue`'s scalar arms this predicate takes -
-            `"text"` and `"coded"` and `"entity_ref"` are all `str` at the value
-            level, and the three are distinguished because they mean different
-            things to the schema gate, not because they serialise differently.
-
-    `ObjectValue` also admits a `dict`, and no member here declares one. That is
-    the ontology doing its job rather than an omission: a structured object is
-    only writable once a predicate declares it, and no clinical predicate does.
-    """
-
-    type: Literal["text", "boolean", "number"]
-
-
-class CodedObject(GMModel):
-    """A value drawn from a controlled terminology.
-
-    Attributes:
-        type: Always `"coded"`.
-        system: The terminology, e.g. `"RxNorm"`. Required, and that is the
-            whole reason this is its own model rather than an optional field on
-            `ScalarObject`: a coded value whose system nobody declared cannot be
-            validated, deduplicated or shown to a reviewer, so `{type: coded}`
-            on its own has to be a load error and not a shrug.
-    """
-
-    type: Literal["coded"]
-    system: str = Field(min_length=1)
-
-
-class EntityRefObject(GMModel):
-    """A reference to another node in the entity graph.
-
-    Attributes:
-        type: Always `"entity_ref"`.
-        entity: The entity type the reference must resolve to. Checked against
-            the pack's declared `entities` at load, so a typo is a load error
-            rather than a dangling edge discovered by a traversal.
-
-    This is the declaration `Edge.object` refers to when it says the ontology
-    decides whether a string is an entity reference - and, from S3.4, what will
-    let a multi-hop `neighbors()` walk stop following literals.
-    """
-
-    type: Literal["entity_ref"]
-    entity: str = Field(min_length=1)
-
-
-# Discriminated on `type`, so an unknown value names the field rather than
-# reporting three unrelated failures, and so `{type: coded}` with no `system`
-# fails against the coded branch specifically.
-type ObjectSpec = Annotated[
-    ScalarObject | CodedObject | EntityRefObject, Field(discriminator="type")
-]
 
 
 class PredicateSpec(GMModel):
@@ -134,6 +72,18 @@ class PredicateSpec(GMModel):
         impact: Declared blast radius. §3.3 floors `RiskVerdict.risk` at it
             (low .15, medium .35, high .60, critical .80), which is what keeps a
             confident write to a critical field out of the auto-write path.
+        pii_class: What kind of personal data this predicate carries, feeding
+            §3.3's `pii_class` at `beta = 1.10`. **Required** (ADR-0009), for
+            `min_source_tier`'s reason and one of its own: `none` scores 0.0, so
+            a default would price every unclassified predicate as carrying no
+            personal data at all - and whether something is Article 9 data is a
+            compliance answer that should be signed off rather than assumed.
+        irreversibility: Whether what an agent *did* on this belief could be
+            undone - an email sent, a prescription filed - feeding §3.3 at
+            `beta = 1.40`. **Required**, and a prior about the predicate rather
+            than an observation about a candidate: none of it has happened when
+            `R` is computed. `reversible` scores 0.0, so the same
+            default-is-the-cheapest-answer trap applies.
         min_source_tier: The weakest source that may assert this at all.
             **Required**, unlike the sketch in §2.1 - see the module's step
             notes. There is no value that is safe to assume: defaulting
@@ -143,12 +93,23 @@ class PredicateSpec(GMModel):
             independent source. Defaults to `false`, which the §2.1 example's
             omissions unambiguously mean, and which is the ordinary case - most
             facts are believed on one source.
+
+    **Four of these six are policy rather than domain fact** - `impact`,
+    `pii_class`, `irreversibility` and `min_source_tier` are judgements the
+    deploying organisation makes, and three of the four are required for the
+    same reason. That symmetry is ADR-0009's argument: `pii_class` and
+    `irreversibility` sat behind a `CandidateClassifier` protocol for four steps
+    while `impact` - the same kind of judgement, feeding the same §3.3 score
+    through the same `{0, .33, .66, 1}` shape - was a declared field. Nothing
+    separated them except that one had been written down.
     """
 
     subject: str = Field(min_length=1)
     object: ObjectSpec
     cardinality: Cardinality
     impact: ImpactLevel
+    pii_class: PiiClass
+    irreversibility: Irreversibility
     min_source_tier: SourceTier
     requires_corroboration: bool = False
 

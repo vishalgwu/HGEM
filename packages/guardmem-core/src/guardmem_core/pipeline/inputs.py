@@ -25,8 +25,11 @@ none of them is obvious:
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from typing import TYPE_CHECKING
 
+from guardmem_core.llm.entailment import EntailmentPair
+from guardmem_core.pipeline.deps import scope_of_namespace
 from guardmem_core.pipeline.l3_score import (
     MutationType,
     OverrideSignals,
@@ -39,15 +42,22 @@ from guardmem_core.pipeline.l3_score import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from guardmem_core.pipeline.deps import CandidateRisk
     from guardmem_core.pipeline.l2_validate import IncumbentSet
     from guardmem_core.schemas.base import ObjectValue
     from guardmem_core.schemas.candidate import ExtractedFact, MemoryCandidate
     from guardmem_core.schemas.ontology import PredicateSpec
     from guardmem_core.schemas.turn import Turn
-    from guardmem_core.schemas.verdict import ConflictKind, ImpactLevel
+    from guardmem_core.schemas.verdict import ConflictKind
+    from guardmem_core.types import Namespace
 
-__all__ = ["claim_text", "draws_for", "override_signals", "render_content", "risk_features"]
+__all__ = [
+    "claim_text",
+    "draws_for",
+    "entail_pairs",
+    "override_signals",
+    "render_content",
+    "risk_features",
+]
 
 
 def render_content(turns: Sequence[Turn]) -> str:
@@ -133,44 +143,84 @@ def claim_text(candidate: MemoryCandidate) -> str:
     )
 
 
+def entail_pairs(draws: Sequence[str | None], *, verbatim: str, claim: str) -> list[EntailmentPair]:
+    """Every entailment question Layer 3 is about to ask, in one list.
+
+    Args:
+        draws: `draws_for`'s output - the K rendered answers, `None` where a
+            draw proposed nothing.
+        verbatim: The candidate's cited span, §3.2's `S_src` premise.
+        claim: `claim_text`'s rendering of the candidate, the hypothesis.
+
+    Returns:
+        The pairs, grounding first. Duplicates are not filtered here;
+        `LLMEntailer.lookup` deduplicates and answers self-pairs locally.
+
+    **Both directions of every draw pair, deliberately over-generating.**
+    `cluster_meanings` walks `combinations(...)` and short-circuits - it asks the
+    reverse direction only when the forward one clears §3.1's 0.8 cut, so on a
+    disagreeing sample set most reverse questions are never asked. Predicting
+    which would mean reimplementing the clustering here and getting it wrong
+    silently: a missing pair raises inside the scorer, where it costs the whole
+    candidate. `LLMEntailer.lookup` says the same thing from the other side -
+    "pass the pairs it *might* need rather than computing the minimal set and
+    risking a miss".
+
+    Abstentions are skipped for `cluster_meanings`' own reason: a `None` asserts
+    no proposition, there is no text to judge, and it is never shown to `entail`.
+    """
+    answered = [draw for draw in draws if draw is not None]
+    pairs = [EntailmentPair(verbatim, claim)]
+    pairs.extend(
+        EntailmentPair(premise, hypothesis)
+        for left, right in combinations(answered, 2)
+        for premise, hypothesis in ((left, right), (right, left))
+    )
+    return pairs
+
+
 def risk_features(
     candidate: MemoryCandidate,
     *,
-    classified: CandidateRisk,
+    spec: PredicateSpec,
+    namespace: Namespace,
     kind: ConflictKind,
-    impact: ImpactLevel,
     degree: int,
     incumbents: IncumbentSet,
 ) -> RiskFeatures:
     """Assemble §3.3's eight features for one candidate.
 
     Args:
-        candidate: The fact. Only its citation is read here - the three features
-            that would need more of it are declared rather than inferred, two on
-            the predicate and one on the namespace (ADR-0009).
-        classified: The three §3.3 named and defined nowhere. **This argument is
-            replaced by the spec and the namespace when ADR-0009 lands**; it is
-            still here because `PredicateSpec` does not carry the two fields
-            yet.
+        candidate: The fact. Only its citation is read here; everything else
+            comes from what the predicate declares and where the write lands.
+        spec: The predicate's declaration. Three of the eight features are read
+            off it - `impact`, `pii_class` and `irreversibility`.
+        namespace: Where the write lands, which is `scope`.
         kind: Layer 2's finding, which decides `mutation_type`.
-        impact: The predicate's declared impact.
         degree: Live edges touching the subject, from `GraphStore.degree`.
         incumbents: What retrieval found; the nearest cosine is `novelty`.
 
     Returns:
         The eight, each normalised to [0, 1].
 
+    **This took a `CandidateRisk` from a `CandidateClassifier` until ADR-0009**,
+    and the whole of that protocol is now these two arguments. Worth reading the
+    call as it stands: of the eight features, three are declared by the
+    ontology, one by the namespace, one by Layer 2, one by the graph, one by the
+    citation and one by retrieval. None is inferred, which is what makes `R`
+    replayable from a `DecisionRecord` - `RULES.md` §1.6.
+
     `novelty` reads `nearest[0].cosine` because `IncumbentSet.nearest` is
     cosine-ordered - "1 - max cosine to existing memory" is the *best* match, so
     it is the first, and an empty set means no neighbour at all.
     """
     return RiskFeatures(
-        impact_declared=impact.risk_feature,
+        impact_declared=spec.impact.risk_feature,
         mutation_type=MutationType.from_conflict(kind).risk_feature,
-        scope=classified.scope.risk_feature,
+        scope=scope_of_namespace(namespace).risk_feature,
         graph_fanout=graph_fanout(degree),
-        pii_class=classified.pii_class.risk_feature,
-        irreversibility=classified.irreversibility.risk_feature,
+        pii_class=spec.pii_class.risk_feature,
+        irreversibility=spec.irreversibility.risk_feature,
         source_tier_risk=source_tier_risk(candidate.provenance.source_tier),
         novelty=novelty(incumbents.nearest[0].cosine if incumbents.nearest else None),
     )

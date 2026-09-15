@@ -1,11 +1,14 @@
 """Hypothesis strategies for the orchestrator's own models.  S5.6
 
-`Proposal`, `PipelineResult` and `CandidateRisk` - the three models S5.6 added
-that are not a layer's output. Its own module for the reason every other
-`strategy_*.py` is: `strategies.py` is the index and sits on `RULES.md` §2.4's
-cap.
+`Proposal` and `PipelineResult` - the models S5.6 added that are not a layer's
+output. Its own module for the reason every other `strategy_*.py` is:
+`strategies.py` is the index and sits on `RULES.md` §2.4's cap.
 
-All three are drawn loosely, like `strategy_l2.py` and unlike `strategy_l3.py`.
+`CandidateRisk` was the third until ADR-0009 deleted it: its three fields became
+two `PredicateSpec` declarations and one reading of the namespace, so there is
+no model left to generate.
+
+Both are drawn loosely, like `strategy_l2.py` and unlike `strategy_l3.py`.
 Nothing here has a cross-field rule: a `PipelineResult` whose `decisions` do not
 correspond to its `quarantined` ids is still a well-formed result, and pinning
 that correspondence is `tests/unit/test_orchestrator.py`'s work, not a
@@ -18,21 +21,11 @@ from hypothesis import strategies as st
 
 from fixtures.strategy_primitives import _ID, _NAMESPACES, _TENANT_IDS, _TRACE_IDS
 from guardmem_core.llm.base import Tier
-from guardmem_core.pipeline.deps import CandidateRisk
-from guardmem_core.pipeline.l3_score import Irreversibility, PiiClass, Scope
 from guardmem_core.pipeline.orchestrator import PipelineResult, Proposal
 from guardmem_core.schemas import GMModel
 from guardmem_core.schemas.receipt import SourceTier
 
 __all__ = ["pipeline_strategies"]
-
-
-_CANDIDATE_RISKS = st.builds(
-    CandidateRisk,
-    scope=st.sampled_from(Scope),
-    pii_class=st.sampled_from(PiiClass),
-    irreversibility=st.sampled_from(Irreversibility),
-)
 
 
 def pipeline_strategies(
@@ -45,7 +38,6 @@ def pipeline_strategies(
     them back would make the two modules import each other.
     """
     return {
-        CandidateRisk: _CANDIDATE_RISKS,
         Proposal: st.builds(
             Proposal,
             trace_id=_TRACE_IDS,

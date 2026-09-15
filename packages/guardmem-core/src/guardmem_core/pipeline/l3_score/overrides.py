@@ -37,7 +37,8 @@ from guardmem_core.pipeline.l3_score.impact_features import MutationType
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.policy import ObligationKind
 from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.verdict import Decision, ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel
+from guardmem_core.schemas.verdict import Decision
 
 if TYPE_CHECKING:
     from guardmem_core.schemas.verdict import ConfidenceReport, ConflictReport, RiskVerdict

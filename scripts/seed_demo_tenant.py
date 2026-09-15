@@ -41,6 +41,7 @@ from uuid import NAMESPACE_URL, uuid5
 import asyncpg
 
 from guardmem_core.errors import ConcurrencyConflict
+from guardmem_core.memory.entities import derive_entity_id
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.relay import OutboxRelay
 from guardmem_core.memory.router import StoreRouter
@@ -53,7 +54,7 @@ from guardmem_core.schemas.ontology import PredicateSpec, load_ontology
 from guardmem_core.schemas.receipt import Provenance
 from guardmem_core.schemas.turn import Turn
 from guardmem_core.settings import get_settings
-from guardmem_core.types import AssertionId, EntityId, TenantId, TraceId
+from guardmem_core.types import AssertionId, TenantId, TraceId
 
 # A sibling module, resolved because `python scripts/seed_demo_tenant.py` puts
 # this directory at the head of `sys.path`. An explicit `sys.path.insert` stood
@@ -72,7 +73,14 @@ from scripts.demo_tenant_data import (
 )
 
 PACK: Final = "clinical"
-PATIENT_KEY: Final = "patient-7781"
+
+# The patient's id is NOT derived here. `derive_entity_id` owns the scheme
+# (ADR-0008), because the resolver has to compute the same id for the same
+# namespace at write time and two derivations of one id is the drift shape
+# `RULES.md`'s conventions warn about. This used to be `identifier("entity",
+# "patient-7781")` under the demo slug; the seeded id therefore CHANGED when
+# ADR-0008 landed, and an existing database keeps its old rows under
+# `ON CONFLICT DO NOTHING`. `make dev-reset && make seed` once.
 TRACE: Final = TraceId("tr_seed")
 
 # Not scored. See the module docstring.
@@ -125,11 +133,15 @@ def build_assertion(fact: SeedFact, spec: PredicateSpec, turns: dict[str, Turn])
             f"{fact.key}: source tier {fact.tier} is weaker than {fact.predicate}'s "
             f"declared minimum {spec.min_source_tier} (ontology/{PACK}.yaml)"
         )
+    tenant_id = TenantId(identifier("tenant", TENANT_SLUG))
     return StoredAssertion(
         assertion_id=AssertionId(identifier("assertion", fact.key)),
-        tenant_id=TenantId(identifier("tenant", TENANT_SLUG)),
+        tenant_id=tenant_id,
         namespace=NAMESPACE,
-        subject_id=EntityId(identifier("entity", PATIENT_KEY)),
+        # ADR-0008's derivation, not the seed's own key. The resolver computes
+        # this same id at write time from the same namespace, so a seeded fact
+        # and a governed one land on one entity rather than two.
+        subject_id=derive_entity_id(tenant_id, NAMESPACE),
         predicate=fact.predicate,
         object=fact.object,
         confidence=PLACEHOLDER_CONFIDENCE,
@@ -171,8 +183,19 @@ async def create_tenancy(owner: asyncpg.Connection) -> None:
         TENANT_SLUG,
     )
     await owner.execute("SELECT set_config('app.tenant_id', $1, false)", tenant)
-    entities = (("patient-7781", "Patient", "Joan Ellery"), *OBJECT_ENTITIES)
-    for key, kind, name in entities:
+    # The patient goes in under the resolver's derivation and the object
+    # entities under the seed's own keys: an `entity_ref` object is an
+    # EntityId by §2.1 and is never resolved from a namespace, so only the
+    # subject has two possible schemes to reconcile.
+    await owner.execute(
+        "INSERT INTO entity (id, tenant_id, type, canonical_name)"
+        " VALUES ($1::uuid, $2::uuid, $3, $4) ON CONFLICT (id) DO NOTHING",
+        str(derive_entity_id(TenantId(tenant), NAMESPACE)),
+        tenant,
+        "Patient",
+        "Joan Ellery",
+    )
+    for key, kind, name in OBJECT_ENTITIES:
         await owner.execute(
             "INSERT INTO entity (id, tenant_id, type, canonical_name)"
             " VALUES ($1::uuid, $2::uuid, $3, $4) ON CONFLICT (id) DO NOTHING",

@@ -26,7 +26,7 @@ from pydantic import Field
 from guardmem_core.schemas.base import GMModel, ObjectValue
 from guardmem_core.schemas.candidate import MemoryCandidate
 from guardmem_core.schemas.entity import Cardinality, StoredAssertion
-from guardmem_core.schemas.verdict import ImpactLevel
+from guardmem_core.schemas.risk import ImpactLevel
 from guardmem_core.types import (
     CandidateId,
     Namespace,
