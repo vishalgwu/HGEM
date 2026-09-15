@@ -2772,13 +2772,32 @@ Decision:
 Notes:
 ```
 
-**Recorded 2026-09-14: BLOCKED. UNBLOCKED 2026-09-15 by S9.1 — still not run.**
+**Recorded 2026-09-14: BLOCKED. Partly unblocked 2026-09-15 by S9.1 — still not run.**
 
-S9.1 shipped the three provider adapters, so the structural blocker above is
-gone: `LLMClient` has implementations and the pipeline can be driven by a real
-model. What has *not* happened is the gate itself — 200 candidates from real
-extraction, human-labelled, scored. That needs `GM_ANTHROPIC_API_KEY`, which is
-still blank, and a labelling session.
+S9.1 shipped the three provider adapters, so the blocker written above is gone:
+`LLMClient` has implementations and a real model can be called. **That was one
+of four missing dependencies, not all of them**, and the entry recorded on
+2026-09-15 said "nothing is in its way now but an API key", which was wrong.
+`pipeline/deps.py` and `mcp_server/tools/pipeline.py::MISSING_DEPENDENCIES` both
+named the other three the whole time; the correction is reading them.
+
+Still missing, and `run()` cannot be called without any of them:
+
+| Missing | What it feeds | Share of `C` |
+|---|---|---|
+| `EntailFn` | §3.1's clustering **and** §3.2's `S_src` | **0.60** (0.35 + 0.25) |
+| `EntityResolver` | incumbents → conflict → `S_con` | 0.15 |
+| `CandidateClassifier` | §3.3's `pii_class`, `irreversibility` → `R` | none, but `run()` needs it |
+
+Two more gaps that are not dependencies. The harness has **no `generate`
+subcommand** — `verify`, `template`, `score` and `agreement` ship, and the loop
+that fills a corpus does not. And step 1 says "200 candidates from the seed
+transcript": that transcript is forty turns for one patient supporting 28
+facts, so the corpus needs widening before 200 is reachable at all.
+
+**It does not need an API key.** `GM_ANTHROPIC_API_KEY` has been blank since
+S0.2, and a local Ollama model runs this gate for nothing. Correction 1 below is
+why that is not a compromise so much as a different instrument.
 
 **Read correction 1 on S9.1 before running it.** Anthropic has no temperature
 parameter at all, so §1.2's 0-then-0.7 spread is not what is drawn there; the

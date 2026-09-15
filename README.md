@@ -188,8 +188,9 @@ used to open with — the engine can call a real model now, and does.
 One remains, and everything below assumes you know it: **nothing writes an
 assertion.** The pipeline returns decisions and applies none; the applier needs
 an ADR, and so does entity resolution. Checkpoint B — the gate that would say
-whether the scoring separates good writes from bad — is no longer *blocked*, but
-it still **has not run**. See "The gate that has not run yet".
+whether the scoring separates good writes from bad — **has not run**, and S9.1
+removed one of the four things standing in its way rather than all four. See
+"The gate that has not run yet", which now lists the other three.
 
 So the toolchain, the gates, the local datastore stack, the typed foundation of
 `guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
@@ -455,13 +456,30 @@ confidence score actually separates the two. Everything after that point —
 gateway, guardrails, dashboard, review queue — assumes it does.
 
 **It has not been run.** The measurement needs candidates from real extraction,
-and no adapter to a real model provider is built yet; the only implementation of
-that interface is the test double. Scoring against a test double would measure
-scripted answers, and hand-writing the 200 candidates would measure the author's
-idea of a plausible mistake — which is the same problem the "no model grading"
-rule exists to prevent.
+because hand-writing the 200 would measure the author's idea of a plausible
+mistake — the same problem the "no model grading" rule exists to prevent — and
+scoring against the test double would measure scripted answers.
 
-So what is built is everything except the generation step: the metric, the
+Until S9.1 there was no adapter to a real model provider at all, and that was
+the whole of the explanation. It is no longer. **Three of the four dependencies
+`pipeline.run()` needs still have no implementation in this repository**, and
+`pipeline/deps.py` says why for each:
+
+| Missing | What it feeds | Share of `C` |
+|---|---|---|
+| `EntailFn` | §3.1's meaning clustering **and** §3.2's `S_src` grounding | **0.60** |
+| `EntityResolver` | incumbent retrieval → conflict → `S_con` | 0.15 |
+| `CandidateClassifier` | §3.3's `pii_class` and `irreversibility` → `R` | none, but `run()` will not execute without it |
+
+`EntityResolver` and `CandidateClassifier` each need an ADR before an
+implementation — the first is a matching problem with a precision/recall
+trade-off that no document specifies, the second is deployment policy.
+
+Two further gaps are not dependencies but are equally in the way. The harness
+has no `generate` subcommand, so nothing fills a corpus; and the seed transcript
+is forty turns for one patient supporting 28 facts, which is not 200 candidates.
+
+So what is built is the *measurement*, not the thing measured: the metric, the
 diagnostics, the label format, the self-consistency check on the labels, and a
 command that runs the eight manual verifications by running the tests that
 establish them. Those eight pass. The discrimination number does not exist, and
@@ -499,8 +517,14 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself**. Nothing is in its way now but an API
-key and a labelling session.
+The next step is **Checkpoint B itself** — via the three dependencies listed
+under "The gate that has not run yet", which S9.1 did not supply.
+
+It does **not** need an API key. `GM_ANTHROPIC_API_KEY` has been blank since
+S0.2 and a local Ollama model runs the gate for nothing, which is why the
+sign-off block has a line for the provider: an AUROC measured on Ollama and one
+measured on Claude are two different numbers, and a stated provider is the
+difference between a cheap result and a misleading one.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

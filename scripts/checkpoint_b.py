@@ -26,8 +26,15 @@ So this ships as everything except generation:
 - `score` is the gate: AUROC, the per-term diagnostics, the sign-off block.
 - `agreement` is diagnostic 3, the self-consistency check on the labels.
 
-`score` works end to end today against a corpus file, so the day S9.1 lands the
-only new thing needed is the loop that fills one.
+`score` works end to end today against a corpus file.
+
+**Correction, 2026-09-15.** This docstring used to end "the day S9.1 lands the
+only new thing needed is the loop that fills one". S9.1 has landed and that is
+not true. `run()` takes a `Deps` whose `EntailFn`, `EntityResolver` and
+`CandidateClassifier` still have no implementation - see `pipeline/deps.py`,
+which explains why a default for the last two would be worse than none - so the
+loop has nothing to call yet. The corpus also has to come from more than the
+seed transcript, which is forty turns for one patient.
 """
 
 from __future__ import annotations

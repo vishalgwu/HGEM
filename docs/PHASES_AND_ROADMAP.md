@@ -10,9 +10,11 @@ the UI, and the evals before the demo. Anything that can't be measured by day 28
 **What this document owns:** phase goals, the exit gate for each phase, deferred scope, and the
 weekly risk review. **What it does not own:** the step-by-step work. Every step, command, file path
 and per-step "done when" lives in `BUILD_NOTEBOOK.md`, and the one-line-per-day index is its
-`BUILD_NOTEBOOK.md`'s own per-day sections. Those used to be restated here; they are not, so a plan
-change has exactly one place to be made. (This line named "Appendix A" until 2026-09-14; the
-notebook has no appendices, and the Day sections are what the pointer was reaching for.)
+**Appendix A**. Those used to be restated here; they are not, so a plan change has exactly one
+place to be made. (A 2026-09-14 correction rewrote this line to say the notebook "has no
+appendices" and repointed it at the Day sections. **That correction was wrong and is reverted
+2026-09-15.** `BUILD_NOTEBOOK.md` PART 6 carries appendices A-G, present since the scaffold commit,
+and Appendix A is exactly the one-line-per-day index the original pointer meant.)
 
 ---
 
@@ -133,11 +135,15 @@ change belongs there first.
 Each of these is a real feature. None of them changes whether the core claim — *governed memory
 measurably reduces drift* — is true, which is the only thing week 4 needs to establish.
 
-**If you fall behind,** the cut order belongs here and **is not yet written**. It was cited as
-`BUILD_NOTEBOOK.md` Appendix G, which does not exist - so the one document that is supposed to say
-what to sacrifice says nothing, and the decision would be made under time pressure with no prior
-agreement, which is the worst moment to make it. §6's deferral list is the nearest thing that does
-exist. Writing the real order is a scope decision and belongs to whoever owns this roadmap.
+**If you fall behind,** the cut order is `BUILD_NOTEBOOK.md` **Appendix G**, which owns it the same
+way the notebook owns every other piece of step-level execution. It names five cuts in order and
+five things that are never cut. It is not restated here: a cut order in two documents is a cut
+order that will be argued about at the exact moment there is no time to argue.
+
+(This paragraph said until 2026-09-15 that the cut order "is not yet written" and that Appendix G
+"does not exist". Both claims were false — Appendix G has been in the notebook since the scaffold
+commit — and the effect was that the one document supposed to say what to sacrifice appeared to say
+nothing. Corrected after reading the notebook rather than the pointer.)
 
 ---
 
