@@ -4745,6 +4745,192 @@ and which the blast-radius score reads.
 
 ---
 
+## 2026-09-16 — S7.1: the Neo4j store, and a contract both backends answer to
+
+Day 7 opens. `GraphStore` has had a protocol since S1.7 and one implementation
+since S3.4; this is the second, and the step's DONE WHEN is not "it works" but
+"the full integration suite passes against **both** backends unchanged".
+
+**Shipped**
+
+- **`Neo4jGraphStore`**, against `ARCHITECTURE.md` §5's model:
+  `(:Entity {key, tenant_id})-[:ASSERTS {...}]->(:Entity|:Literal)`. Idempotent
+  by `assertion_id` through `MERGE` on the relationship, which is the same
+  replay semantics the outbox needs and NetworkX gets from an edge key.
+- **`GM_GRAPH_BACKEND=neo4j|networkx`**, the flag the step names, as
+  `graph/selection.py`. An **async context manager**, and that is last session's
+  lesson applied rather than a preference: an `AsyncDriver` owns a connection
+  pool with exactly the problem `build_llm`'s unclosed SDK client had. A test
+  asserts the driver is dead after the lifespan unwinds.
+- **`build_graph` yields a `BoundGraph`** - the store *and* whether it is
+  durable - so `ServerState.graph_durable` is reported by the thing that chose
+  the backend rather than inferred by an `isinstance` at the point of use.
+- **The schema is applied at startup**: uniqueness on `Entity.key` and
+  `Literal.key`, relationship indexes on `assertion_id` and `tenant_id`. The
+  constraints are what make `MERGE` *correct* under concurrency rather than
+  merely fast - two relay passes can otherwise each create a node for one
+  subject, and no later constraint repairs that.
+- **Sixteen behavioural assertions moved into one contract class**
+  (`fixtures/graph_contract.py`) and now run against all three implementations:
+  the fake, NetworkX, and Neo4j in the integration suite. That is what makes
+  "unchanged" checkable - the Neo4j module inherits the assertions rather than
+  restating them, so a behaviour that differs is a failure and not a footnote.
+- **`make seed` writes to the configured backend.** It named `NetworkXGraphStore`
+  directly, which was harmless while that was the only graph and would have
+  become a quiet bug the moment anyone set `neo4j`: the relay would dispatch
+  every event into an in-process graph that dies with the script, leaving
+  Postgres seeded, the real graph empty, and no undispatched events to rebuild
+  it from.
+
+**What broke / what I learned**
+
+- **The tenancy question has two right answers and I nearly gave the wrong
+  one.** NetworkX is single-tenant and enforces it by *refusing* a second
+  tenant, because the protocol's reads take an `EntityId` and no tenant so it
+  has nothing to filter on. Neo4j exists precisely because that refusal is not
+  an answer for a deployment - so it **scopes** instead: every read resolves the
+  tenant from the node it starts at and constrains every edge it counts or
+  follows. Without that, object nodes bridge tenants: two tenants recording an
+  allergy to penicillin legitimately converge on one node, and a two-hop walk
+  from one patient comes back with the other's edges, straight into §2.2's
+  incumbent set. A cross-tenant read with no symptom. Two integration tests pin
+  it; both fail if the filter is dropped.
+- **A node that was only ever an *object* has no tenant**, so those reads are
+  unscoped. Reachable from the contract suite and not from the pipeline, which
+  only ever passes a resolved subject. The honest fix is a tenant on the
+  protocol, and **S8.2** is where a request first has an authenticated one to
+  thread.
+- **Cypher's variable-length path takes a literal bound, not a parameter.** So
+  the obvious way to write `neighbors(hops=n)` is to render `n` into the query
+  text - which `RULES.md` §4 forbids and which is the one place in this module
+  where the shortcut is also an injection. One parameterised `HOP` per hop
+  instead, with the frontier as a list. It is also *why* the two backends agree:
+  it is the same breadth-first loop NetworkX runs.
+- **A Neo4j property cannot hold a map**, so `object` is stored as JSON and
+  decoded on read. Reading the node's *key* back instead would turn
+  `{"dose": 5}` into the string `literal:{"dose": 5}` somewhere inside a
+  conflict check. And `valid_from` comes back as `neo4j.time.DateTime`, which
+  pydantic rejects - `to_native()` is the conversion, and both have a test
+  because both are invisible until a `ConflictReport` compares one against a
+  Postgres row.
+- **`_object_key` had to stop being private to NetworkX.** It decides whether a
+  two-hop walk can follow an object and whether two writes of one value land on
+  one node - so two copies would be two graph models, agreeing until somebody
+  edited one, and the disagreement would surface as a blast-radius score that
+  differs by backend. It is `graph/keys.py` now.
+- **The checkpoint harness deliberately does *not* use `build_graph`.** Its old
+  comment said "S7.1 is unbuilt", which was the whole reason; the reason now is
+  better. A durable graph lets run N+1 see run N's edges, so `graph_fanout`
+  drifts between two runs of one corpus and two AUROCs a week apart stop being
+  comparable. Right call for a server, wrong one for a benchmark.
+
+**Still open**
+
+- **`memory.get_entity` has no graph half yet.** It reports `graph_durable` and
+  returns no neighbours; now that the graph is durable, the entity card in
+  `MCP_INTEGRATION.md` §3 has something real to show.
+- The protocol's missing tenant argument, at S8.2.
+- S7.2 (coverage to the release gate), S7.3 (MCP contract tests), S7.4 (the
+  week-1 retro), and everything carried from yesterday.
+
+**Tomorrow's first step**
+
+**S7.2** - the coverage push. `RULES.md` §5 sets the release gate at 90% for
+`guardmem-core` and the step says to look specifically at error branches,
+because they are the ones that get skipped.
+
+---
+
+## 2026-09-16 — S7.2: the coverage push, which was not about coverage
+
+The step says "get `guardmem-core` to >= 85%" and then, in the sentence that
+turned out to be the whole task, "look specifically at error branches - they are
+what you skipped."
+
+**`guardmem-core` was already at 98.85%** when the step opened, past the 85%
+interim floor and past `RULES.md` §5's 90% release gate. So the number was never
+the work. Every uncovered line was an error branch or an unreachable edge case,
+and most of them were mine, written in the last two steps.
+
+**Shipped**
+
+- **`test_graph_selection.py`.** The one that mattered: S7.1 shipped
+  `graph/selection.py` and `Neo4jGraphStore._run` with **every** failure path
+  unexercised. It now pins both directions - three retryable driver faults
+  become a retryable `StoreUnavailable`, and a `ClientError` must **not** be
+  dressed as one. That second direction is the important one: translating a
+  Cypher bug into an outage tells the relay to retry it until `attempts` reaches
+  the cap, which manufactures a poison event out of a typo.
+- **`test_llm_selection.py`.** `llm/providers/selection.py` was the
+  least-covered module in the package at **61%**, both SDK arms unexercised -
+  and it is the module that decides *which model answers*, which §3.1's entropy
+  makes a claim about every audit record. Constructing either SDK client opens
+  no connection, so the arms, the adapter types and the transport-closing are
+  all checkable offline.
+- **`test_store_query_builders.py`.** `retired_statement`'s guard, whose failure
+  mode is the quiet kind: a caller passing an `as_of` gets rows filtered on two
+  contradictory temporal conditions, and an empty result reads as "nothing was
+  retired" rather than as a mistake.
+- **Provider error branches**: anthropic rate-limiting, and "nothing answered at
+  all" on both adapters - the case no status code can express, because a 5xx
+  means the provider is there and unwell while a connect error means it is not
+  there. Both retryable, both reaching the caller as one domain error, or a
+  breaker has to learn two shapes for one outcome.
+- **A `usage`-less OpenAI response** reports zero tokens and `cache_hit=False`.
+  "Not reported" and "not cached" are different facts and only one fits in a
+  boolean; `PRD.md` §6.5's ≥40% cache-hit assumption is read off that field, so
+  guessing `True` would inflate the one number the cost model rests on.
+
+**What broke / what I learned**
+
+- **`Neo4jGraphStore.degree` had defensive code that could not run.**
+  `if not rows: return 0` in front of `rows[0]`. Cypher's `count()` is an
+  aggregate with no grouping key, so it returns one row even when the `MATCH`
+  finds nothing - verified against 5.26, which answers `[{'degree': 0}]` for a
+  node that does not exist. **Unreachable defensive code is worse than none**:
+  it reads as a handled case and is a branch no test can ever cover. Deleted.
+  The unknown-entity test still passes, and if `DEGREE` ever stops aggregating
+  it now raises `IndexError` rather than returning a zero from a query that
+  quietly stopped answering.
+- **`_verify` had two `except` clauses with byte-identical bodies**, which is a
+  branch no test can tell apart. Collapsed - but the reason it names two base
+  classes is worth keeping: `Neo4jError` and `DriverError` are **disjoint**,
+  meeting only at `GqlError`. `ServiceUnavailable` is a `DriverError`;
+  `TransientError` is a `Neo4jError`. Catching either alone lets half the
+  failures escape as bare driver exceptions, past the `StoreUnavailable`
+  contract every caller upstream is written against.
+- **Unit-only coverage numbers are a trap for this exact task.** Reading them
+  first, `applier.py` looked like 39% and `relay.py` like 36% - both are covered
+  by the integration suite, and the Makefile already says so in as many words.
+  Chasing those would have been an hour spent adding tests for things already
+  tested. The authoritative number is `make test-all`.
+- **The import contract had stopped being complete and still passed.**
+  `pyproject.toml` forbids `pipeline/` from importing `networkx_store`,
+  `pgvector_store`, `networkx` and `asyncpg`, and its comment said "both
+  concrete stores and both of their drivers". S7.1 added a third of each. The
+  rule would have gone on passing while the thing it protects had a new way to
+  be broken. Widened, with a note that a new backend means two more lines here.
+- **S7.1 pushed `seed()` past the 50-line body cap.** Same lesson as the module
+  cap two steps ago: split at a seam rather than shave. A graph whose lifetime
+  has to be opened and closed is a unit of work, so `drain_the_outbox` is now
+  its own function.
+
+**Still open**
+
+- S7.3 (MCP contract tests over every tool's schemas) and S7.4 (the week-1
+  retro), then the Week-1 exit gate.
+- `memory.get_entity`'s graph half, now that the graph is durable.
+- Everything carried: the merge path, ADR-0011, S18.1, CHECKPOINT B's
+  transcripts and labels.
+
+**Tomorrow's first step**
+
+**S7.3** - validate every tool's `inputSchema`/`outputSchema` with `jsonschema`
+and assert no drift. `tests/contract/` has been an empty directory with a
+`.gitkeep` since S1.1 waiting for it.
+
+---
+
 ---
 
 ---

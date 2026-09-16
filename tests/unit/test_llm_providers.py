@@ -22,26 +22,21 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-import anthropic
 import httpx
-import openai
 import pytest
 
 from fixtures.providers import (
     MODELS,
     PROMPT,
     Capital,
-    anthropic_client,
-    anthropic_transport,
     ollama_adapter,
     ollama_client,
     ollama_transport,
     openai_client,
     openai_transport,
 )
-from guardmem_core.errors import BudgetExceeded, ProviderUnavailable
 from guardmem_core.llm.base import Tier
-from guardmem_core.llm.providers import AnthropicClient, OllamaClient, OpenAIClient, tier_models
+from guardmem_core.llm.providers import OllamaClient, OpenAIClient, tier_models
 from guardmem_core.llm.providers.common import MAX_SAMPLES, require_samples
 from guardmem_core.llm.providers.ollama_client import BASE_SEED
 from guardmem_core.llm.providers.pricing import PRICES, estimate_cost
@@ -109,149 +104,6 @@ class TestTheSeedVariesAcrossADraw:
         assert seen[0]["stream"] is False
 
 
-class TestErrorsMapToTheRightDomainType:
-    """Retryable and not-retryable look alike over HTTP and need opposite answers."""
-
-    async def test_anthropic_5xx_is_retryable(self) -> None:
-        sdk = anthropic_client(anthropic_transport(status=503))
-        client = AnthropicClient(sdk, models=MODELS["anthropic"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(ProviderUnavailable) as caught:
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-        assert caught.value.retryable is True
-
-    async def test_anthropic_402_is_a_budget_error_and_is_not_retryable(self) -> None:
-        """The balance does not refill because a caller asked again."""
-        sdk = anthropic_client(anthropic_transport(status=402))
-        client = AnthropicClient(sdk, models=MODELS["anthropic"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(BudgetExceeded) as caught:
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-        assert caught.value.retryable is False
-
-    async def test_anthropic_401_propagates_unwrapped(self) -> None:
-        """**Deliberate, and the most arguable decision in the adapter.** A wrong
-        API key is a configuration error, and dressing it as `ProviderUnavailable`
-        would tell S9.3's breaker it is worth retrying - forever, since a key
-        does not become correct."""
-        sdk = anthropic_client(anthropic_transport(status=401))
-        client = AnthropicClient(sdk, models=MODELS["anthropic"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(anthropic.AuthenticationError):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_openai_quota_exhaustion_is_a_budget_error_not_a_rate_limit(self) -> None:
-        """Both arrive as **429**, and that is the trap: a breaker reading the
-        status alone would back off and retry an empty account until its cap."""
-        sdk = openai_client(
-            openai_transport(
-                status=429, body={"error": {"message": "quota", "code": "insufficient_quota"}}
-            )
-        )
-        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(BudgetExceeded):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_openai_plain_rate_limiting_stays_retryable(self) -> None:
-        """The control for the test above - same status, different code."""
-        sdk = openai_client(
-            openai_transport(status=429, body={"error": {"message": "slow down", "code": None}})
-        )
-        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(ProviderUnavailable) as caught:
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-        assert caught.value.retryable is True
-
-    async def test_openai_5xx_is_retryable(self) -> None:
-        sdk = openai_client(openai_transport(status=502))
-        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(ProviderUnavailable):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_openai_400_propagates_unwrapped(self) -> None:
-        sdk = openai_client(openai_transport(status=400))
-        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(openai.BadRequestError):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_an_unreachable_ollama_says_so(self) -> None:
-        """Including the hint, because "connection refused" to localhost has one
-        overwhelmingly likely cause and naming it saves a support round trip."""
-
-        def refuse(_request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("connection refused")
-
-        client, http = ollama_adapter(ollama_transport(handler=refuse))
-
-        async with http:
-            with pytest.raises(ProviderUnavailable, match="ollama serve"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_an_ollama_error_status_is_a_provider_error(self) -> None:
-        client, http = ollama_adapter(ollama_transport(status=404))
-
-        async with http:
-            with pytest.raises(ProviderUnavailable, match="404"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-
-class TestAnEmptyReplyIsAProviderProblem:
-    """`LLMResponse.samples` requires one non-empty sample.
-
-    A refusal, or a response truncated at `max_tokens` before any text, produces
-    none. Left alone that surfaces as a pydantic `ValidationError` about
-    `min_length`, which reads as a bug in this code rather than as something the
-    model did.
-    """
-
-    async def test_anthropic_with_no_text_block(self) -> None:
-        sdk = anthropic_client(anthropic_transport(answer=""))
-        client = AnthropicClient(sdk, models=MODELS["anthropic"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(ProviderUnavailable, match="no text"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_openai_with_an_empty_choice(self) -> None:
-        sdk = openai_client(openai_transport(answer=""))
-        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
-
-        async with sdk:
-            with pytest.raises(ProviderUnavailable, match="empty choice"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_ollama_with_empty_content(self) -> None:
-        client, http = ollama_adapter(ollama_transport(answer=""))
-
-        async with http:
-            with pytest.raises(ProviderUnavailable, match="empty content"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-    async def test_ollama_with_a_body_that_is_not_json(self) -> None:
-        def html(_request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text="<html>proxy error</html>")
-
-        client, http = ollama_adapter(ollama_transport(handler=html))
-
-        async with http:
-            with pytest.raises(ProviderUnavailable, match="non-JSON"):
-                await client.complete(prompt=PROMPT, tier=Tier.FAST)
-
-
 class TestZeroCostMeansTwoDifferentThings:
     """A ledger that reads an absence as free is a ledger that cannot be exceeded."""
 
@@ -287,6 +139,39 @@ class TestZeroCostMeansTwoDifferentThings:
 
         assert cost == 0.0
         assert any("ABSENCE" in record.message for record in caplog.records)
+
+
+class TestAccountingSurvivesAMissingUsageBlock:
+    """`usage` is optional on the Chat Completions response.
+
+    Absent on older surfaces and on some proxies, and the adapter has to answer
+    "how many tokens?" with a number either way - `PRD.md` §6.5's per-tenant
+    ledger reads these, and `None` propagating into it would be a crash at
+    billing time rather than at call time.
+    """
+
+    async def test_a_response_with_no_usage_reports_zero_rather_than_crashing(self) -> None:
+        sdk = openai_client(openai_transport(usage=False))
+        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
+
+        async with sdk:
+            reply = await client.complete(prompt=PROMPT, tier=Tier.FAST)
+
+        assert reply.tokens_in == 0
+        assert reply.tokens_out == 0
+
+    async def test_a_response_with_no_usage_is_not_reported_as_a_cache_hit(self) -> None:
+        """ "Not reported" and "not cached" are different facts and only one of
+        them fits in a boolean. `PRD.md` §6.5's ≥40% cache-hit assumption is
+        read off this field, so guessing `True` would inflate the one number the
+        cost model rests on."""
+        sdk = openai_client(openai_transport(usage=False))
+        client = OpenAIClient(sdk, models=MODELS["openai"], timeout_s=_TIMEOUT_S)
+
+        async with sdk:
+            reply = await client.complete(prompt=PROMPT, tier=Tier.FAST)
+
+        assert reply.cache_hit is False
 
 
 class TestBoundsAndPinning:

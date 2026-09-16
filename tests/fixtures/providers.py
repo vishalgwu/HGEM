@@ -50,6 +50,7 @@ __all__ = [
     "ollama_transport",
     "openai_client",
     "openai_transport",
+    "unreachable_transport",
 ]
 
 
@@ -131,6 +132,7 @@ def openai_transport(
     status: int = 200,
     body: dict[str, Any] | None = None,
     choices: int = 1,
+    usage: bool = True,
 ) -> httpx2.MockTransport:
     """A transport that answers Chat Completions.
 
@@ -140,6 +142,10 @@ def openai_transport(
         body: The error body for a non-200.
         choices: How many choices to return - OpenAI satisfies `n` natively, so
             this is what a multi-sample draw looks like on the wire.
+        usage: Whether to report a `usage` block at all. `False` is not a
+            hypothetical - the field is optional on the API and absent on older
+            surfaces, and the adapter has to answer "how many tokens?" with a
+            number either way rather than crashing on `None`.
 
     Returns:
         A transport for `AsyncOpenAI(http_client=...)`.
@@ -164,14 +170,35 @@ def openai_transport(
                     }
                     for index in range(choices)
                 ],
-                "usage": {
-                    "prompt_tokens": 11,
-                    "completion_tokens": 7,
-                    "total_tokens": 18,
-                    "prompt_tokens_details": {"cached_tokens": 0},
-                },
+                **(
+                    {
+                        "usage": {
+                            "prompt_tokens": 11,
+                            "completion_tokens": 7,
+                            "total_tokens": 18,
+                            "prompt_tokens_details": {"cached_tokens": 0},
+                        }
+                    }
+                    if usage
+                    else {}
+                ),
             },
         )
+
+    return httpx2.MockTransport(handler)
+
+
+def unreachable_transport() -> httpx2.MockTransport:
+    """A transport whose every request fails to connect.
+
+    The SDKs turn this into `APIConnectionError`, which both adapters translate
+    to a **retryable** `ProviderUnavailable` - the case a status code cannot
+    produce, because nothing answered at all. Distinct from a 5xx: a 5xx means
+    the provider is there and unwell, this means it is not there.
+    """
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("mock: nothing is listening", request=request)
 
     return httpx2.MockTransport(handler)
 
