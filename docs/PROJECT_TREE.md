@@ -325,6 +325,12 @@ guardmem-ai/
 │   ├── unit/                            # per-module, no I/O, >90% on guardmem-core
 │   │                                    #   test_networkx_graph_store.py (S3.4) runs every
 │   │                                    #   shared case against BOTH GraphStore impls
+│   │                                    #   test_dependency_imports.py: every third-party
+│   │                                    #   module the source imports must be installable
+│   │                                    #   from uv.lock - CI installs from that and
+│   │                                    #   nothing else. Added after `neo4j` reached
+│   │                                    #   requirements/ but not the lock and took all
+│   │                                    #   three CI jobs down while local was green
 │   ├── integration/                     # testcontainers Postgres, from S3.2
 │   │   ├── test_migration_invariants.py #   RULES 1.1/#2/#4 and RLS, against the schema
 │   │   ├── test_pgvector_store.py       #   S3.2 DONE WHEN: write, search, supersede, as_of

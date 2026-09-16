@@ -87,9 +87,30 @@ dependencies = [
   "pgvector>=0.5",
   # S3.4. The dev and single-tenant graph backend (`PROJECT_TREE.md`), and the
   # first `GraphStore` implementation - `requirements/stores.txt` says "build
-  # this one first". Neo4j arrives at S7.1 behind the same protocol and is NOT
-  # listed here: a driver nothing imports is scaffolding.
+  # this one first".
   "networkx>=3.4",
+  # S7.1, and the step this block's own comment predicted: "Neo4j arrives at
+  # S7.1 behind the same protocol and is NOT listed here: a driver nothing
+  # imports is scaffolding." S7.1 landed and `memory/graph/neo4j_store.py`
+  # imports it, so the condition that kept it out has gone - but the line was
+  # not moved in the same commit, and that is what broke CI.
+  #
+  # The failure is this repo's THIRD in the same shape and the first in the
+  # RUNTIME layer: `neo4j` reached `requirements/stores.txt` and
+  # `requirements.lock.txt`, so every local gate passed, and never reached
+  # `uv.lock`, which is the only thing CI installs from. All three jobs failed
+  # on `Cannot find implementation or library stub for module named "neo4j"`.
+  # `tests/unit/test_dependency_consistency.py` now checks the runtime
+  # direction too, so a driver that source imports and `uv.lock` lacks fails a
+  # test rather than a push.
+  #
+  # Pinned exactly, unlike its sibling floors above, for the reason the dev
+  # group states about itself: the two locks must agree, and a floor here
+  # resolves 6.3.1 against `requirements/stores.txt`'s 6.3.0 - which is a drift
+  # failure in `test_uv_lock_agrees_with_requirements_lock`, not a hypothetical.
+  # 6.3.0 is also the version S7.1's integration suite was verified against, so
+  # pinning it keeps CI on the driver the tests actually ran on.
+  "neo4j==6.3.0",
   # S3.5. The ontology starter packs are YAML (`MEMORY_ENGINE.md` §2.1) and
   # `schemas/ontology.py` is the first module in this package to read one.
   "pyyaml>=6.0",

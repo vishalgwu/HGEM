@@ -5117,6 +5117,74 @@ it", and the box that is unticked is the one that says the product works.
 
 ---
 
+## 2026-09-16 - fix(ci): the third failure of one shape, and the guard that ends it
+
+**All three CI jobs were red, and had been since the S7.1/S7.2 push.** I pushed
+S7.3 and S7.4 on top without reading the badge - which is the exact habit the
+`types-pyyaml` incident was supposed to have cured, and it cost two more red
+commits.
+
+**The failure**
+
+`mypy --strict` in CI: `Cannot find implementation or library stub for module
+named "neo4j"`, in five files. Every local gate was green.
+
+`neo4j==6.3.0` reached `requirements/stores.txt` and `requirements.lock.txt`,
+which is what a developer installs from. It never reached
+`packages/guardmem-core/pyproject.toml`, so it never reached `uv.lock` - and
+`uv.lock` is the only thing CI installs from. Three jobs, one missing line.
+
+**S3.4 predicted the step and S7.1 did not do it.** The manifest comment beside
+`networkx` read: "Neo4j arrives at S7.1 behind the same protocol and is NOT
+listed here: a driver nothing imports is scaffolding." That was correct when it
+was written and became wrong the moment S7.1 imported the driver. The comment
+was right, load-bearing, and not executable - which is the whole argument for
+what follows.
+
+**What broke / what I learned**
+
+- **A subset check is asymmetric, and it permits the harmful direction.**
+  `test_uv_lock_introduces_no_package_the_pip_lock_lacks` asserts
+  `uv.lock` is a subset of `requirements.lock.txt`. A package the developer has
+  and CI lacks *satisfies* that. The harmful direction was closed for the dev
+  toolchain at S1.7 by `test_dev_group_mirrors_requirements_dev` and left open
+  for every runtime layer, which is where `neo4j` lives. The guard was not
+  wrong; it was scoped to the half that had already bitten.
+- **So the new guard checks the property rather than adding a third mirror.**
+  `tests/unit/test_dependency_imports.py` parses every file in the four trees
+  `make typecheck` covers, collects the third-party top-level imports, and
+  asserts each is installable from `uv.lock`. An import is not a declaration
+  someone can forget to mirror - it is what the code does.
+- **Mutation-checked, and it earns its place.** Removing the declaration and
+  re-locking fails it with all five importing files named. That is the CI
+  failure, reproduced as a local unit test, before a push.
+- **The first version of the guard was wrong in a way that would have made it
+  useless.** It treated every `.py` stem as a first-party module name to
+  exclude - and `tests/fixtures/neo4j.py` exists, so `neo4j` was excluded and
+  the guard passed while the bug was present. Fixed by following `sys.path`
+  semantics: a file is importable under its own name only when its directory is
+  not a package, so that file is `fixtures.neo4j` and contributes `fixtures`.
+  **A guard written from the bug it is meant to catch can still be blind to
+  it**, and the only reason this one is not is the mutation test.
+- **`neo4j` is pinned `==6.3.0`, unlike its sibling floors.** A floor resolves
+  6.3.1, `requirements/stores.txt` pins 6.3.0, and the two locks disagreeing is
+  a drift failure rather than a hypothesis. 6.3.0 is also the driver S7.1's
+  integration suite actually ran against.
+- **Read the badge.** Two commits went out on top of a red main because I
+  verified locally and treated that as the answer. Local green and CI green are
+  different claims - the whole point of the file this bug lives in.
+
+**Still open**
+
+- Unchanged: CHECKPOINT B's 200 transcripts and the labelling session; the
+  Claude Desktop click; the merge path, ADR-0011, S18.1.
+
+**Tomorrow's first step**
+
+Unchanged by this: **the corpus**.
+
+---
+
 ---
 
 ---
