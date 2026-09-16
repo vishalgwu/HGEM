@@ -48,6 +48,215 @@ docker run -p 8080:8080 ghcr.io/guardmem/mcp-server:1.0 --transport streamable-h
 A token holding `review.decide` without a bound human identity is rejected at handshake — agents do
 not approve their own memories, and that is enforced in the auth layer rather than by convention.
 
+### 1.1 Connecting *this repository* — S6.3
+
+**The block above is the target and cannot be pasted today.** It names a published
+package (`uvx guardmem-mcp@latest`), a hosted API (`https://api.guardmem.ai`) and a
+`GUARDMEM_API_KEY` that a gateway resolves a tenant from. None of the three exists:
+the gateway is S8.1 and its auth middleware is S8.2, so **the server you can run
+today talks straight to Postgres and has no authentication at all.** That is why it
+reads `GM_MCP_TENANT_ID` from configuration — a server with no way to resolve a
+tenant and no instruction about which one to serve would have to guess, and a wrong
+guess is a cross-tenant read, which is the isolation failure this product exists to
+prevent. It refuses instead.
+
+Everything below was run, not drafted. Where it quotes output, that is the output.
+
+**Prerequisites, in order.** The server does not create or migrate anything.
+
+```bash
+make dev                              # the stack, and wait for health
+make migrate                          # alembic upgrade head
+make seed                             # the demo tenant and its 28 assertions
+```
+
+`make seed` prints the tenant id it used:
+
+```
+tenant      demo-clinic (cfc846ef-1d68-5958-a581-31608313de15)
+```
+
+That id is derived — `uuid5(NAMESPACE_URL, "guardmem/demo-clinic/tenant/demo-clinic")` —
+so it is the same on every machine, and it is the value `GM_MCP_TENANT_ID` wants.
+Skip `make seed` and the tools still answer; they answer about a tenant with no rows.
+
+**The config block.** Claude Desktop reads
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows and
+`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS.
+
+```jsonc
+{
+  "mcpServers": {
+    "guardmem": {
+      // The console script from `uv pip install -e services/mcp_server`.
+      // An absolute path, because the client does not inherit your PATH.
+      "command": "C:\\path\\to\\HGEM\\.venv\\Scripts\\guardmem-mcp.EXE",
+      "args": [],
+      "cwd": "C:\\path\\to\\HGEM",
+      "env": {
+        // pragma: allowlist secret - the dev stack's throwaway credentials,
+        // the same pair already in .env.example and docker-compose.dev.yml.
+        "GM_DATABASE_URL": "postgresql+asyncpg://guardmem:guardmem@localhost:5432/guardmem", // pragma: allowlist secret
+        "GM_REDIS_URL": "redis://localhost:6379/0",
+        "GM_NEO4J_URI": "bolt://localhost:7687",
+        "GM_NEO4J_USER": "neo4j",
+        "GM_NEO4J_PASSWORD": "guardmem123", // pragma: allowlist secret
+        "GM_MODEL_FAST": "claude-haiku-4-5",
+        "GM_MODEL_BALANCED": "claude-sonnet-5",
+        "GM_MODEL_FRONTIER": "claude-opus-5",
+        "GM_EMBED_MODEL": "text-embedding-3-large",
+        "GM_LLM_PROVIDER": "ollama",
+        "GM_OLLAMA_MODEL": "llama3.1:8b",
+        "GM_MCP_TENANT_ID": "cfc846ef-1d68-5958-a581-31608313de15",
+        "GM_MCP_DEFAULT_NAMESPACE": "patient:7781"
+      }
+    }
+  }
+}
+```
+
+**Four things about that block are load-bearing, and three of them are the ones
+people get wrong.**
+
+1. **The ports must match your stack.** The block above uses the compose defaults.
+   If your `.env` shifted them — 5433/6380/7688 is a common second checkout — the
+   client config must shift with it. The client never reads `.env.example`, and it
+   may not read your `.env` either; see (3).
+2. **`GM_LLM_PROVIDER=ollama` is what makes this runnable without a key.**
+   `memory.search` and `memory.get_entity` need no model and work regardless;
+   `memory.propose` and `memory.commit` refuse by name when no provider is
+   configured, and the server logs `no model provider: …` and starts anyway. For
+   Anthropic, set `GM_ANTHROPIC_API_KEY` and drop `GM_LLM_PROVIDER` — but read
+   `providers/anthropic_client.py` on what the missing temperature parameter does
+   to §3.1's entropy before comparing any score across providers.
+3. **`env` is not a convenience — a spawned server inherits almost nothing.** The
+   MCP SDK passes only `DEFAULT_INHERITED_ENV_VARS` plus this dict, so `GM_*`
+   exported in your shell does **not** reach the process. `Settings` also resolves
+   `.env` against the **working directory**, and the client chooses that directory:
+   without `cwd`, it is wherever Claude Desktop was launched from, which on Windows
+   can be `C:\Windows\System32`. Either set `cwd` to the repository so `.env` is
+   found, or put every value in `env`. Doing both is fine and is what the block does.
+4. **Restart Claude Desktop fully.** Closing the window leaves it in the tray;
+   the config is read at process start.
+
+**When it is wrong, it says so in one line.** `preflight()` runs before the
+transport opens, so a misconfigured server declines to start rather than accepting a
+pipe and dying mid-handshake. Run the command yourself from a directory with no
+`.env` and this is the whole output:
+
+```
+ERROR mcp_server.server guardmem-mcp cannot start: 9 setting(s) are missing or
+invalid: database_url, embed_model, model_balanced, model_fast, model_frontier,
+neo4j_password, neo4j_uri, neo4j_user, redis_url. Settings are read from
+GM_-prefixed environment variables, or from a .env file in the working directory -
+which is C:\Users\you\AppData\Local\Temp - and there is no .env there. A server
+launched by an MCP client inherits only a safe subset of the environment, so GM_*
+exported in a shell does not reach it: put the values in that client's own `env`
+block, or start the server in a directory that has a .env.
+```
+
+Exit code **2**, not 1 — distinct from a crash, so a supervisor does not restart a
+misconfigured server forever. Claude Desktop reports every one of these identically
+as "server disconnected" and buries the log, which is the reason that line exists.
+Its log is `%APPDATA%\Claude\logs\mcp-server-guardmem.log`.
+
+**What you should see.** The server advertises four tools —
+`memory.search`, `memory.propose`, `memory.commit`, `memory.get_entity` — and
+`initialize` returning at all is the real assertion: the lifespan opens the Postgres
+pool and parses the ontology *before* the first response is written, so a bad
+`GM_DATABASE_URL` fails the handshake rather than the first call.
+
+**The gate.** Say to Claude Desktop:
+
+> Remember that the patient's preferred pharmacy is CVS #4021.
+
+then look for the row, its span, its score and its audit event:
+
+```sql
+SELECT a.id, a.predicate, a.object_json, a.visible, p.verbatim, p.char_start, p.char_end
+FROM assertion a JOIN provenance p ON p.assertion_id = a.id
+WHERE a.tenant_id = 'cfc846ef-1d68-5958-a581-31608313de15'
+ORDER BY a.created_at DESC LIMIT 5;
+
+SELECT kind, payload->'decision' AS decision, payload->'confidence'->'confidence' AS c
+FROM audit_event
+WHERE tenant_id = 'cfc846ef-1d68-5958-a581-31608313de15'
+ORDER BY seq DESC LIMIT 10;
+```
+
+**`visible` will be `false`, and that is the design, not a failure.** ADR-0010's
+applier commits the assertion, its provenance, its outbox event and its audit events
+in one transaction; the relay applies the graph side and only then flips `visible`.
+Nothing runs the relay in this configuration — `services/worker` is S8.4 — so the
+row is durable, sourced, scored and audited, and deliberately not yet retrievable.
+Drain it by hand with `OutboxRelay.run_once()` if you want `memory.search` to find
+it.
+
+**What it produced here**, on `llama3.1:8b`, 2026-09-16 — the sentence above, through
+a spawned `guardmem-mcp` over real stdio pipes, `mode=strict`:
+
+| | |
+|---|---|
+| `predicate` / `object_json` | `preferred_pharmacy` / `"CVS #4021"` |
+| `verbatim` / `source_span` | `CVS #4021` / `[50, 59)`, `alignment 1.0` |
+| `confidence` | `0.8375` (`semantic_entropy 0.0`, `grounding 0.95`) |
+| `risk` | `0.2789` |
+| decision | `auto_write`, reasons `C_AT_OR_ABOVE_TAU_HI`, `R_BELOW_RHO_LO` |
+| audit | `DECISION` + `WRITE`, identical `created_at` — one transaction, ADR-0010 |
+| `visible` | `false`, pending the relay |
+
+`content[50:59]` of the submitted string is exactly `CVS #4021`, so the span is
+checkable rather than decorative — which is the point of `PRD.md`'s "no span, no
+write". Four Ollama calls, about two minutes wall clock: one noise filter and
+K=3 extraction. Entropy is `0.0` because all three samples agreed.
+
+**Then drain the outbox and the read path closes the loop.** One
+`OutboxRelay.run_once()` reported `claimed=1 dispatched=1`, flipped `visible` to
+true, and `memory.search` — over the same spawned server — returned it:
+
+```jsonc
+{ "assertion_id": "eca881e5-…", "predicate": "preferred_pharmacy",
+  "object": "CVS #4021", "confidence": 0.8375, "valid_to": null,
+  "provenance": [ { "span": [50, 59], "verbatim": "CVS #4021",
+                    "tier": "verified_user", "source_hash": "sha256:4e6bdd8b…" } ] }
+```
+
+That is `PHASES_AND_ROADMAP.md`'s first Phase-1 exit-gate line — propose → decide →
+write → `memory.search` returns it with provenance — over the real transport. The
+box stays unticked because it says *from Claude Desktop* and this was driven by a
+programmatic MCP client: same spawned binary, same stdio pipes, same `env` handling,
+same tool surface, but not the desktop app's own UI. That last click is yours.
+
+**Two things in that result are worth not misreading.**
+
+- **The query has to be narrow, because retrieval is not semantic yet.** Searching
+  `"pharmacy"` does *not* return this row. `HashEmbedder` hashes text — identical
+  text retrieves identically and nothing else does — so ranking is near-noise until
+  a real embedder lands. Filter by `predicates` or query the exact verbatim. Nothing
+  measured against `HashEmbedder` is a retrieval-quality number.
+- **The seeded tenant already had a `preferred_pharmacy`,** and this did not
+  supersede it. They are on different subjects — `3c723e01…` from the seed,
+  `8dadc187…` here — because "the patient" in a one-line proposal does not resolve
+  to the seeded entity. ADR-0008 is why that is a new binding rather than a fuzzy
+  match to the nearest candidate. Two believed rows for one predicate is therefore
+  correct, not a cardinality violation.
+
+**The payload keys are `assertions` and `excluded`**, not `results`.
+
+**A `hitl_review` is also a pass.** `MEMORY_ENGINE.md` §3.4 sends the ambiguous
+middle to a human, and an 8B local model is exactly the kind of extractor that lands
+there on a less clear-cut sentence. What the gate asks for is a governed row with a
+span, a score and an audit event — not a particular decision. A `REJECT` is a real
+outcome too and still audits. What would be a failure is a row with no provenance,
+or a decision with no audit event.
+
+**One note for anyone writing a client rather than using Claude Desktop.** The
+Python SDK exposes the payload as `result.structured_content`; `structuredContent`
+is the wire name and reading it off the model object silently returns `None`,
+which looks exactly like a server that answered with nothing. The tools always
+populate it — `memory.search` returns its results there and only a summary line in
+`content[0].text`.
+
 ---
 
 ## 2. Tools

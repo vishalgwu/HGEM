@@ -33,6 +33,12 @@ tools.
 
 **Exit gate**
 - [ ] End-to-end from Claude Desktop: propose → decide → write → `memory.search` returns it with provenance
+  <br>(**Everything under the last click is evidenced as of 2026-09-16** — a spawned
+  `guardmem-mcp` over real stdio pipes wrote `preferred_pharmacy = "CVS #4021"` with span
+  `[50, 59)`, `C = 0.8375`, decision `auto_write`, and `DECISION` + `WRITE` at one
+  timestamp; the relay then made it visible and `memory.search` returned it with its
+  provenance. `MCP_INTEGRATION.md` §1.1 has the run. The box stays unticked because that
+  was a programmatic MCP client, not the desktop app's own UI.)
 - [ ] A contradictory second fact supersedes the first, with tombstone and audit event
 - [ ] `replay_trace.py` reproduces any decision deterministically
 - [ ] Zero unsourced writes possible (property test + DB constraint both enforce it)

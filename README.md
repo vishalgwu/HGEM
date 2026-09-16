@@ -166,6 +166,28 @@ deliberately **not** in it — from v3 it needs ClickHouse, MinIO and a worker
 container, so it arrives at S13.1 in `docker-compose.observability.yml` with the
 stack it actually requires.
 
+**Every published port binds `127.0.0.1`.** Compose publishes on `0.0.0.0` when an
+entry names no host address, and the credentials in that stack are the throwaway
+kind a local stack is entitled to — `guardmem`/`guardmem`, `neo4j`/`guardmem123`,
+and a Redis with no password at all. The binding, not the password, is what stands
+between a laptop on a shared network and an unauthenticated Redis. The
+`POSTGRES_PORT=5433`-style overrides still work: they are the host *port*, not the
+host address.
+
+### Connecting Claude Desktop
+
+Once the stack is up and seeded, `docs/MCP_INTEGRATION.md` §1.1 has the config
+block, the three variables people get wrong, and what the round-trip should leave
+in Postgres:
+
+```bash
+make dev && make migrate && make seed      # then see MCP_INTEGRATION.md §1.1
+```
+
+Note that §1's block above §1.1 describes the *published* product — `uvx
+guardmem-mcp@latest` against `api.guardmem.ai` — which does not exist yet. §1.1 is
+the one you can paste.
+
 ---
 
 ## Status

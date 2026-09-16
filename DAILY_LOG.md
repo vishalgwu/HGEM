@@ -4527,6 +4527,100 @@ built do not leak, hang or print a password.
 
 ---
 
+## 2026-09-16 — ADR-0012, and S6.3: Claude Desktop's round trip, run
+
+**Shipped**
+
+- **ADR-0012: the pool bounds the wait for a connection.** `Pool.acquire()` with
+  no timeout awaits `queue.get()` over `max_size` holders and nothing bounds it,
+  so a process holding all ten connections stops rather than failing, with its
+  transport still open. `transaction` now requires a `timeout_s` and spends it
+  there. The ADR has the table that matters: `create_pool(timeout=)` is the
+  **handshake** timeout (asyncpg default 60s), `acquire(timeout=)` is the wait
+  for a free connection (**no default at all**), and the per-statement `timeout=`
+  every call site already passes is a third thing. Conflating the first two is
+  the easy way to write that fix wrong.
+- **Exhaustion reports itself.** `TimeoutError` subclasses `OSError`, so the
+  existing `except (OSError, ...)` already caught it - and `wait_for`'s instance
+  carries no message, so an operator would have got `postgres connection failed: `
+  with nothing after the colon for an incident that is not a connection failure.
+  The specific clause goes first and names the wait and `max_size`. Both
+  orderings are pinned by a test; both mutations were checked to fail.
+- **`CONNECT_TIMEOUT_S = 60.0`**, which is asyncpg's own default written down.
+  Nothing changes except that `RULES.md` §2.2 stops being satisfied by a number
+  nobody in this repository chose.
+- **S6.3 ran, end to end, on a local model.** `docs/MCP_INTEGRATION.md` §1.1 is
+  the setup document the step asks for, and everything in it was executed rather
+  than drafted: the config block, the three variables people get wrong, the
+  preflight line quoted verbatim with its exit code 2, and what the round trip
+  leaves in Postgres.
+- **The gate is met.** Spawned `guardmem-mcp` over real stdio pipes,
+  `memory.propose(mode=strict)` on `llama3.1:8b`: `preferred_pharmacy` =
+  `"CVS #4021"`, span `[50, 59)` with `alignment 1.0`, `C = 0.8375`,
+  `R = 0.2789`, decision `auto_write` on `C_AT_OR_ABOVE_TAU_HI` and
+  `R_BELOW_RHO_LO` - and **`DECISION` and `WRITE` with identical `created_at`**,
+  which is ADR-0010's one transaction visible in the data rather than argued for.
+  `content[50:59]` of the submitted string is exactly `CVS #4021`.
+- **The audit chain had its first real rows.** It went from **0** to 2. Every
+  assertion in this database before today was written by the seed, which goes
+  through the store directly; this is the first time anything was *governed*
+  into it.
+- **`scripts/replay_trace.py` could not connect to a correctly configured
+  database.** It called `create_pool(str(settings.database_url))` with no
+  `libpq_dsn`, and `GM_DATABASE_URL` is specified to carry
+  `postgresql+asyncpg://` for Alembic. asyncpg answers `invalid DSN: scheme is
+  expected to be either "postgresql" or "postgres"`. Four integration tests drive
+  its `main()` and none could see it, because the fixture set `GM_DATABASE_URL`
+  to the container's *libpq* DSN. The fixture now uses `sqlalchemy_dsn`, which is
+  the form a deployment has.
+
+**What broke / what I learned**
+
+- **Two "bugs" I found were mine.** `memory.propose` looked like it returned
+  nothing - `structuredContent` was `None`. That is the *wire* name; the Python
+  SDK exposes `result.structured_content`, and reading the alias off the model
+  object silently gives `None`, which looks exactly like a server that answered
+  with nothing. Then `memory.search` looked like it had lost the row, because I
+  filtered `payload["results"]` and the key is `assertions`. Both are now a note
+  in §1.1 for anyone writing a client, and neither was a defect. Worth the
+  reminder that the first explanation for "the server returned nothing" is
+  usually the client.
+- **The demo tenant was already seeded and I said it was not.** I read the
+  tenant table through `tail -12` and the row I wanted was the one that scrolled
+  off. `make seed` then printed `0 released this run`, which is what said so.
+- **Searching `"pharmacy"` does not find the fact that was just written.**
+  `HashEmbedder` hashes text, so ranking is near-noise; the row is found by
+  predicate filter or by its exact verbatim. This is documented behaviour and it
+  is still the most surprising thing about a first round trip, so §1.1 says it
+  before a reader concludes the write failed.
+- **Two believed `preferred_pharmacy` rows is not a cardinality violation.** The
+  seed's is on subject `3c723e01…` and the new one on `8dadc187…`: "the patient"
+  in a one-line proposal does not resolve to the seeded entity, and ADR-0008 is
+  why that is a new binding rather than a fuzzy match.
+
+**Still open**
+
+- **The Phase-1 exit-gate box stays unticked.** It says "from Claude Desktop" and
+  this was a programmatic MCP client - same spawned binary, same pipes, same
+  `env` handling, same tool surface, but not the app's own UI. Everything under
+  that last click is now evidenced.
+- **Nothing runs the relay in the server configuration.** A governed row is
+  durable, sourced, scored and audited, and invisible until something drains the
+  outbox; I did it by hand. `services/worker` is S8.4.
+- **`max_size = 10` is still an unmeasured number.** ADR-0012 makes exhaustion
+  visible, which is the prerequisite for measuring it, and deliberately does not
+  guess a better ceiling.
+- The merge path, ADR-0011, S18.1's review task, and CHECKPOINT B's transcripts
+  and labels.
+
+**Tomorrow's first step**
+
+**S6.4** - resources and prompts. S6.3's document is written and its gate is
+evidenced; what is left of it is a click in an app, and that does not block the
+next step.
+
+---
+
 ---
 
 ---
