@@ -4290,6 +4290,71 @@ cheaper than twice.
 
 ---
 
+## 2026-09-16 — ADR-0010 (the applier owns one Postgres transaction)
+
+**Shipped**
+
+- **ADR-0010.** The applier is a Postgres-specific composition owning **one
+  transaction per candidate**: assertion, provenance, outbox event, supersession
+  or merge, and the audit events. `RULES.md` non-negotiable #4 then holds by
+  construction rather than by convention.
+- **`VectorStore` does not change**, and that is the decision inside the
+  decision. `PgVectorStore` grows connection-taking variants; the Protocol stays
+  backend-neutral.
+- Indexes updated, and the three code comments that said "the applier needs an
+  ADR" now point at it. No implementation.
+
+**What broke / what I learned**
+
+- **The two halves were built to opposite conventions and both are right.**
+  `VectorStore.upsert` takes no connection because a protocol that handed one
+  out would be a protocol about Postgres; `audit_store.append` requires one
+  precisely so the audit row commits with the state change. Neither is wrong,
+  and they cannot be composed until something decides who owns the transaction.
+  That is the whole ADR, and it was legible only once both existed.
+- **Widening the Protocol is the cheap edit and the worst outcome.** An optional
+  `connection` on `upsert` would make #4 hold on Postgres and be silently
+  unenforceable on Qdrant - same call site, same green tests, a guarantee that
+  evaporates where nobody looks. Widening the *concrete class* keeps §2.4's
+  config-not-code seam and makes the absence of the guarantee a visible fact
+  about a deployment. **A silently backend-dependent guarantee is worse than an
+  explicitly unavailable one.**
+- **I checked the schema before claiming it, and it argued for me.**
+  `0001_initial` revokes `DELETE` on `assertion` and `UPDATE`/`DELETE` on
+  `audit_event`, so the "two transactions, compensate on failure" alternative is
+  not merely inelegant - the role cannot perform the cleanup that design needs.
+  The schema refusing to permit a design is the schema being right.
+- **A decision is not one effect**, which an applier that only knew `INSERT`
+  would get wrong for most of them. A `merge` writes **no new row** - it raises
+  the incumbent's `corroboration_count` - so the obvious implementation is wrong
+  for §2.4's own example.
+- **I corrected yesterday's own framing.** The log said the applier and
+  `memory.commit`'s entropy would be decided together because both "are about
+  the transaction boundary". They are not: one is atomicity, the other is
+  scoring, and bundling them would hide a scoring judgement inside a storage
+  ADR. `commit` is **ADR-0011**.
+- **Every decision gets audited, including the ones that write nothing.** A
+  `REJECT` that leaves no trace cannot be reviewed, explained, or tuned against
+  - and `threshold_tuner.py` refits from exactly those outcomes.
+
+**Still open**
+
+- **Implementing it.** `PgVectorStore`'s connection-taking writes, the applier,
+  and its call site after `run()`. The existing transaction-owning methods
+  should become thin wrappers over the new ones, or the two paths will drift.
+- **ADR-0011: `memory.commit`'s confidence** without a sampling distribution.
+- S18.1's review task, so a `HITL_REVIEW` produces a ticket rather than only an
+  audit row.
+- CHECKPOINT B: transcripts and labels, still no code.
+
+**Tomorrow's first step**
+
+**Implement ADR-0010.** It closes open item #18 - the audit chain has been built
+and tested since S5.5 and has never had a caller - and it makes S6.3's DONE WHEN
+reachable, which is the Day-7 gate.
+
+---
+
 ---
 
 ---

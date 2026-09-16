@@ -60,7 +60,7 @@ D4E49FEFFB9FA1A5325D1E9AE9AF530604F871E9EA8327998EFE4902161357CD
 | [PROJECT_TREE.md](PROJECT_TREE.md) | Planned repository layout to build incrementally |
 | [MCP_INTEGRATION.md](MCP_INTEGRATION.md) | Planned agent tools, resources, prompts, and authentication contracts |
 | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) | Dashboard and human review interface requirements |
-| [Architecture decisions](adr/) | Rationale for dual stores, bitemporal history, async evaluation, entropy, MCP, the Day-2 amendments to `ExtractionResult` and `Provenance`, **entity resolution — which binds and never matches**, and **`pii_class` and `irreversibility` as ontology fields** |
+| [Architecture decisions](adr/) | Rationale for dual stores, bitemporal history, async evaluation, entropy, MCP, the Day-2 amendments to `ExtractionResult` and `Provenance`, **entity resolution — which binds and never matches**, **`pii_class` and `irreversibility` as ontology fields**, and **the applier's transaction boundary** |
 | [Incident runbooks](runbooks/) | Draft response procedures for poisoning, review backlogs, and provider outages |
 
 The diagrams illustrate distinct parts of this design:

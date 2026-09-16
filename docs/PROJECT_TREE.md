@@ -52,7 +52,8 @@ guardmem-ai/
 │   │   ├── 0006-extraction-result-carries-the-sample-sets-and-the-unsourced-count.md
 │   │   ├── 0007-provenance-records-its-span-alignment.md
 │   │   ├── 0008-entity-resolution-binds-not-matches.md
-│   │   └── 0009-pii-class-and-irreversibility-are-ontology-fields.md
+│   │   ├── 0009-pii-class-and-irreversibility-are-ontology-fields.md
+│   │   └── 0010-the-applier-owns-one-postgres-transaction.md
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md
@@ -141,6 +142,9 @@ guardmem-ai/
 │   │       │   ├── toxicity.py
 │   │       │   └── policy_engine.py     # OPA/Rego-compatible rule evaluation
 │   │       ├── memory/
+│   │       │   ├── applier.py           # ADR-0010; ONE Postgres transaction per
+│   │       │   │                        #   candidate: assertion + provenance + outbox
+│   │       │   │                        #   + audit. RULES #4 by construction
 │   │       │   ├── entities.py          # ADR-0008; NamespaceEntityResolver. Binds a
 │   │       │   │                        #   subject to an entity and NEVER matches names
 │   │       │   ├── router.py            # S3.3; StoreRouter — write entry point, tenant + visibility guards

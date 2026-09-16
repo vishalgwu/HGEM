@@ -12,7 +12,7 @@ same call into `guardmem_core.pipeline.run`.
 K-sample extraction, span linking, schema gate, incumbent retrieval, conflict
 detection, confidence, impact, decision. It returns real numbers from a real
 model. What it does **not** do is write - `run()` applies no decision until the
-applier exists - so the result carries `applied: false` rather than letting a
+applier is built (ADR-0010) - so the result carries `applied: false` rather than letting a
 caller read `auto_write` as "stored". `governing.result_of` owns that mapping
 and says why.
 

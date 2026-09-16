@@ -205,7 +205,8 @@ async def append_decision(
     and three of the four outcomes change nothing: a REJECT, a HITL_REVIEW and
     an ESCALATE write no assertion. The record *is* the artifact. An AUTO_WRITE
     does change state, and the `WRITE` event for it has to commit with the
-    assertion; that is the applier's transaction and it does not exist yet (see
+    assertion; that is the applier's transaction, decided by ADR-0010 and not yet
+    built (see
     `pipeline/orchestrator.py`). Calling this and then writing separately would
     satisfy neither rule, so nothing here does.
 

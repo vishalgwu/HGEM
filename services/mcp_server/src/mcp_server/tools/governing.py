@@ -16,7 +16,7 @@ to one call's tenant.
 **Nothing here writes an assertion, and the result says so.** `run()` reaches a
 decision and applies none: `RULES.md` non-negotiable #4 binds the audit event to
 the state change, `VectorStore.upsert` owns the only transaction, and composing
-the two is a Postgres-specific applier that needs its own ADR. So §2.2's
+the two is a Postgres-specific applier - ADR-0010, decided and unbuilt. So §2.2's
 `assertion_id` - which its example shows on an `auto_write` - **cannot be
 produced**, and `applied: false` is carried instead of leaving a caller to infer
 from a missing field that their fact was stored. A decision of `auto_write` here
