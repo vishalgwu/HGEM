@@ -210,3 +210,88 @@ def test_env_example_declares_exactly_the_settings_fields() -> None:
         "An active key that is not a declared field makes Settings() raise on "
         "every boot - extra='forbid'."
     )
+
+
+# Every field that carries a credential, and what would appear in a log if it
+# stopped being protected. The DSNs embed a password in their userinfo; the
+# other three are the credential.
+_SECRET_BEARING = ("database_url", "redis_url", "neo4j_password", "anthropic_api_key")
+
+
+def test_no_credential_survives_the_repr() -> None:
+    """`repr(settings)` printed the Postgres, Redis and Neo4j passwords and both
+    API keys in clear.
+
+    Nothing in this repository logs `Settings` today, which is exactly why this
+    is a test rather than a comment: the leak is one `logger.debug("%s", s)`, one
+    crash reporter that captures frame locals, or one `pytest --showlocals` away,
+    and none of those would look like a mistake at the call site. Two mechanisms
+    protect it - `SecretStr` on the three credentials and `repr=False` on the two
+    DSNs - and this asserts the outcome rather than either mechanism, so
+    replacing one with the other stays a free choice.
+    """
+    settings = build(
+        database_url="postgresql+asyncpg://u:pgsecret@h:5432/d",  # pragma: allowlist secret
+        redis_url="redis://:redissecret@localhost:6379/0",  # pragma: allowlist secret
+        neo4j_password="neosecret",  # pragma: allowlist secret
+        anthropic_api_key="anthropicsecret",  # pragma: allowlist secret
+        openai_api_key="openaisecret",  # pragma: allowlist secret
+    )
+    rendered = repr(settings)
+
+    leaked = [
+        value
+        for value in ("pgsecret", "redissecret", "neosecret", "anthropicsecret", "openaisecret")
+        if value in rendered
+    ]
+    assert not leaked, f"repr(Settings) exposes {leaked}: {rendered}"
+
+
+def test_every_secret_bearing_field_is_still_readable() -> None:
+    """Masking the repr must not mask the value.
+
+    `libpq_dsn` needs the real DSN and `build_llm` needs the real key, so a
+    field that redacted itself on access would fail at the first connection
+    instead of in this file.
+    """
+    settings = build(anthropic_api_key="anthropicsecret")  # pragma: allowlist secret
+
+    assert (
+        settings.anthropic_api_key.get_secret_value() == "anthropicsecret"
+    )  # pragma: allowlist secret
+    assert str(settings.database_url) == REQUIRED["database_url"]
+
+
+def test_an_unset_key_is_falsy_so_the_provider_guard_still_refuses() -> None:
+    """`providers/selection.py` reads `if not settings.anthropic_api_key`.
+
+    `SecretStr` is an object, and an object without `__bool__` is always truthy -
+    which would have turned that refusal into a silent pass and let a blank key
+    reach the SDK as a `401` four layers down. pydantic defines `__bool__` over
+    the wrapped value; this pins that, because the failure is invisible.
+    """
+    assert not build().anthropic_api_key
+    assert build(anthropic_api_key="x").anthropic_api_key
+
+
+def test_the_secret_bearing_fields_are_the_ones_this_file_knows_about() -> None:
+    """A new credential field should arrive with its masking, not after it.
+
+    This is the reminder: adding a field whose name says credential without
+    adding it to `_SECRET_BEARING` above fails here, and the fix is to give it
+    `SecretStr` (or `repr=False`, for a type that cannot take one) and list it.
+    """
+    suspicious = {
+        name
+        for name in Settings.model_fields
+        if any(word in name for word in ("password", "secret", "api_key", "token", "_url"))
+    }
+    # `ollama_url` and `neo4j_uri` carry no credential: Ollama is unauthenticated
+    # and the Neo4j password is its own field.
+    unclassified = suspicious - set(_SECRET_BEARING) - {"ollama_url", "openai_api_key"}
+
+    assert not unclassified, (
+        f"these fields look like credentials and are not listed as secret-bearing: "
+        f"{sorted(unclassified)}. Give each one SecretStr (or repr=False where the "
+        "type cannot take one) and add it to _SECRET_BEARING."
+    )

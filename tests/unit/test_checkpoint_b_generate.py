@@ -25,7 +25,6 @@ import json
 import pathlib
 from typing import Any
 
-import httpx
 import pytest
 
 from fixtures.assertions import ENTITY, TENANT, WHEN
@@ -34,10 +33,10 @@ from fixtures.decisions import conflict, risk
 from fixtures.mcp import settings
 from fixtures.providers import ollama_client, ollama_transport
 from guardmem_core.llm.base import Tier
-from guardmem_core.llm.providers import OllamaClient
+from guardmem_core.llm.providers import OllamaClient, build_llm
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.verdict import ConfidenceReport, Decision, DecisionRecord
-from scripts.checkpoint_b_generate import _client, _read_proposals, _row
+from scripts.checkpoint_b_generate import _provider_settings, _read_proposals, _row
 
 
 def governed(*, entropy: float = 0.25, confidence: float = 0.8) -> GovernedCandidate:
@@ -206,24 +205,45 @@ class TestProviderSelection:
     """
 
     def test_ollama_needs_no_credential(self) -> None:
-        http = httpx.AsyncClient(base_url="http://ollama.test")
+        chosen = _provider_settings("ollama", settings(anthropic_api_key=""))
 
-        assert isinstance(_client("ollama", http, settings(anthropic_api_key="")), OllamaClient)
+        assert chosen.llm_provider == "ollama"
 
     def test_anthropic_without_a_key_refuses_rather_than_falling_back(self) -> None:
         """The sign-off has to name the provider, so a silent fallback to the
         local model would make it a lie - and an AUROC from a 7B local model is
         not an AUROC from Claude."""
-        http = httpx.AsyncClient(base_url="http://ollama.test")
-
         with pytest.raises(ValueError, match="GM_ANTHROPIC_API_KEY is empty"):
-            _client("anthropic", http, settings(anthropic_api_key=""))
+            _provider_settings("anthropic", settings(anthropic_api_key=""))
 
     def test_an_unknown_provider_names_what_it_expected(self) -> None:
-        http = httpx.AsyncClient(base_url="http://ollama.test")
-
         with pytest.raises(ValueError, match="expected 'ollama' or 'anthropic'"):
-            _client("gpt", http, settings(anthropic_api_key=""))
+            _provider_settings("gpt", settings(anthropic_api_key=""))
+
+    def test_openai_is_refused_even_though_settings_would_accept_it(self) -> None:
+        """`Settings.llm_provider` allows it and this harness does not. Nothing
+        has been measured against OpenAI, and the gate's sign-off names the
+        provider that produced the corpus - so the narrower list is the honest
+        one and it has to be enforced rather than assumed from `--provider`'s
+        `choices`, which a direct caller does not go through.
+        """
+        with pytest.raises(ValueError, match="expected 'ollama' or 'anthropic'"):
+            _provider_settings("openai", settings(anthropic_api_key=""))
+
+    def test_the_local_model_comes_from_settings_not_from_os_environ(self) -> None:
+        """`pydantic-settings` reads `.env` without exporting it to `os.environ`.
+
+        This module used to read `GM_OLLAMA_MODEL` with `os.environ.get`, so a
+        value set in `.env` - which is where `.env.example` says to set it -
+        configured the rest of the process and was silently ignored here. The
+        corpus would then have been generated against `llama3.1:8b` whatever the
+        operator selected, which is the one defect the harness exists to avoid.
+        """
+        chosen = _provider_settings(
+            "ollama", settings(anthropic_api_key="", ollama_model="qwen2.5:7b")
+        )
+
+        assert chosen.ollama_model == "qwen2.5:7b"
 
     async def test_the_local_tier_ladder_collapses_to_one_model(self) -> None:
         """Worth pinning because it is a caveat on any number this corpus
@@ -237,10 +257,12 @@ class TestProviderSelection:
         """
         seen: list[dict[str, Any]] = []
         http = ollama_client(ollama_transport(seen=seen))
-        client = _client("ollama", http, settings(anthropic_api_key=""))
+        chosen = _provider_settings("ollama", settings(anthropic_api_key=""))
         try:
-            for tier in Tier:
-                await client.complete(prompt="p", tier=tier)
+            async with build_llm(chosen, http) as client:
+                assert isinstance(client, OllamaClient)
+                for tier in Tier:
+                    await client.complete(prompt="p", tier=tier)
         finally:
             await http.aclose()
 

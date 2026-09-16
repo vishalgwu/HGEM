@@ -16,6 +16,7 @@ startup rather than resolving to something plausible.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Final
@@ -23,9 +24,18 @@ from typing import TYPE_CHECKING, Final
 from guardmem_core.llm.base import Tier
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from guardmem_core.settings import Settings
 
-__all__ = ["MAX_SAMPLES", "TierModels", "elapsed_ms", "require_samples", "tier_models"]
+__all__ = [
+    "MAX_SAMPLES",
+    "TierModels",
+    "draw_samples",
+    "elapsed_ms",
+    "require_samples",
+    "tier_models",
+]
 
 type TierModels = Mapping[Tier, str]
 
@@ -101,6 +111,61 @@ def require_samples(n: int) -> int:
             "ladder is 1, 3 or 5."
         )
     return n
+
+
+def _first_leaf(failures: BaseExceptionGroup[BaseException]) -> BaseException:
+    """The first non-group exception inside a possibly nested group.
+
+    `TaskGroup` reports whatever happened as an `ExceptionGroup`, and a caller of
+    `LLMClient.complete` is promised `ProviderUnavailable` or `BudgetExceeded` -
+    the two it can act on. Handing it a group instead would move the `except`
+    clause in every call site and in the circuit breaker S9.3 adds.
+    """
+    for failure in failures.exceptions:
+        return _first_leaf(failure) if isinstance(failure, BaseExceptionGroup) else failure
+    return failures  # pragma: no cover - a group is never constructed empty
+
+
+async def draw_samples[T](draw: Callable[[int], Coroutine[object, object, T]], n: int) -> list[T]:
+    """Run `n` draws concurrently and return them in request order.
+
+    Args:
+        draw: Builds the coroutine for one sample, given its index. Two of the
+            three providers satisfy `n` by issuing that many requests, and the
+            index is what lets a provider vary a per-sample parameter - Ollama
+            derives a seed from it.
+        n: How many samples. Checked against `MAX_SAMPLES` by the caller.
+
+    Returns:
+        The results, in the order `draw` was called rather than the order the
+        requests completed - which is what makes `MEMORY_ENGINE.md` §1.2's
+        "sample 0 is canonical" meaningful.
+
+    Raises:
+        BaseException: whatever the first failing draw raised. One failure fails
+            the whole call, because these `n` samples are one measurement:
+            §3.1 normalises entropy by `log K`, so returning K-1 samples for a
+            K-sample draw would not degrade the score, it would silently compute
+            a different one.
+
+    **A `TaskGroup`, not `gather`, and the difference is money.** `gather`
+    propagates the first exception and leaves its siblings running - so a draw
+    that failed on sample 2 of 5 still issued, paid for and discarded the other
+    four, against a provider that had just told us it was in trouble.
+    `TaskGroup` cancels them. `RULES.md` §2.2 requires it for exactly this
+    reason and names the failure mode: orphaned tasks.
+
+    The group is unwrapped to its first leaf on the way out. That loses the
+    other failures, which is the right trade here - the contract above is that
+    one failure fails the call, so the second reason is not information a caller
+    can use, and `ProviderUnavailable` reaching an `except` clause unwrapped is.
+    """
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(draw(index)) for index in range(n)]
+    except BaseExceptionGroup as failures:
+        raise _first_leaf(failures) from None
+    return [task.result() for task in tasks]
 
 
 def elapsed_ms(started: float) -> float:

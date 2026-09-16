@@ -184,7 +184,9 @@ class TestAnthropic:
         from guardmem_core.settings import get_settings
 
         settings = get_settings()
-        async with anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key) as sdk:
+        async with anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key.get_secret_value()
+        ) as sdk:
             client = AnthropicClient(
                 sdk,
                 models={

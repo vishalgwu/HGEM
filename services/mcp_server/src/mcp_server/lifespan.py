@@ -26,18 +26,27 @@ parses - and a lifespan that allocated nothing would pass it on a machine where
 none of that is true. `RULES.md` §2.2 also puts pool creation in lifespan
 explicitly: one pool per process, never one per request.
 
-**Shutdown closes what startup opened, in reverse, and `finally` is why.** An
-MCP client disconnecting is a normal end to a stdio session, and a pool that is
-dropped rather than closed leaves its connections to be reaped by Postgres on a
-timeout. One orphan per restart is invisible; a supervisor restarting a crash
-loop reaches `max_connections` and takes the rest of the deployment with it.
+**Shutdown closes what startup opened, in reverse, and `AsyncExitStack` is
+why.** An MCP client disconnecting is a normal end to a stdio session, and a
+pool that is dropped rather than closed leaves its connections to be reaped by
+Postgres on a timeout. One orphan per restart is invisible; a supervisor
+restarting a crash loop reaches `max_connections` and takes the rest of the
+deployment with it.
+
+A hand-written `try/finally` said that and did not quite do it. Each resource
+was registered only once the *next* one had been constructed, so a pool opened
+and then an `httpx.AsyncClient` that raised leaked the pool; and the model
+provider was never closed at all, because `build_llm` returned a bare adapter
+over an SDK client nobody held. The stack fixes both by construction: a resource
+is registered the moment it exists, and unwinding is LIFO, so the order is the
+reverse of the order things opened without anyone maintaining a list.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -246,13 +255,18 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
     of its call sites rather than a fourth inline `str.replace`.
     """
     settings = get_settings()
-    pool = await create_pool(libpq_dsn(str(settings.database_url)))
-    # Opened unconditionally, and only Ollama uses it. `build_llm` explains why:
-    # opening it conditionally would put an `if` around an `async with` here,
-    # and an unused client on a mock transport costs nothing.
-    http = httpx.AsyncClient(base_url=settings.ollama_url)
-    try:
-        llm = _llm_or_none(settings, http)
+    async with AsyncExitStack() as stack:
+        # Pushed first so it unwinds last, and the final line of a session is
+        # the one saying the session ended rather than a resource closing.
+        stack.callback(_LOGGER.info, "guardmem-mcp stopped")
+        pool = await create_pool(libpq_dsn(str(settings.database_url)))
+        stack.push_async_callback(pool.close)
+        # Opened unconditionally, and only Ollama uses it. `build_llm` explains
+        # why: opening it conditionally would put an `if` around an
+        # `async with` here, and an unused client on a mock transport costs
+        # nothing.
+        http = await stack.enter_async_context(httpx.AsyncClient(base_url=settings.ollama_url))
+        llm = await _llm_or_none(stack, settings, http)
         _LOGGER.info(
             "guardmem-mcp started",
             extra={
@@ -274,22 +288,25 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
             # binds Neo4j here and sets this true.
             graph_durable=False,
         )
-    finally:
-        await http.aclose()
-        await pool.close()
-        _LOGGER.info("guardmem-mcp stopped")
 
 
-def _llm_or_none(settings: Settings, http: httpx.AsyncClient) -> LLMClient | None:
-    """Build the configured provider, or log why there is none.
+async def _llm_or_none(
+    stack: AsyncExitStack, settings: Settings, http: httpx.AsyncClient
+) -> LLMClient | None:
+    """Open the configured provider on `stack`, or log why there is none.
 
     Args:
+        stack: The lifespan's exit stack. The provider is entered on it rather
+            than returned bare, because for Anthropic and OpenAI the adapter sits
+            on an SDK client that owns a transport - and an adapter handed back
+            without its closer is exactly the leak this argument exists to close.
         settings: The process configuration.
         http: The client Ollama would use.
 
     Returns:
         The adapter, or `None` when `build_llm` refuses for want of a
-        credential.
+        credential. Nothing is registered on `stack` in the `None` case:
+        `build_llm` raises on entry, before it has allocated anything.
 
     **A warning rather than a raise**, and the level matters: a server serving
     two of its four tools is degraded, not broken, and `RULES.md` §6 wants that
@@ -302,7 +319,7 @@ def _llm_or_none(settings: Settings, http: httpx.AsyncClient) -> LLMClient | Non
     SDK constructor is a real fault that should stop the process.
     """
     try:
-        return build_llm(settings, http)
+        return await stack.enter_async_context(build_llm(settings, http))
     except ValueError as exc:
         _LOGGER.warning(
             "no model provider: %s. memory.search and memory.get_entity work; "

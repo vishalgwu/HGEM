@@ -21,6 +21,22 @@
 #
 #     POSTGRES_PORT=5433 make dev        # then update GM_DATABASE_URL in .env
 #
+# EVERY PUBLISHED PORT IS BOUND TO 127.0.0.1, and the prefix is not decoration.
+# Compose's short form publishes on 0.0.0.0 when no host address is given, so
+# `HOST:CONTAINER` offers these five services to every machine that can route to
+# this one - a conference network, a shared office subnet, a coffee shop. The
+# credentials below are `guardmem`/`guardmem` and `neo4j`/`guardmem123`, which is
+# correct for a throwaway local stack and indefensible on a LAN, and Redis is
+# published with no password at all. A reachable unauthenticated Redis is not a
+# data-exposure problem, it is a remote code execution one: `CONFIG SET dir` plus
+# `CONFIG SET dbfilename` writes an attacker-chosen file as the container user.
+#
+# The override still works - `POSTGRES_PORT=5433 make dev` binds 127.0.0.1:5433 -
+# because the variable is the host *port*, not the host address. Anyone who
+# genuinely needs to reach this stack from another machine should say so
+# explicitly rather than inherit it from a default, and should fix the passwords
+# in the same breath.
+#
 # These names deliberately carry NO `GM_` prefix. `GM_` is the settings
 # namespace, and S1.4's Settings object is `extra="forbid"` - it raises on any
 # key in .env that is not a declared field. Putting a compose-only variable in
@@ -59,7 +75,7 @@ services:
       # locale, and index ordering then differs between machines.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Runs once, on an empty data directory. Creates the vector extension so
@@ -89,7 +105,7 @@ services:
     # exercised against. Revisit together with that pin.
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       # `--appendonly yes` writes the AOF to /data. S1.3 as written declares no
       # volume, so the durability that flag buys is thrown away the moment the
@@ -118,8 +134,8 @@ services:
       # bolt URI in .env.example unambiguous.
       NEO4J_dbms_default__database: neo4j
     ports:
-      - "${NEO4J_HTTP_PORT:-7474}:7474"
-      - "${NEO4J_BOLT_PORT:-7687}:7687"
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
       - neo4jdata:/data
       - neo4jlogs:/logs
@@ -149,9 +165,9 @@ services:
       # ephemeral filesystem.
       PHOENIX_WORKING_DIR: /mnt/data
     ports:
-      - "${PHOENIX_PORT:-6006}:6006"
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
       # OTLP gRPC receiver - GM_OTEL_ENDPOINT points here at S13.1.
-      - "${PHOENIX_OTLP_PORT:-4317}:4317"
+      - "127.0.0.1:${PHOENIX_OTLP_PORT:-4317}:4317"
     volumes:
       - phoenixdata:/mnt/data
     healthcheck:

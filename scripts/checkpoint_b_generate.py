@@ -35,17 +35,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import pathlib
 from typing import TYPE_CHECKING, Any, Final
 
-import anthropic
 import asyncpg
 import httpx
 
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.entailment import LLMEntailer
-from guardmem_core.llm.providers import AnthropicClient, OllamaClient, tier_models
+from guardmem_core.llm.providers import build_llm
 from guardmem_core.memory.entities import NamespaceEntityResolver
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
@@ -59,7 +57,7 @@ from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.ontology import load_ontology
 from guardmem_core.schemas.receipt import SourceTier
 from guardmem_core.schemas.turn import Turn
-from guardmem_core.settings import get_settings
+from guardmem_core.settings import Settings, get_settings
 from guardmem_core.types import Namespace, TenantId, TraceId
 
 if TYPE_CHECKING:
@@ -78,12 +76,14 @@ _K: Final = 3
 # The gate's own sample size, from the checkpoint's step 1.
 _TARGET: Final = 200
 
-_OLLAMA_URL: Final = os.environ.get("GM_OLLAMA_URL", "http://localhost:11434")
-_OLLAMA_MODEL: Final = os.environ.get("GM_OLLAMA_MODEL", "llama3.1:8b")
-
-# A local 7B model is slow and this is a batch job, so the per-request ceiling is
-# generous rather than the 20s `settings.llm_timeout_s` a request path wants.
-_LOCAL_TIMEOUT_S: Final = 600.0
+# What `--provider` accepts. `Settings.llm_provider` also offers `openai`; this
+# harness does not, because nothing has been measured against it and the gate's
+# sign-off names the provider that produced the corpus.
+#
+# The local URL, model id and request timeout come from `Settings` - see
+# `_provider_settings` for the three `os.environ.get` constants that used to
+# stand here and why reading them that way silently ignored `.env`.
+_PROVIDERS: Final = ("ollama", "anthropic")
 
 
 def generate(path: pathlib.Path, proposals: pathlib.Path | None, provider: str, tenant: str) -> int:
@@ -142,13 +142,15 @@ async def _generate(
     a client per proposal would throw away the connection pool on a job whose
     whole cost is round trips.
     """
-    settings = get_settings()
+    settings = _provider_settings(provider, get_settings())
     pool = await create_pool(libpq_dsn(str(settings.database_url)), min_size=1, max_size=4)
     rows: list[dict[str, Any]] = []
     try:
         await _ensure_tenant(pool, tenant)
-        async with httpx.AsyncClient(base_url=_OLLAMA_URL) as http:
-            llm = _client(provider, http, settings)
+        async with (
+            httpx.AsyncClient(base_url=settings.ollama_url) as http,
+            build_llm(settings, http) as llm,
+        ):
             deps = _deps(llm, pool, tenant, settings)
             for index, proposal in enumerate(_read_proposals(proposals, tenant), start=1):
                 result, failures = await run(proposal, deps)
@@ -283,40 +285,55 @@ def _proposal(
     )
 
 
-def _client(provider: str, http: httpx.AsyncClient, settings: Any) -> LLMClient:
-    """Build the adapter named on the command line.
+def _provider_settings(provider: str, settings: Settings) -> Settings:
+    """Point `settings` at the provider named on the command line.
+
+    Args:
+        provider: `ollama` or `anthropic`, from `--provider`.
+        settings: The process configuration, as the environment supplied it.
+
+    Returns:
+        A copy whose `llm_provider` is what the command line asked for, ready to
+        hand to `build_llm`.
 
     Raises:
         ValueError: the provider is unknown, or Anthropic was asked for without
             a key. The second is worth its own message: `GM_ANTHROPIC_API_KEY`
             has been blank since S0.2 and "it silently fell back to the local
             model" is the kind of thing that makes two AUROCs incomparable.
+
+    **This used to build the adapters itself**, and `selection.build_llm`'s own
+    docstring names this module as the second composition root that must not be
+    allowed to answer differently - "a second copy of the mapping would be free
+    to drift on which provider a blank key falls back to". It drifted anyway,
+    not on the fallback but on everything around it: the local URL, model and
+    timeout came from three module-level `os.environ.get` constants rather than
+    from `Settings`. `pydantic-settings` reads `.env` directly and does **not**
+    export it to `os.environ`, so `GM_OLLAMA_MODEL` set in `.env` - which is
+    where `.env.example` says to set it - configured the rest of the process and
+    was silently ignored here. A corpus generated against a different model than
+    the operator selected is the one defect this whole harness exists to avoid.
+
+    The key check stays local because the message has to: `build_llm` tells an
+    operator to set `GM_LLM_PROVIDER=ollama`, which is the right advice for a
+    server and the wrong advice here, where `--provider` is what selects and the
+    environment variable would be overwritten a line later. It is one `if` and
+    it cannot drift on the fallback, because it does not fall back.
     """
-    if provider == "ollama":
-        # The tier ladder collapses to one local model: `settings.model_fast`
-        # and its siblings are Claude ids, and a local run has one model. The
-        # consequence is that a BALANCED judge call and a FAST extraction hit
-        # the same 7B weights, which is worth knowing before reading an AUROC
-        # off this corpus - MEMORY_ENGINE.md §3.5's ladder is not being
-        # exercised at all.
-        return OllamaClient(
-            http, models=dict.fromkeys(Tier, _OLLAMA_MODEL), timeout_s=_LOCAL_TIMEOUT_S
+    if provider not in _PROVIDERS:
+        raise ValueError(
+            f"unknown provider {provider!r}; expected "
+            + " or ".join(repr(name) for name in _PROVIDERS)
         )
-    if provider == "anthropic":
-        if not settings.anthropic_api_key:
-            raise ValueError(
-                "GM_ANTHROPIC_API_KEY is empty. Set it, or pass `--provider ollama`; "
-                "this will not quietly run on a different model than you asked for."
-            )
-        return AnthropicClient(
-            anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key),
-            models=tier_models(settings),
-            timeout_s=settings.llm_timeout_s,
+    if provider == "anthropic" and not settings.anthropic_api_key:
+        raise ValueError(
+            "GM_ANTHROPIC_API_KEY is empty. Set it, or pass `--provider ollama`; "
+            "this will not quietly run on a different model than you asked for."
         )
-    raise ValueError(f"unknown provider {provider!r}; expected 'ollama' or 'anthropic'")
+    return settings.model_copy(update={"llm_provider": provider})
 
 
-def _deps(llm: LLMClient, pool: asyncpg.Pool, tenant: TenantId, settings: Any) -> Deps:
+def _deps(llm: LLMClient, pool: asyncpg.Pool, tenant: TenantId, settings: Settings) -> Deps:
     """Compose a real pipeline.
 
     `NetworkXGraphStore` rather than Neo4j (S7.1 is unbuilt) and `HashEmbedder`

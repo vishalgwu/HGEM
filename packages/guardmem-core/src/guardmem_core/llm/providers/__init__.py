@@ -18,12 +18,18 @@ the audit record has to say which one served a call rather than flatten them.
 `MEMORY_ENGINE.md` §3.1's entropy, and it is worth reading before any AUROC is
 quoted.
 
-**Constructed nowhere in this package.** Every adapter takes an already-built
-transport, because `RULES.md` §2.2 puts client creation in lifespan - one per
-provider, never per request. `common.tier_models` and `selection.build_llm` are
-the only things that read `Settings`, and both are called once, by a composition
-root. `build_llm` chooses *which* adapter from configuration; it still builds no
-transport.
+**No adapter constructs a transport.** Every one takes an already-built client,
+because `RULES.md` §2.2 puts client creation in lifespan - one per provider,
+never per request. `common.tier_models` and `selection.build_llm` are the only
+things that read `Settings`, and both are called once, by a composition root.
+
+`build_llm` chooses *which* adapter from configuration, and for the two SDK
+providers it has to build the client to do it: `anthropic.AsyncAnthropic` and
+`openai.AsyncOpenAI` each own an `httpx.AsyncClient` internally and there is no
+way to select one without constructing it. This paragraph used to claim it
+"still builds no transport", which was wrong, and the consequence was a
+transport nothing could close - so `build_llm` is an **async context manager**
+and the composition root holds the lifetime after all. See its module docstring.
 
 S9.2 routes between these, S9.3 adds the breaker and the cross-provider
 fallback `ARCHITECTURE.md` §4 requires, and S10.1 turns `cost_usd` into a

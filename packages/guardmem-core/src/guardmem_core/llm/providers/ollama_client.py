@@ -35,7 +35,6 @@ pretending the rest are immutable - see it for what that costs.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Final
 
@@ -43,7 +42,12 @@ import httpx
 
 from guardmem_core.errors import ProviderUnavailable
 from guardmem_core.llm.base import LLMResponse
-from guardmem_core.llm.providers.common import TierModels, elapsed_ms, require_samples
+from guardmem_core.llm.providers.common import (
+    TierModels,
+    draw_samples,
+    elapsed_ms,
+    require_samples,
+)
 from guardmem_core.llm.providers.pricing import estimate_cost
 
 if TYPE_CHECKING:
@@ -160,11 +164,15 @@ class OllamaClient:
         require_samples(n)
         model = self._models[tier]
         started = time.perf_counter()
-        replies = await asyncio.gather(
-            *(
-                self._one(model, prompt=prompt, schema=schema, temperature=temperature, offset=i)
-                for i in range(n)
-            )
+        # `offset` is the sample index, which is what varies the seed per draw -
+        # see `_one`. `draw_samples` supplies it and cancels the siblings when
+        # one fails, which for a local server is queue time rather than money
+        # but is the same orphaned-task rule from `RULES.md` §2.2.
+        replies = await draw_samples(
+            lambda index: self._one(
+                model, prompt=prompt, schema=schema, temperature=temperature, offset=index
+            ),
+            n,
         )
         return self._response(model, replies, temperature=temperature, elapsed=elapsed_ms(started))
 

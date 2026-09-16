@@ -180,8 +180,17 @@ class OutboxRelay:
         """Take a bounded batch off the queue, recording the attempt.
 
         Returns:
-            The claimed events, oldest first. Empty when nothing is pending or
-            everything pending has exhausted `max_attempts`.
+            The claimed events. Empty when nothing is pending or everything
+            pending has exhausted `max_attempts`.
+
+            **In no particular order.** `CLAIM_OUTBOX` orders by `created_at`
+            inside the CTE, which selects *which* rows are claimed - the oldest
+            pending ones - but the `RETURNING` of the `UPDATE` that follows
+            carries no ordering guarantee, and Postgres does not promise to
+            preserve the subquery's. This said "oldest first", which is true of
+            the selection and not of the result, and the distinction matters
+            only to whoever next wants dispatch order to mean something: it will
+            need its own `ORDER BY`, not this docstring.
 
         Raises:
             StoreUnavailable: Postgres is unreachable.

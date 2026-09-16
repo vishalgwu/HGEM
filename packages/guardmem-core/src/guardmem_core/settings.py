@@ -9,11 +9,20 @@ in development. **`.env.example` is the inventory** - every variable, grouped,
 each annotated with the step that turns it on - and the thresholds are owned by
 `MEMORY_ENGINE.md` §3.4, which is the spec of record for what they mean.
 
-That inventory used to be cited as `BUILD_NOTEBOOK.md` Appendix B, which does
-not exist and never did; the notebook has no appendices. `.env.example` is where
-the fact actually lives, it is checked against this class by
-`tests/unit/test_settings.py`, and a reader following the old pointer found
-nothing.
+`BUILD_NOTEBOOK.md` Appendix B is the *other* list, and a correction here once
+claimed it "does not exist and never did; the notebook has no appendices". That
+was wrong on both counts: the notebook carries appendices A-G, B is "Environment
+variables (complete list)", and `tests/unit/test_docs_integrity.py` asserts all
+seven are present precisely because that claim had been made and needed to be
+checkable rather than arguable. The pointer was correct and was repointed away
+from a section that was there all along.
+
+`.env.example` is still the inventory of record, for a reason that survives the
+correction: it is checked against this class by `tests/unit/test_settings.py`, so
+a field added here and not there fails CI. Appendix B is a plan-time table that
+nothing checks - it lists `GM_GRAPH_BACKEND` and `GM_BUDGET_DAILY_USD`, which are
+not fields yet - so read it as the roadmap it is and `.env.example` as the state
+of the world.
 
 **`extra="forbid"` is the sharp edge.** Any key in `.env` that is not declared
 below raises at construction - including keys with no `GM_` prefix. That is
@@ -38,7 +47,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyUrl, Field, PostgresDsn, RedisDsn, model_validator
+from pydantic import AnyUrl, Field, PostgresDsn, RedisDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from guardmem_core.schemas.verdict import Thresholds
@@ -92,17 +101,40 @@ class Settings(BaseSettings):
     # precise message instead of at the first connection attempt, halfway
     # through a request. Verified that each round-trips to the exact input
     # string, so nothing downstream sees a normalised variant.
-    database_url: PostgresDsn
-    redis_url: RedisDsn
+    #
+    # `repr=False` on the two that carry credentials. A DSN embeds its password
+    # in its userinfo, between the scheme and the host, and `repr(settings)`
+    # printed the whole DSN in clear - which reaches a log the moment anything
+    # renders this object: a debugger, a crash reporter that captures frame
+    # locals, `--showlocals`.
+    # `SecretStr` is the usual answer and is not available here without giving
+    # up `PostgresDsn`'s validation, which is the thing that makes a typo fail at
+    # startup instead of mid-request; excluding the field from `__repr__` keeps
+    # both. It does not redact `model_dump()`, and it must not - Alembic and
+    # `libpq_dsn` need the real string - so the rule this leaves behind is that
+    # these two are never interpolated into a message.
+    database_url: PostgresDsn = Field(repr=False)
+    redis_url: RedisDsn = Field(repr=False)
     neo4j_uri: AnyUrl
     neo4j_user: str
-    neo4j_password: str
+    # `SecretStr`, so it is `**********` in any repr or f-string and has to be
+    # asked for by name. Nothing in this repository reads it yet - S7.1's Neo4j
+    # backend is the first - which is exactly when to get the type right.
+    neo4j_password: SecretStr
 
     # --- model providers ----------------------------------------------------
     # Optional: the pipeline only needs these from S2.2 and S9.1 respectively,
-    # and an empty string is the honest representation of "not configured yet".
-    anthropic_api_key: str = ""
-    openai_api_key: str = ""
+    # and an empty secret is the honest representation of "not configured yet".
+    #
+    # `SecretStr` rather than `str`, for the reason above: `repr(settings)`
+    # printed both keys in clear. Note that the emptiness checks in
+    # `providers/selection.py` still read naturally - pydantic gives `Secret` a
+    # `__bool__` over the wrapped value, so `if not settings.anthropic_api_key`
+    # remains false-for-unset rather than silently always-true, which would have
+    # disabled the refusal that keeps a blank key from falling back to a local
+    # model. Verified against pydantic 2.13.
+    anthropic_api_key: SecretStr = SecretStr("")
+    openai_api_key: SecretStr = SecretStr("")
 
     # Which adapter the composition roots build. S9.2 replaces this with a
     # *router* that picks per tier and falls back across providers; until then a

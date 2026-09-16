@@ -4425,6 +4425,108 @@ It is the Day-7 gate, and for the first time every piece behind it exists.
 
 ---
 
+## 2026-09-16 — a hardening pass over what was already there
+
+No feature. An audit of the whole tree for the failures the gates cannot see,
+which turned out to be four leaks and one silently-wrong config read.
+
+**Shipped**
+
+- **The dev stack was published on `0.0.0.0`.** All six port mappings used
+  Compose's short `HOST:CONTAINER` form, which binds every interface. Postgres
+  is `guardmem`/`guardmem`, Neo4j is `neo4j`/`guardmem123`, and Redis has no
+  password at all — fine for a throwaway local stack, and on a shared network an
+  unauthenticated Redis is a remote code execution primitive, not an exposed
+  cache. All six now bind `127.0.0.1`; the `${VAR:-default}` override is the
+  host *port* and still works. `test_every_published_port_is_bound_to_loopback`
+  makes it a rule rather than a comment.
+- **`build_llm` built two transports and closed neither.** The Anthropic and
+  OpenAI SDK clients each own an `httpx.AsyncClient`, and `build_llm` returned a
+  bare adapter, so nothing in the process held a reference that could close it.
+  It is now an `@asynccontextmanager` and the composition root owns the
+  lifetime. `providers/__init__.py` said "it still builds no transport" for
+  eight steps; that sentence is corrected rather than deleted.
+- **The lifespan is an `AsyncExitStack`.** The old `try/finally` registered each
+  resource only once the *next* had been built, so a pool that opened before a
+  failing `httpx.AsyncClient(...)` leaked. Registration now happens the moment a
+  resource exists, and unwinding is LIFO for free.
+- **Both adapters fanned out with bare `gather`, which `RULES.md` §2.2 forbids by
+  name.** `gather` propagates the first failure and leaves its siblings running,
+  so a draw that failed on sample 2 of 5 still issued, paid for and discarded
+  the other four — against a provider that had just said it was in trouble.
+  `common.draw_samples` wraps a `TaskGroup` and unwraps the `ExceptionGroup` to
+  its first leaf, so `ProviderUnavailable` still arrives as itself and no caller
+  changes.
+- **`repr(Settings)` printed every credential in clear** — both DSN passwords,
+  the Neo4j password and both API keys. Measured, not assumed. `SecretStr` on
+  the three credentials, `Field(repr=False)` on the two DSNs (`SecretStr` there
+  would cost `PostgresDsn`'s validation, which is what makes a typo fail at
+  startup instead of mid-request).
+- **`checkpoint_b_generate` silently ignored `.env`.** It read `GM_OLLAMA_URL`
+  and `GM_OLLAMA_MODEL` with `os.environ.get`, and `pydantic-settings` reads
+  `.env` *directly* without exporting it to `os.environ`. So a model set in
+  `.env` — where `.env.example` says to set it — configured the whole process
+  and was ignored by the one script whose output is the gate's AUROC. It was
+  also a second composition root, which `selection.build_llm`'s own docstring
+  says must not exist. Both gone: `_provider_settings` points `Settings` at
+  `--provider` and hands it to `build_llm`.
+
+**What broke / what I learned**
+
+- **`min(n, require_samples(n))` cannot clamp.** `require_samples` returns `n`
+  or raises, so the expression was `min(n, n)`. It read as a bound for eight
+  steps and was never one.
+- **The appendix correction was itself the false claim.** `settings.py` said
+  `BUILD_NOTEBOOK.md` Appendix B "does not exist and never did; the notebook has
+  no appendices". The notebook has A–G, B is "Environment variables (complete
+  list)" at line 3707, `PHASES_AND_ROADMAP.md` already recorded the correction
+  as reverted on 2026-09-15, and `test_docs_integrity.py` asserts all seven are
+  present. `settings.py` was the one file still carrying the retracted version.
+  Same lesson as last time, one layer up: the *correction* was the pointer
+  nobody re-read.
+- **`SecretStr` could have disabled the provider refusal invisibly.** `if not
+  settings.anthropic_api_key` is what stops a blank key falling back to a local
+  model, and an object without `__bool__` is always truthy. pydantic defines it
+  over the wrapped value — checked, and now pinned by a test, because the
+  failure mode is a silent pass.
+- **Fixing the compose file broke the guard that should have caught it.**
+  `test_published_ports_do_not_collide_within_a_stack` read segment 0 as the
+  host port, so the new `127.0.0.1:` prefix produced five phantom collisions.
+  The parser now resolves `${VAR:-default}` before splitting and counts the
+  container port from the right.
+- **Nothing was deleted, and that is the result.** Unused imports, dead code,
+  layering and formatting are already machine-enforced every commit, so a pass
+  by hand finds what the linters find: nothing. The dependency manifests were
+  left alone deliberately —
+  `test_every_unused_core_dependency_is_documented_with_its_step` makes an
+  unused dependency a documented roadmap entry, and pruning would have deleted
+  the roadmap.
+
+**Still open**
+
+- **`create_pool` passes no `timeout` or `command_timeout`.** Statements are
+  covered — every store call passes `timeout=store_timeout_s` — but
+  `pool.acquire()` can block forever once all ten connections are held, so a
+  saturated server hangs rather than erroring. `RULES.md` §2.2 makes that a CI
+  failure in principle. Not changed here because the value is an operational
+  decision: adopting `store_timeout_s` (5s) converts queueing into failures
+  under burst, and there is no load test to calibrate against. Probably an ADR.
+- **The integration suite did not run** — no Docker on this machine, so the
+  `lifespan()` rewrite is unconfirmed end to end. Verified instead by
+  `mypy --strict`, a direct test of `build_llm`'s close semantics, and a
+  fake-backed check of exit ordering including the failure path. `make test-all`
+  on a machine with Docker before trusting it.
+- Everything from the previous entry: the merge path, ADR-0011, S6.3, S18.1,
+  and CHECKPOINT B's transcripts and labels.
+
+**Tomorrow's first step**
+
+**S6.3**, unchanged — connect Claude Desktop and write a fact. Nothing here was
+meant to move the build forward; it was meant to make sure the parts already
+built do not leak, hang or print a password.
+
+---
+
 ---
 
 ---

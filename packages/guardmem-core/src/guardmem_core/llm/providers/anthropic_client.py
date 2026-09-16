@@ -36,7 +36,6 @@ job, with numbers.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import TYPE_CHECKING, Final
 
@@ -46,6 +45,7 @@ from guardmem_core.errors import BudgetExceeded, ProviderUnavailable
 from guardmem_core.llm.base import LLMResponse
 from guardmem_core.llm.providers.common import (
     TierModels,
+    draw_samples,
     elapsed_ms,
     require_samples,
 )
@@ -176,19 +176,19 @@ class AnthropicClient:
         Raises:
             ProviderUnavailable, BudgetExceeded: as `complete`.
 
-        `gather` without `return_exceptions`, so one failed draw fails the whole
-        call. That is the right shape *here* and the opposite of
-        `pipeline/orchestrator.py`'s choice, for a reason worth stating: the
-        orchestrator fans out over independent candidates, where nineteen good
-        results should survive one bad one, while these `n` samples are one
-        measurement. `MEMORY_ENGINE.md` §3.1 normalises entropy by `log K`, so
-        returning K-1 samples for a K-sample draw would not degrade the score,
-        it would silently compute a different one.
+        One failed draw fails the whole call, and cancels the rest. That is the
+        right shape *here* and the opposite of `pipeline/orchestrator.py`'s
+        choice, for a reason worth stating: the orchestrator fans out over
+        independent candidates, where nineteen good results should survive one
+        bad one, while these `n` samples are one measurement. `draw_samples`
+        carries the rest of the argument, including why cancelling matters when
+        every sibling is a billable request.
+
+        The index `draw_samples` passes is unused: the Messages API has no
+        per-sample parameter to vary, which is the same absence that makes
+        `LLMResponse.temperature` and `.seed` both `None` here.
         """
-        bounded = min(n, require_samples(n))
-        return await asyncio.gather(
-            *(self._one(model, prompt=prompt, schema=schema) for _ in range(bounded))
-        )
+        return await draw_samples(lambda _index: self._one(model, prompt=prompt, schema=schema), n)
 
     async def _one(
         self, model: str, *, prompt: str, schema: type[BaseModel] | None
