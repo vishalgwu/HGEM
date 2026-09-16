@@ -278,7 +278,19 @@ risk scorer can use — without it `MEMORY_ENGINE.md` §3.3's `graph_fanout`
 feature is a constant and the blast-radius half of the decision matrix cannot be
 evaluated at all. It is the dev and single-tenant backend, and it enforces that:
 the `GraphStore` protocol gives its read methods no tenant to filter on, so it
-refuses to hold two. Neo4j swaps in at S7.1 behind the same three methods.
+refuses to hold two.
+
+**S7.1 swaps Neo4j in behind the same three methods**, on
+`GM_GRAPH_BACKEND=neo4j`. It is the durable backend and the multi-tenant one,
+and those two facts are connected: it answers the tenancy question by *scoping*
+where NetworkX answers it by refusing. Every read resolves the tenant from the
+node it starts at and constrains the edges it counts or follows to it — which
+matters because object nodes are shared by construction, so without the filter a
+two-hop walk from one tenant's patient could pass through `"penicillin"` and
+return another tenant's edges. Sixteen behavioural assertions live in one
+contract class and run against all three implementations — the fake, NetworkX
+and Neo4j — so "the backend is an operator decision" is checked rather than
+claimed.
 
 S3.5 is the first thing that can say what a predicate *means*. The clinical
 starter pack declares fifteen predicates over six entity types, and each one

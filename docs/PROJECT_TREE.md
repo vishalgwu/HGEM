@@ -166,7 +166,14 @@ guardmem-ai/
 │   │       │   │   └── qdrant_store.py
 │   │       │   ├── graph/
 │   │       │   │   ├── base.py          # GraphStore Protocol (S1.7)
-│   │       │   │   ├── neo4j_store.py
+│   │       │   │   ├── keys.py          # S7.1; the one piece of the graph model both
+│   │       │   │   │                    #   backends must compute identically
+│   │       │   │   ├── cypher.py        # S7.1; the statements + the schema, apart from
+│   │       │   │   │                    #   the control flow, as queries.py is
+│   │       │   │   ├── selection.py     # S7.1; GM_GRAPH_BACKEND. An async CM - the
+│   │       │   │   │                    #   driver owns a pool and something must close it
+│   │       │   │   ├── neo4j_store.py   # S7.1; durable, MULTI-tenant - reads are scoped
+│   │       │   │   │                    #   to the tenant of the node they start at
 │   │       │   │   └── networkx_store.py   # S3.4; dev / single-tenant fallback -
 │   │       │   │                        #   MultiDiGraph keyed by assertion_id, and the
 │   │       │   │                        #   single-tenant half is enforced, not assumed

@@ -336,12 +336,21 @@ def _provider_settings(provider: str, settings: Settings) -> Settings:
 def _deps(llm: LLMClient, pool: asyncpg.Pool, tenant: TenantId, settings: Settings) -> Deps:
     """Compose a real pipeline.
 
-    `NetworkXGraphStore` rather than Neo4j (S7.1 is unbuilt) and `HashEmbedder`
-    rather than a real embedding model, and both matter for reading the result:
-    the graph is in-process so `graph_fanout` sees only what this run wrote, and
-    hash vectors model no semantics so `novelty` and incumbent retrieval are
-    near-noise. Neither feeds `C` - they feed `R` - so the gate's own number is
-    unaffected, but a diagnostic over `R` from this corpus would not mean much.
+    `NetworkXGraphStore` and `HashEmbedder` rather than the real things, and both
+    matter for reading the result: the graph is in-process so `graph_fanout` sees
+    only what this run wrote, and hash vectors model no semantics so `novelty`
+    and incumbent retrieval are near-noise. Neither feeds `C` - they feed `R` -
+    so the gate's own number is unaffected, but a diagnostic over `R` from this
+    corpus would not mean much.
+
+    **S7.1 built the Neo4j backend and this deliberately does not use it.** The
+    line above used to say "S7.1 is unbuilt", which was the whole reason; the
+    reason now is better. A durable graph would let run N+1 see run N's edges,
+    so `graph_fanout` would drift between two runs of the same corpus and two
+    AUROCs measured a week apart would not be comparable. `build_graph` is the
+    right call for a server and the wrong one for a benchmark, and a harness
+    whose inputs move underneath it is measuring the wrong thing. Naming the
+    class here is the deliberate opt-out.
     """
     embedder = HashEmbedder()
     return Deps(

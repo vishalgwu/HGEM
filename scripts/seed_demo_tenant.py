@@ -42,7 +42,7 @@ import asyncpg
 
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.entities import derive_entity_id
-from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
+from guardmem_core.memory.graph.selection import build_graph
 from guardmem_core.memory.relay import OutboxRelay
 from guardmem_core.memory.router import StoreRouter
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
@@ -53,7 +53,7 @@ from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.ontology import PredicateSpec, load_ontology
 from guardmem_core.schemas.receipt import Provenance
 from guardmem_core.schemas.turn import Turn
-from guardmem_core.settings import get_settings
+from guardmem_core.settings import Settings, get_settings
 from guardmem_core.types import AssertionId, TenantId, TraceId
 
 # A sibling module, resolved because `python scripts/seed_demo_tenant.py` puts
@@ -237,6 +237,41 @@ async def supersede_the_moved_facts(store: PgVectorStore) -> int:
     return retired
 
 
+async def drain_the_outbox(pool: asyncpg.Pool, settings: Settings) -> int:
+    """Run the relay until nothing is left to claim, and report what landed.
+
+    Args:
+        pool: The process pool, already open.
+        settings: The configuration; `graph_backend` decides where the graph
+            half of each dual write goes.
+
+    Returns:
+        How many events completed this run. Zero on a re-run, which is the
+        idempotence `seed` prints and the reason it is worth returning at all.
+
+    Raises:
+        StoreUnavailable: Postgres is unreachable, or the configured graph is.
+
+    **The configured backend, not a hard-coded one.** Before S7.1 this named
+    `NetworkXGraphStore` inline, which was fine while that was the only graph
+    there was - and would have become a quiet bug the moment somebody set
+    `GM_GRAPH_BACKEND=neo4j`: the relay would flip `visible` and dispatch every
+    event into an in-process graph that dies with this script. Postgres would be
+    seeded, the graph an operator actually configured would be empty, and there
+    would be no undispatched events left to rebuild it from.
+
+    Its own function because S7.1 made it one - a graph whose lifetime has to be
+    opened and closed is a unit of work rather than four lines in the middle of
+    another, and `seed` went over `RULES.md` §2.4's 50-line body cap saying so.
+    """
+    async with build_graph(settings) as graph:
+        relay = OutboxRelay(pool, graph.store, timeout_s=settings.store_timeout_s)
+        released = 0
+        while (run := await relay.run_once()).claimed:
+            released += run.dispatched
+    return released
+
+
 async def seed() -> None:
     """Write the demo tenant, release it, and report what is there.
 
@@ -278,15 +313,13 @@ async def seed() -> None:
             pool, HashEmbedder(), tenant_id=tenant, timeout_s=settings.store_timeout_s
         )
         await StoreRouter(store, tenant_id=tenant).write(assertions)
-        relay = OutboxRelay(pool, NetworkXGraphStore(), timeout_s=settings.store_timeout_s)
-        released = 0
-        while (run := await relay.run_once()).claimed:
-            released += run.dispatched
+        released = await drain_the_outbox(pool, settings)
         retired = await supersede_the_moved_facts(store)
     finally:
         await pool.close()
 
     print(f"tenant      {TENANT_SLUG} ({tenant})")
+    print(f"graph       {settings.graph_backend}")
     print(f"turns       {len(TRANSCRIPT)} intake + {len(MOVE_CALL)} follow-up")
     print(f"assertions  {len(assertions)} submitted, {released} released this run")
     print(f"superseded  {retired} this run")

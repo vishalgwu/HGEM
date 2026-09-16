@@ -55,7 +55,7 @@ import httpx
 from pydantic import ValidationError
 
 from guardmem_core.llm.providers import build_llm
-from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
+from guardmem_core.memory.graph.selection import build_graph
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.schemas import load_ontology
@@ -111,11 +111,12 @@ class ServerState:
             `PgVectorStore` binds a tenant, and the tenant comes from an
             authenticated request - so the pool is what lives here and the store
             is not.
-        graph: The entity graph. Typed as the `GraphStore` protocol, because
-            S7.1 swaps Neo4j in behind it by configuration; today `lifespan`
-            binds the NetworkX one, which is in-process and therefore lost on
-            restart - the outbox is what rebuilds it, and S7.1's backend is the
-            first durable one.
+        graph: The entity graph. Typed as the `GraphStore` protocol, and since
+            S7.1 the concrete backend is `GM_GRAPH_BACKEND`'s to choose -
+            `graph/selection.py` builds it and this never names a class. On
+            `networkx` it is in-process and lost on restart, and the outbox is
+            what rebuilds it; on `neo4j` it survives. `graph_durable` below says
+            which, because nothing downstream should have to ask.
         embedder: Write-side embedding, typed as the `Embedder` protocol for
             the reason `graph` is. **The `HashEmbedder` bound today models no
             semantics** -
@@ -142,10 +143,11 @@ class ServerState:
             `GM_ANTHROPIC_API_KEY` is a well-formed environment with a tool
             unavailable, not a broken process; `deps_for` refuses the two write
             tools by name and the read tools go on working.
-        graph_durable: Whether `graph` survives this process. **False today**,
-            and `memory.get_entity` reports it so an empty neighbour list is
-            readable as "this process has no graph" rather than "this entity is
-            isolated" - which matters, because that list feeds
+        graph_durable: Whether `graph` survives this process. **Since S7.1 this
+            follows `GM_GRAPH_BACKEND`** - false on `networkx`, true on `neo4j`
+            - and `memory.get_entity` reports it so an empty neighbour list is
+            readable as "this process has no durable graph" rather than "this
+            entity is isolated", which matters because that list feeds
             `MEMORY_ENGINE.md` §3.3's blast-radius score.
 
             A flag rather than an `isinstance` check at the point of use, and
@@ -153,7 +155,8 @@ class ServerState:
             which backend it chose; a tool asking `isinstance(graph,
             NetworkXGraphStore)` has to name a concrete class, gets the answer
             wrong for any third implementation, and quietly reports a *test
-            double* as durable. S7.1 sets this true where it binds Neo4j.
+            double* as durable. `build_graph` answers instead, in a
+            `BoundGraph`, so the fact travels with the thing it is about.
 
     Frozen, because none of it may be swapped while a session is open: a handler
     that saw a different pool halfway through a request would be reading a
@@ -266,6 +269,10 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
         # `async with` here, and an unused client on a mock transport costs
         # nothing.
         http = await stack.enter_async_context(httpx.AsyncClient(base_url=settings.ollama_url))
+        # S7.1's swap. Entered on the stack because the Neo4j arm opens a driver
+        # that owns a connection pool, and the NetworkX arm opens nothing - the
+        # caller does not have to know which, which is the point of the manager.
+        graph = await stack.enter_async_context(build_graph(settings))
         llm = await _llm_or_none(stack, settings, http)
         _LOGGER.info(
             "guardmem-mcp started",
@@ -273,20 +280,23 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
                 "env": settings.env,
                 "ontology": DEFAULT_ONTOLOGY,
                 "llm_provider": settings.llm_provider,
+                "graph_backend": settings.graph_backend,
             },
         )
         yield ServerState(
             settings=settings,
             pool=pool,
-            graph=NetworkXGraphStore(),
+            graph=graph.store,
             embedder=HashEmbedder(),
             ontology=load_ontology(DEFAULT_ONTOLOGY),
             llm=llm,
-            # NetworkX holds the graph in memory, so it is empty in every new
-            # process and nothing repopulates it - the outbox rebuilds by
-            # replaying, and a seeded database has no undispatched events. S7.1
-            # binds Neo4j here and sets this true.
-            graph_durable=False,
+            # Reported by the thing that chose the backend, never inferred. On
+            # NetworkX this is false and the graph is empty in every new process
+            # - nothing repopulates it, because the outbox rebuilds by replaying
+            # and a seeded database has no undispatched events. On Neo4j it is
+            # true. `memory.get_entity` surfaces it so an empty neighbour list
+            # reads as "no durable graph" rather than "isolated entity".
+            graph_durable=graph.durable,
         )
 
 

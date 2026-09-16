@@ -44,6 +44,7 @@ pytest_plugins = (
     "fixtures.pgvector",
     "fixtures.outbox",
     "fixtures.seed",
+    "fixtures.neo4j",
     "fixtures.mcp_session",
 )
 

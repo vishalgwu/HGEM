@@ -341,21 +341,32 @@ forbidden_modules = ["fastapi", "starlette", "uvicorn", "mcp", "arq"]
 # the concrete class". A comment saying so is a suggestion; this fails `make
 # lint`.
 #
-# Both concrete stores and both of their drivers, not just NetworkX. The rule is
-# about the direction of the dependency, not about one backend: ARCHITECTURE.md
-# 2.4 makes a backend swap configuration rather than code, and that is only true
-# while the decision engine talks to VectorStore/GraphStore and never to what
-# implements them. `networkx` and `asyncpg` are listed as well because the leak
-# that matters is a pipeline module reaching for a driver directly, which would
-# satisfy a rule phrased only about the store modules.
+# EVERY concrete store and every one of their drivers, not just one backend. The
+# rule is about the direction of the dependency: ARCHITECTURE.md 2.4 makes a
+# backend swap configuration rather than code, and that is only true while the
+# decision engine talks to VectorStore/GraphStore and never to what implements
+# them. The drivers are listed as well because the leak that matters is a
+# pipeline module reaching for one directly, which would satisfy a rule phrased
+# only about the store modules.
+#
+# S7.1 added `neo4j_store` and the `neo4j` driver. Adding a backend means adding
+# two lines here, and forgetting them is the quiet failure this contract exists
+# to prevent - the rule would still pass, while the one thing it protects
+# (swapping a backend by configuration) had a new way to be broken.
+#
+# `selection.py` is NOT listed and must not be: it names every concrete class on
+# purpose, which is what a composition root is for. It lives in `memory.graph`,
+# not in `pipeline`, so this contract never sees it.
 [[tool.importlinter.contracts]]
 name = "the pipeline never imports a concrete store"
 type = "forbidden"
 source_modules = ["guardmem_core.pipeline"]
 forbidden_modules = [
   "guardmem_core.memory.graph.networkx_store",
+  "guardmem_core.memory.graph.neo4j_store",
   "guardmem_core.memory.vector.pgvector_store",
   "networkx",
+  "neo4j",
   "asyncpg",
 ]
 

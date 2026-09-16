@@ -122,6 +122,17 @@ class Settings(BaseSettings):
     # backend is the first - which is exactly when to get the type right.
     neo4j_password: SecretStr
 
+    # Which `GraphStore` the composition roots build. S7.1's flag, verbatim
+    # from the step: `GM_GRAPH_BACKEND=neo4j|networkx`.
+    #
+    # `networkx` is the default and stays the default. It needs no server, so a
+    # clone with only Postgres running still passes the unit suite and still
+    # serves `memory.get_entity` - and `ServerState.graph_durable` reports which
+    # one is bound, so nothing downstream has to guess. Neo4j is what makes the
+    # graph survive a restart; until a deployment needs that, the in-process one
+    # is the honest default rather than the lesser one.
+    graph_backend: Literal["networkx", "neo4j"] = "networkx"
+
     # --- model providers ----------------------------------------------------
     # Optional: the pipeline only needs these from S2.2 and S9.1 respectively,
     # and an empty secret is the honest representation of "not configured yet".
