@@ -31,12 +31,12 @@ import pytest
 from fixtures.assertions import TENANT, WHEN
 from fixtures.conflict import candidate
 from fixtures.decisions import conflict, risk
+from fixtures.mcp import settings
 from fixtures.providers import ollama_client, ollama_transport
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import OllamaClient
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.verdict import ConfidenceReport, Decision, DecisionRecord
-from guardmem_core.settings import Settings
 from scripts.checkpoint_b_generate import _client, _read_proposals, _row
 
 
@@ -194,21 +194,20 @@ class TestReadProposals:
 
 
 class TestProviderSelection:
-    def settings(self, **overrides: object) -> Settings:
-        base: dict[str, object] = {
-            "database_url": "postgresql+asyncpg://u:p@localhost:5432/d",
-            "model_fast": "claude-haiku-4-5",
-            "model_balanced": "claude-sonnet-5",
-            "model_frontier": "claude-opus-5",
-            "embed_model": "text-embedding-3-large",
-            "neo4j_uri": "bolt://localhost:7687",
-        }
-        return Settings.model_validate(base | overrides)
+    """Built with `fixtures.mcp.settings`, which passes `_env_file=None`.
+
+    **Not a hand-rolled `Settings`.** The first version of this class built one
+    from a literal dict and omitted `redis_url`, `neo4j_user` and
+    `neo4j_password` - which a developer's `.env` supplied silently and CI,
+    where `.env` is gitignored and absent, did not. Four tests passed locally
+    and failed on the runner. The shared builder's own docstring warns about
+    exactly this, and using it is the fix.
+    """
 
     def test_ollama_needs_no_credential(self) -> None:
         http = httpx.AsyncClient(base_url="http://ollama.test")
 
-        assert isinstance(_client("ollama", http, self.settings()), OllamaClient)
+        assert isinstance(_client("ollama", http, settings(anthropic_api_key="")), OllamaClient)
 
     def test_anthropic_without_a_key_refuses_rather_than_falling_back(self) -> None:
         """The sign-off has to name the provider, so a silent fallback to the
@@ -217,13 +216,13 @@ class TestProviderSelection:
         http = httpx.AsyncClient(base_url="http://ollama.test")
 
         with pytest.raises(ValueError, match="GM_ANTHROPIC_API_KEY is empty"):
-            _client("anthropic", http, self.settings(anthropic_api_key=""))
+            _client("anthropic", http, settings(anthropic_api_key=""))
 
     def test_an_unknown_provider_names_what_it_expected(self) -> None:
         http = httpx.AsyncClient(base_url="http://ollama.test")
 
         with pytest.raises(ValueError, match="expected 'ollama' or 'anthropic'"):
-            _client("gpt", http, self.settings())
+            _client("gpt", http, settings(anthropic_api_key=""))
 
     async def test_the_local_tier_ladder_collapses_to_one_model(self) -> None:
         """Worth pinning because it is a caveat on any number this corpus
@@ -237,7 +236,7 @@ class TestProviderSelection:
         """
         seen: list[dict[str, Any]] = []
         http = ollama_client(ollama_transport(seen=seen))
-        client = _client("ollama", http, self.settings())
+        client = _client("ollama", http, settings(anthropic_api_key=""))
         try:
             for tier in Tier:
                 await client.complete(prompt="p", tier=tier)
