@@ -39,12 +39,29 @@ tools.
   timestamp; the relay then made it visible and `memory.search` returned it with its
   provenance. `MCP_INTEGRATION.md` §1.1 has the run. The box stays unticked because that
   was a programmatic MCP client, not the desktop app's own UI.)
-- [ ] A contradictory second fact supersedes the first, with tombstone and audit event
-- [ ] `replay_trace.py` reproduces any decision deterministically
-- [ ] Zero unsourced writes possible (property test + DB constraint both enforce it)
+- [x] A contradictory second fact supersedes the first, with tombstone and audit event
+  <br>(`tests/integration/test_applier.py::TestSupersession::test_it_retires_the_incumbent_and_records_both`,
+  against real Postgres, with `test_pgvector_store.py` on recoverability. Ticked 2026-09-16, S7.4.)
+- [x] `replay_trace.py` reproduces any decision deterministically
+  <br>(Five integration tests over a real hash chain, including that a *changed threshold* is
+  reported as a diff naming both decisions rather than as a bare mismatch. Ticked 2026-09-16.)
+- [x] Zero unsourced writes possible (property test + DB constraint both enforce it)
+  <br>(Property test I1 at the pipeline edge, and a **deferred constraint trigger** in
+  `0001_initial` that fires at COMMIT — so the rule holds against a direct `INSERT`, not only
+  against the pipeline. `test_migration_invariants.py::test_an_assertion_without_provenance_cannot_commit`
+  is the second half. Ticked 2026-09-16.)
 - [ ] Checkpoint B signed off: AUROC of `C` against 200 human-labelled candidates ≥ 0.80 (0.75–0.80 proceeds as MARGINAL and is recorded)
-- [ ] `guardmem-core` coverage ≥ 90% (RULES §5 release gate; 85% is the Week-1 interim floor)
-- [ ] `make lint typecheck test` green
+  <br>(**The only gate not close, and the critical path.** The harness is complete and runs free
+  on a local model; what is missing is 200 transcripts and a human labelling them. No corpus
+  file exists in this repository. S7.4's retro records why a number produced today would be
+  weakly informative anyway — `HashEmbedder` models no semantics, and Anthropic has no
+  `temperature` parameter to draw §1.2's spread with.)
+- [x] `guardmem-core` coverage ≥ 90% (RULES §5 release gate; 85% is the Week-1 interim floor)
+  <br>(100.00% at S7.2 — 0 missed statements and 0 partial branches over 2664 statements and
+  452 branches. Ticked 2026-09-16.)
+- [x] `make lint typecheck test` green
+  <br>(ruff, ruff format over 221 files, import-linter 3/3, `mypy --strict` over 219 files, and
+  1839 passing against real Postgres and real Neo4j. Ticked 2026-09-16.)
 
 **Risk:** NLI quality on typed/short objects. Mitigation: hybrid — cross-encoder for prose,
 deterministic comparators for coded/numeric values, LLM judge only in the ambiguous band.

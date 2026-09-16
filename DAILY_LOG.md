@@ -5012,6 +5012,111 @@ interesting half of the step was the one S6.2 deferred *to* it by name.
 
 ---
 
+## 2026-09-16 — S7.4: week 1 retro
+
+    "Answer honestly: does the scoring separate good from bad?"
+
+**No. Not "yes" and not "no" - we do not know, and that is the single most
+important fact about week one.**
+
+CHECKPOINT B has never run. There is no labelled corpus anywhere in this
+repository - `find . -name '*.jsonl'` returns nothing. The gate is an AUROC of
+`C` against 200 human-labelled candidates, and every part of that sentence
+exists except the labels: `checkpoint_b.py` scores a corpus,
+`checkpoint_b_generate.py` produces one against a real model for free on Ollama,
+`discrimination.py` computes the AUROC. What is missing is a human reading two
+hundred rows and writing `keep: true` or `keep: false`. Nothing in the codebase
+can do that, deliberately - "no model grading" is the rule that makes the number
+mean anything.
+
+So **every quality figure in `README.md` is a target, and it says so.** That was
+the right call at Day 0 and it is still the honest state at Day 7.
+
+**And a number produced today would be weakly informative anyway.** Four
+reasons, in descending order of how much they would distort it:
+
+1. **`HashEmbedder` models no semantics.** It hashes text, so incumbent
+   retrieval and the `novelty` feature are near-noise. `R` is therefore not
+   meaningfully measured at all, and a diagnostic over `R` from any corpus
+   generated today would not mean much. `C` is unaffected - novelty feeds risk,
+   not confidence - which is why the gate's own number would still be readable.
+2. **Anthropic has no `temperature` parameter.** `MEMORY_ENGINE.md` §1.2 draws
+   the canonical sample at 0 and the rest at 0.7, and §3.1 takes entropy over
+   that spread. On Claude neither number can be sent. What survives is real
+   variance - the model is not deterministic - but it is **the model's own
+   spread, not one this system tuned**, and an entropy measured on Claude and
+   one measured on `llama3.1:8b` are two different instruments. An AUROC that
+   mixed them would be comparing two things.
+3. **Temporal extraction is unbuilt.** `extract_memories/v1.md` asks for no
+   `valid_from`, so every candidate reaching §2.2 is undated and `_overlaps`
+   reads a missing date as unbounded-past. That is the conservative choice - an
+   undated candidate conflicts with any live incumbent, raising the conflict
+   rather than missing it - but it makes the temporal signal coarse, so the
+   conflict term is doing less work than §2.3 assumes.
+4. **A fixed seed once made every entropy sample identical.** That bug was
+   caught, but it is the precedent that matters: the scoring machinery can look
+   entirely healthy and be measuring nothing. It is the reason "run the code
+   against a real model before believing a score" is written down rather than
+   assumed.
+
+**What week one actually delivered.** 75 commits, 298 tracked files, ~44.8k
+lines of Python, and a pipeline that runs end to end on a local model - proven
+at S6.3 by a real governed write with a checkable span. Layers 1, 2 and 3 all
+exist and compose. The audit chain has a caller. The MCP surface has four tools,
+three resources, four prompts and now an enforced output contract. Two store
+backends behind one protocol.
+
+**Phase-1 exit gate, box by box, with the evidence rather than a claim.**
+
+| # | Gate | Status |
+|---|---|---|
+| 1 | Claude Desktop round trip with provenance | **Evidenced, unticked.** S6.3 wrote `preferred_pharmacy = "CVS #4021"`, span `[50,59)`, `C=0.8375`, `auto_write`, `DECISION`+`WRITE` at one timestamp; the relay made it visible and `memory.search` returned it. Driven by a *programmatic* MCP client - same binary, same pipes, same `env` handling. The click in the app is not mine to make. |
+| 2 | Contradiction supersedes, with tombstone and audit | **Met.** `test_applier.py::TestSupersession::test_it_retires_the_incumbent_and_records_both`, against real Postgres, plus `test_pgvector_store.py` on recoverability. |
+| 3 | `replay_trace.py` reproduces any decision | **Met.** Five integration tests over a real chain, including that a changed threshold is reported as a diff rather than a bare mismatch. It also could not connect to a correctly configured database until this week - the fixture had been feeding it the wrong DSN form. |
+| 4 | Zero unsourced writes possible | **Met, twice.** Property test I1 at the pipeline edge, and a **deferred constraint trigger** in `0001_initial` that fires at COMMIT - so the rule holds even against a direct `INSERT`. |
+| 5 | CHECKPOINT B signed off, AUROC ≥ 0.80 | **NOT DONE, and the only one that is not close.** See above. |
+| 6 | `guardmem-core` coverage ≥ 90% | **Met.** 100.00% - 0 missed statements, 0 partial branches, over 2664 statements and 452 branches. |
+| 7 | `make lint typecheck test` green | **Met.** ruff, ruff format over 221 files, import-linter 3/3, `mypy --strict` over 219 files, 1839 passed / 3 skipped. |
+
+Five met, one evidenced but honestly unticked, one genuinely blocked.
+
+**The three habits that paid for themselves this week**
+
+- **Reading the document rather than the pointer.** Four false claims shipped
+  earlier because a citation was trusted over the file it named, and the
+  *correction* to one of them was itself false - `settings.py` still said the
+  notebook "has no appendices" while a passing test asserted all seven.
+- **Making a rule fail a build.** Every rule that was only written down drifted:
+  the import contract silently stopped covering a third backend, the compose
+  file published five services on `0.0.0.0`, the seed named a graph backend
+  directly. Each was caught by a gate or by writing one.
+- **Mutation-checking a test before believing it.** Twice this week a test that
+  "passed" would have passed with the feature removed. "Nothing raises" is only
+  a test if something would.
+
+**The one thing I would do differently.** The corpus should have been started at
+Day 5, when the harness landed and was recorded as blocked. It is the only item
+on the exit gate that cannot be unblocked by writing code, and it has been the
+critical path since - every day since has added machinery on top of a number
+nobody has measured.
+
+**Still open**
+
+- **CHECKPOINT B: 200 transcripts, and a human labelling them.** The critical
+  path, and the whole of the Week-1 exit gate that remains.
+- The Claude Desktop click, which closes gate 1.
+- The merge path, ADR-0011 (`memory.commit`'s confidence), `memory.get_entity`'s
+  graph half now the graph is durable, S18.1's review queue, and the protocol's
+  missing tenant argument at S8.2.
+
+**Tomorrow's first step**
+
+Not week 2. **The corpus.** The notebook's own instruction for this gate is "do
+not start week 2 with a box unticked - every week after this one assumes all of
+it", and the box that is unticked is the one that says the product works.
+
+---
+
 ---
 
 ---
