@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Final
 import pytest
 
 from fixtures.decisions import confidence, conflict, risk, signals
-from guardmem_core.memory.vector.pool import tenant_transaction
+from guardmem_core.memory.vector.pool import sqlalchemy_dsn, tenant_transaction
 from guardmem_core.observability.audit_store import append_decision
 from guardmem_core.pipeline.l3_score import decide
 from guardmem_core.schemas.verdict import Decision, Thresholds
@@ -52,8 +52,18 @@ def _script_env(app_role_dsn: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[
     The script reads its DSN from settings rather than taking one, which is
     right for a command and awkward for a test - so the environment is set and
     the cache cleared, which is the same thing a fresh process does.
+
+    **`sqlalchemy_dsn`, because that is the form a real `GM_DATABASE_URL` has.**
+    `pool.libpq_dsn`'s docstring says the variable carries SQLAlchemy's
+    `postgresql+asyncpg://` marker for Alembic's benefit and that every asyncpg
+    call site has to convert - and `replay_trace.main` was the one that did not,
+    so it could not open a connection against any correctly configured
+    environment. This fixture handed it the container's *libpq* DSN, which
+    asyncpg accepts, so four tests exercised `main()` end to end and none of them
+    could see the bug. Feeding it the production form is what makes the
+    conversion a thing under test rather than a thing assumed.
     """
-    monkeypatch.setenv("GM_DATABASE_URL", app_role_dsn)
+    monkeypatch.setenv("GM_DATABASE_URL", sqlalchemy_dsn(app_role_dsn))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

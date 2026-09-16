@@ -53,7 +53,10 @@ guardmem-ai/
 │   │   ├── 0007-provenance-records-its-span-alignment.md
 │   │   ├── 0008-entity-resolution-binds-not-matches.md
 │   │   ├── 0009-pii-class-and-irreversibility-are-ontology-fields.md
-│   │   └── 0010-the-applier-owns-one-postgres-transaction.md
+│   │   ├── 0010-the-applier-owns-one-postgres-transaction.md
+│   │   └── 0012-the-pool-bounds-the-wait-for-a-connection.md
+│   │                                     # 0011 is reserved for memory.commit's
+│   │                                     #   confidence - ADR-0010 points at it
 │   ├── runbooks/
 │   │   ├── incident-memory-poisoning.md
 │   │   ├── incident-hitl-queue-backlog.md

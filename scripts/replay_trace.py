@@ -46,7 +46,7 @@ import math
 import sys
 from typing import TYPE_CHECKING
 
-from guardmem_core.memory.vector.pool import create_pool, tenant_transaction
+from guardmem_core.memory.vector.pool import create_pool, libpq_dsn, tenant_transaction
 from guardmem_core.observability.audit_store import read_chain
 from guardmem_core.pipeline.l3_score import MutationType, OverrideSignals, decide
 from guardmem_core.schemas.receipt import SourceTier
@@ -185,7 +185,16 @@ async def main(argv: list[str] | None = None) -> int:
     """
     args = parse_args(argv)
     settings = get_settings()
-    pool = await create_pool(str(settings.database_url))
+    # `libpq_dsn`, not `str(...)`. `GM_DATABASE_URL` is specified to carry
+    # SQLAlchemy's `postgresql+asyncpg://` marker for Alembic, and asyncpg
+    # rejects it outright with `invalid DSN: scheme is expected to be either
+    # "postgresql" or "postgres"`. This line omitted the conversion, so this
+    # script could not open a connection against a correctly configured
+    # environment at all - and its integration test could not see that,
+    # because the fixture sets `GM_DATABASE_URL` to the testcontainer's
+    # *libpq* DSN, which asyncpg accepts. The fixture now uses the SQLAlchemy
+    # form, which is what a real deployment has.
+    pool = await create_pool(libpq_dsn(str(settings.database_url)))
     try:
         async with tenant_transaction(
             pool, TenantId(args.tenant), timeout_s=settings.store_timeout_s

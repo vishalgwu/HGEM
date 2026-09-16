@@ -200,7 +200,7 @@ class OutboxRelay:
         every tenant. The tenant arrives with each row and is applied from
         `_dispatch` onwards.
         """
-        async with transaction(self._pool) as connection:
+        async with transaction(self._pool, timeout_s=self._timeout_s) as connection:
             rows = await connection.fetch(
                 CLAIM_OUTBOX, self._max_attempts, self._batch_size, timeout=self._timeout_s
             )

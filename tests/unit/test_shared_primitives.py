@@ -23,10 +23,22 @@ coverage can see and neither of which would say *which* number was wrong.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import pytest
 
-from guardmem_core.memory.vector.pool import libpq_dsn, sqlalchemy_dsn
+from guardmem_core.errors import StoreUnavailable
+from guardmem_core.memory.vector.pool import (
+    libpq_dsn,
+    sqlalchemy_dsn,
+    tenant_transaction,
+    transaction,
+)
 from guardmem_core.schemas import ImpactLevel, SourceTier
+from guardmem_core.types import TenantId
+
+if TYPE_CHECKING:
+    import asyncpg
 
 LIBPQ = "postgresql://guardmem:guardmem@localhost:5433/guardmem"  # pragma: allowlist secret
 SQLALCHEMY = (
@@ -130,3 +142,110 @@ class TestTheDsnSpellings:
         odd = "postgresql://u:postgresql+asyncpg://@host:5432/db"  # pragma: allowlist secret
 
         assert libpq_dsn(odd) == odd
+
+
+class _ExhaustedPool:
+    """A pool whose `max_size` connections are all checked out.
+
+    Models asyncpg rather than reimplementing it. `Pool._acquire` awaits
+    `self._queue.get()` over `max_size` holders and wraps it in `wait_for` only
+    when a timeout is given, so the two behaviours worth pinning are: with a
+    timeout, exhaustion surfaces as `TimeoutError`; without one, the await never
+    returns and there is nothing for a test to observe. This fake raises, which
+    is the case the code has to handle.
+    """
+
+    def __init__(self, max_size: int = 10) -> None:
+        self.max_size = max_size
+        self.timeouts: list[float | None] = []
+
+    def get_max_size(self) -> int:
+        return self.max_size
+
+    def acquire(self, *, timeout: float | None = None) -> _ExhaustedAcquire:
+        self.timeouts.append(timeout)
+        return _ExhaustedAcquire()
+
+
+class _ExhaustedAcquire:
+    """What `Pool.acquire()` returns: a context manager, not a coroutine."""
+
+    async def __aenter__(self) -> object:
+        raise TimeoutError  # what `compat.wait_for` raises, carrying no message
+
+    async def __aexit__(self, *_: object) -> bool:
+        return False  # pragma: no cover - __aenter__ always raises
+
+
+def _pool(max_size: int = 10) -> asyncpg.Pool:
+    """The fake, typed as the real thing. `transaction` takes an `asyncpg.Pool`
+    and a structural stand-in cannot satisfy a concrete class under
+    `mypy --strict`, so this is the same `cast` the MCP tests use."""
+    return cast("asyncpg.Pool", _ExhaustedPool(max_size))
+
+
+class TestThePoolBoundsTheWaitForAConnection:
+    """ADR-0012. `acquire()` with no timeout waits forever.
+
+    The failure this prevents has no symptom to assert on directly - a hung
+    `await` produces no exception, no log line and no return - so what is pinned
+    here is the two observable consequences: that a bound is passed at all, and
+    that exceeding it is reported as exhaustion rather than as a dead database.
+    """
+
+    async def test_transaction_bounds_the_acquire(self) -> None:
+        """The bug was a missing argument, so this asserts the argument."""
+        pool = _ExhaustedPool()
+
+        with pytest.raises(StoreUnavailable):
+            async with transaction(cast("asyncpg.Pool", pool), timeout_s=2.5):
+                pass  # pragma: no cover - the acquire never yields
+
+        assert pool.timeouts == [2.5], (
+            "transaction() must pass its timeout to acquire(); without it asyncpg "
+            "awaits queue.get() with nothing bounding it and the process hangs."
+        )
+
+    async def test_tenant_transaction_bounds_it_too(self) -> None:
+        """It delegates to `transaction`, and delegating to the *unbounded*
+        helper is how every tenant-scoped call came to be unbounded despite
+        `tenant_transaction` having taken a `timeout_s` since S3.3."""
+        pool = _ExhaustedPool()
+
+        with pytest.raises(StoreUnavailable):
+            async with tenant_transaction(cast("asyncpg.Pool", pool), TenantId("t"), timeout_s=1.5):
+                pass  # pragma: no cover - the acquire never yields
+
+        assert pool.timeouts == [1.5]
+
+    async def test_exhaustion_is_reported_as_exhaustion(self) -> None:
+        """`TimeoutError` is a subclass of `OSError`.
+
+        So the generic `except (OSError, ...)` clause below it would catch this
+        first if the order were wrong, and `wait_for`'s instance carries no
+        message - the operator would get "postgres connection failed: " with
+        nothing after the colon, for an incident that is not a connection
+        failure. Exhaustion means "you are over capacity" and wants a different
+        first responder than "the database is gone".
+        """
+        with pytest.raises(StoreUnavailable) as caught:
+            async with transaction(_pool(max_size=7), timeout_s=0.5):
+                pass  # pragma: no cover - the acquire never yields
+
+        message = str(caught.value)
+        assert "0.5" in message, "the message must name the wait that was exceeded"
+        assert "7" in message, "the message must name max_size, which is the knob"
+        assert "postgres connection failed" not in message, (
+            "caught by the OSError branch - TimeoutError subclasses OSError, so "
+            "the specific clause has to come first"
+        )
+
+    async def test_exhaustion_stays_retryable(self) -> None:
+        """A full pool empties. `ARCHITECTURE.md` §4 degrades a store fault
+        toward human review rather than dropping the write, and that rests on
+        the error carrying the flag."""
+        with pytest.raises(StoreUnavailable) as caught:
+            async with transaction(_pool(), timeout_s=0.1):
+                pass  # pragma: no cover - the acquire never yields
+
+        assert caught.value.retryable is True
