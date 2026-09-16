@@ -467,13 +467,19 @@ driven end to end against a real Postgres and a real local model: one candidate
 in, one `HITL_REVIEW` out at `C = 0.837`, `R = 0.924`, with a real entity row
 written through the assertion's foreign key.
 
-What is still in the way is narrower and was found by trying it. **Extraction
-cannot run on Ollama**: `ExtractedFact.verbatim` carries `maxLength: 2000`, and
-llama.cpp's grammar compiler refuses the schema outright — bisected, and the
-same schema compiles once that one keyword is removed. So the local-model route
-to the gate needs a small change to the Ollama adapter (strip generation-only
-keywords from the grammar; the reply is still validated against the full schema
-by the caller), or an API key.
+One thing was in the way and is no longer, and it is worth recording because it
+was believed twice before it was measured. **Extraction could not run on
+Ollama.** `ExtractedFact.verbatim` carries `maxLength: 2000`, and Ollama
+compiles a JSON Schema into a grammar in which a bounded length becomes a
+repetition — repetitions of 2000 or more are refused outright, taking the whole
+schema with them. Bisected: 1999 compiles, 2000 does not. The adapter now strips
+the keywords the compiler cannot take before sending the grammar, and the reply
+is still validated against the full schema by the caller, so the cap moves from
+prevention to detection rather than being lost.
+
+**The whole pipeline now runs on a local model with no API key**, verified end
+to end: real extraction, real conflict adjudication, real entailment, real
+Postgres.
 
 Two further gaps are not dependencies. The harness has no `generate`
 subcommand, so nothing fills a corpus; and the seed transcript is forty turns
@@ -517,10 +523,10 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself**, and for the first time nothing
-architectural is in front of it — no missing dependency, no undecided design.
-What remains is one adapter fix or an API key, a corpus generator, a wider
-transcript, and a labelling session.
+The next step is **Checkpoint B itself**, and for the first time nothing is in
+front of it but the measurement — no missing dependency, no undecided design, no
+credential. What remains is a corpus generator, a wider transcript, and a
+labelling session.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

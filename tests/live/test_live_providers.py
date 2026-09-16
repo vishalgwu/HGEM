@@ -39,6 +39,7 @@ import pytest
 from fixtures.providers import PROMPT, Capital
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import AnthropicClient, OllamaClient
+from guardmem_core.pipeline.l1_extract.extractor import ExtractionBatch
 
 if TYPE_CHECKING:
     from guardmem_core.llm.base import LLMResponse
@@ -109,6 +110,39 @@ class TestOllama:
             "has regressed, and MEMORY_ENGINE.md §3.1's entropy is now zero for "
             "every candidate. See OllamaClient._one."
         )
+
+    async def test_the_real_extraction_schema_compiles_to_a_grammar(self) -> None:
+        """**The second bug in this file that only a real model could show.**
+
+        Ollama turns `format` into a GBNF grammar, and a repetition of 2000 or
+        more is refused with `400 ... failed to parse grammar` - the whole
+        schema, not the offending field. `ExtractedFact.verbatim` declares
+        `max_length=2000`, mirroring `Provenance.verbatim`, so **extraction
+        never ran on Ollama at all** and the README and the notebook both
+        recorded CHECKPOINT B as runnable locally when it was not.
+
+        `_grammar_safe` strips the keyword the compiler cannot take; the caller
+        still validates the reply against the full schema, so the cap moves from
+        prevention to detection rather than being lost.
+
+        Asserted against the *real* `ExtractionBatch` rather than a small model
+        that happens to have a long field. The bug was in the interaction
+        between a real schema and a real compiler, and a hand-built stand-in
+        would drift from the thing that actually goes over the wire.
+        """
+        async with httpx.AsyncClient(base_url=_OLLAMA_URL) as http:
+            client = OllamaClient(
+                http,
+                models=dict.fromkeys(Tier, _OLLAMA_MODEL),
+                timeout_s=_LOCAL_TIMEOUT_S,
+            )
+            response = await client.complete(
+                prompt="Return an empty list of facts.",
+                schema=ExtractionBatch,
+                tier=Tier.FAST,
+            )
+
+        ExtractionBatch.model_validate_json(response.samples[0])
 
     async def test_a_wrong_model_id_fails_as_a_provider_error(self) -> None:
         """The error path, against a real server. Ollama answers 404 for a model

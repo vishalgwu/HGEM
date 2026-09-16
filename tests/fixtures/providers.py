@@ -34,6 +34,7 @@ import openai
 from pydantic import BaseModel
 
 from guardmem_core.llm.base import Tier
+from guardmem_core.llm.providers import OllamaClient
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,6 +45,7 @@ __all__ = [
     "Capital",
     "anthropic_client",
     "anthropic_transport",
+    "ollama_adapter",
     "ollama_client",
     "ollama_transport",
     "openai_client",
@@ -75,6 +77,10 @@ ANSWER: Final = json.dumps({"capital": "Paris", "country": "France"})
 # Every tier on one id per provider. A real deployment gives the three tiers
 # three different models; these tests are about the adapter, and a ladder with
 # three distinct ids would make every assertion name one arbitrarily.
+# Short: a mock transport answers instantly, and a generous timeout here would
+# only slow a hang down.
+_TIMEOUT_S: Final = 5.0
+
 MODELS: Final = {
     "anthropic": dict.fromkeys(Tier, "claude-haiku-4-5"),
     "openai": dict.fromkeys(Tier, "gpt-4o-mini"),
@@ -246,3 +252,16 @@ def openai_client(transport: httpx2.MockTransport) -> openai.AsyncOpenAI:
 def ollama_client(transport: httpx.MockTransport) -> httpx.AsyncClient:
     """An `httpx.AsyncClient` on `transport`, with the base URL the adapter joins to."""
     return httpx.AsyncClient(transport=transport, base_url="http://ollama.test")
+
+
+def ollama_adapter(transport: httpx.MockTransport) -> tuple[OllamaClient, httpx.AsyncClient]:
+    """An `OllamaClient` on `transport`, and the http client to close afterwards.
+
+    Here rather than in one test module because two of them build it now:
+    `test_llm_providers.py` for the cross-provider contract, and
+    `test_ollama_grammar.py` for the `format` payload. A second copy would be
+    free to drift on the timeout or the model map, which is what `MODELS` is
+    above this for.
+    """
+    http = ollama_client(transport)
+    return OllamaClient(http, models=MODELS["ollama"], timeout_s=_TIMEOUT_S), http

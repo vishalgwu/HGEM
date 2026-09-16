@@ -4082,6 +4082,68 @@ architectural is in front of it any more.
 
 ---
 
+## 2026-09-15 — the Ollama grammar fix; the gate is now runnable for nothing
+
+**Shipped**
+
+- **`_grammar_safe` in the Ollama adapter.** Strips `maxLength`, `minLength`,
+  `maxItems` and `minItems` from the schema sent as `format` when their value
+  reaches 2000, recursively, at every depth. Nothing else is touched, and the
+  model's own schema is not mutated.
+- **The whole pipeline now runs on a local model, end to end, with no API key** —
+  real extraction, real conflict adjudication, real entailment, real Postgres,
+  real entity write.
+- A live test against the *real* `ExtractionBatch`, six unit tests on the
+  payload, and `tests/unit/test_ollama_grammar.py` split out at the cap.
+- 1546 tests, 98.89%. Live suite green.
+
+**What broke / what I learned**
+
+- **I had the diagnosis right and the cause wrong, and only a second measurement
+  showed it.** Yesterday's bisect said "remove `maxLength` and it compiles", and
+  I wrote that up as *`maxLength` is unsupported*. It is not: probing each
+  keyword on its own, `maxLength`, `minLength`, `pattern`, `format`, `minimum`,
+  `maxItems` and the rest **all compile fine**. The real rule is a *magnitude* —
+  binary-searched to a sharp boundary, **1999 OK, 2000 REJECTED**. A round
+  number that sharp is a constant in the compiler, not a size blow-up.
+  Had I shipped the first diagnosis I would have stripped a keyword class that
+  mostly works.
+- **`verbatim` sits exactly one over the line.** `max_length=2000` mirrors
+  `Provenance.verbatim`, so the extraction schema was a single unit past a limit
+  nobody knew existed. One character less and this would never have been found —
+  and the gate would have been silently unavailable on the only free provider.
+- **Clamping to 1999 was the tempting fix and is wrong.** It would forbid a
+  legitimate 2500-character value under a `maxLength: 5000` schema: the model
+  could not produce it and nothing would say why. Over-constraining silently is
+  worse than under-constraining loudly. Dropping the keyword is sound precisely
+  because `RULES.md` §3 leaves parsing with the caller — the cap moves from
+  prevention to detection, not out of existence.
+- **pydantic caches `model_json_schema()` and hands back the same object.**
+  Mutating it in place would have stripped the cap from the *validation* this
+  fix exists to preserve, in every other caller in the process. There is a test
+  for that specifically, because the bug would be invisible and global.
+- **The first real run scored `H_norm = 1.000`.** Three draws, three different
+  answers, maximum semantic entropy — the measurement S9.1's fixed seed would
+  have pinned at 0.000 forever. Seeing it vary against a real model is the first
+  evidence the entropy term does anything at all.
+- The decision that came out was `REJECT` at `C = 0.440`, just under `τ_lo`.
+  A genuinely uncertain extraction, refused. That is the matrix working.
+
+**Still open**
+
+- **`checkpoint_b generate`** and a transcript wider than forty turns. That is
+  now the entire distance to the gate.
+- **The applier (#44).** `run()` reaches a decision and writes nothing.
+- **`make dev-reset && make seed`** still owed from ADR-0008.
+- An Ollama tag is still not a digest, and a 7B local model is still not Claude —
+  the sign-off has to name the provider.
+
+**Tomorrow's first step**
+
+**`checkpoint_b generate`.** Nothing else is in front of the gate.
+
+---
+
 ---
 
 ---

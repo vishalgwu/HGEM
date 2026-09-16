@@ -33,6 +33,7 @@ from fixtures.providers import (
     Capital,
     anthropic_client,
     anthropic_transport,
+    ollama_adapter,
     ollama_client,
     ollama_transport,
     openai_client,
@@ -47,12 +48,6 @@ from guardmem_core.llm.providers.pricing import PRICES, estimate_cost
 from guardmem_core.settings import Settings
 
 _TIMEOUT_S: Final = 5.0
-
-
-def ollama(transport: httpx.MockTransport) -> tuple[OllamaClient, httpx.AsyncClient]:
-    """An Ollama adapter and the client to close afterwards."""
-    http = ollama_client(transport)
-    return OllamaClient(http, models=MODELS["ollama"], timeout_s=_TIMEOUT_S), http
 
 
 class TestTheSeedVariesAcrossADraw:
@@ -71,7 +66,7 @@ class TestTheSeedVariesAcrossADraw:
 
     async def test_each_request_in_a_draw_carries_its_own_seed(self) -> None:
         seen: list[dict[str, Any]] = []
-        client, http = ollama(ollama_transport(seen=seen))
+        client, http = ollama_adapter(ollama_transport(seen=seen))
 
         async with http:
             await client.complete(prompt=PROMPT, tier=Tier.FAST, temperature=0.7, n=4)
@@ -83,7 +78,7 @@ class TestTheSeedVariesAcrossADraw:
     async def test_a_single_sample_draw_uses_the_base_seed(self) -> None:
         """So a K=1 extraction is reproducible from the recorded seed alone."""
         seen: list[dict[str, Any]] = []
-        client, http = ollama(ollama_transport(seen=seen))
+        client, http = ollama_adapter(ollama_transport(seen=seen))
 
         async with http:
             response = await client.complete(prompt=PROMPT, tier=Tier.FAST, n=1)
@@ -94,7 +89,7 @@ class TestTheSeedVariesAcrossADraw:
     async def test_the_temperature_asked_for_is_the_one_sent(self) -> None:
         """`MEMORY_ENGINE.md` §1.2's 0.7 spread, on a provider that has the knob."""
         seen: list[dict[str, Any]] = []
-        client, http = ollama(ollama_transport(seen=seen))
+        client, http = ollama_adapter(ollama_transport(seen=seen))
 
         async with http:
             await client.complete(prompt=PROMPT, tier=Tier.FAST, temperature=0.7, n=2)
@@ -105,7 +100,7 @@ class TestTheSeedVariesAcrossADraw:
         """`RULES.md` §3 forbids regex over free text: the model is *constrained*
         to the shape rather than asked for JSON in the prompt."""
         seen: list[dict[str, Any]] = []
-        client, http = ollama(ollama_transport(seen=seen))
+        client, http = ollama_adapter(ollama_transport(seen=seen))
 
         async with http:
             await client.complete(prompt=PROMPT, schema=Capital, tier=Tier.FAST)
@@ -200,14 +195,14 @@ class TestErrorsMapToTheRightDomainType:
         def refuse(_request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
-        client, http = ollama(ollama_transport(handler=refuse))
+        client, http = ollama_adapter(ollama_transport(handler=refuse))
 
         async with http:
             with pytest.raises(ProviderUnavailable, match="ollama serve"):
                 await client.complete(prompt=PROMPT, tier=Tier.FAST)
 
     async def test_an_ollama_error_status_is_a_provider_error(self) -> None:
-        client, http = ollama(ollama_transport(status=404))
+        client, http = ollama_adapter(ollama_transport(status=404))
 
         async with http:
             with pytest.raises(ProviderUnavailable, match="404"):
@@ -240,7 +235,7 @@ class TestAnEmptyReplyIsAProviderProblem:
                 await client.complete(prompt=PROMPT, tier=Tier.FAST)
 
     async def test_ollama_with_empty_content(self) -> None:
-        client, http = ollama(ollama_transport(answer=""))
+        client, http = ollama_adapter(ollama_transport(answer=""))
 
         async with http:
             with pytest.raises(ProviderUnavailable, match="empty content"):
@@ -250,7 +245,7 @@ class TestAnEmptyReplyIsAProviderProblem:
         def html(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text="<html>proxy error</html>")
 
-        client, http = ollama(ollama_transport(handler=html))
+        client, http = ollama_adapter(ollama_transport(handler=html))
 
         async with http:
             with pytest.raises(ProviderUnavailable, match="non-JSON"):
@@ -384,7 +379,7 @@ class TestTheTimeoutIsThreadedThrough:
                 },
             )
 
-        client, http = ollama(ollama_transport(handler=capture))
+        client, http = ollama_adapter(ollama_transport(handler=capture))
 
         async with http:
             await client.complete(prompt=PROMPT, tier=Tier.FAST)
