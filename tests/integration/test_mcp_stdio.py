@@ -40,8 +40,10 @@ from contextlib import asynccontextmanager
 from importlib.metadata import entry_points
 from typing import Final
 
+import mcp_types as types
 import pytest
 from mcp.client.session import ClientSession
+from mcp.shared.exceptions import MCPError
 from mcp.shared.memory import create_client_server_memory_streams
 
 from guardmem_core.settings import get_settings
@@ -148,19 +150,69 @@ class TestTheDoneWhen:
             ]
 
     async def test_listing_resources_and_prompts_also_succeeds(self) -> None:
-        """Both are advertised, so both must answer.
+        """Every advertised capability must answer.
 
         A capability advertised over a method that errors is worse than an
         unadvertised one: the client has already decided the server supports it,
         so the failure surfaces as a broken server rather than as a missing
         feature.
+
+        S6.4 filled all three lists. What is asserted is the two that are a fact
+        about the *server* - three templates and four prompts. `resources/list`
+        is a fact about its *configuration*: it is keyed by
+        `GM_MCP_DEFAULT_NAMESPACE`, which `_server_env` does not set, so its
+        length depends on whether a developer's `.env` happens to supply one.
+        Asserting it were empty here would pass in CI and fail on the machine
+        this was written on, which is the exact CI-only divergence
+        `test_dependency_consistency.py` exists because of. That it *answers* is
+        the claim this test is making.
         """
         async with connected() as session:
             resources = await asyncio.wait_for(session.list_resources(), timeout=_SESSION_TIMEOUT_S)
+            templates = await asyncio.wait_for(
+                session.list_resource_templates(), timeout=_SESSION_TIMEOUT_S
+            )
             prompts = await asyncio.wait_for(session.list_prompts(), timeout=_SESSION_TIMEOUT_S)
 
-            assert resources.resources == []
-            assert prompts.prompts == []
+            assert resources.resources is not None
+            assert len(templates.resource_templates) == 3
+            assert len(prompts.prompts) == 4
+
+    async def test_a_prompt_renders_the_pipeline_s_own_file(self) -> None:
+        """§4's claim for `extract_memories` is that it is *the same prompt*.
+
+        Over the protocol, because the canary has to survive `_meta` on the way
+        out - it is the only thing a client can check an echo against, and a
+        server that dropped it would still return a perfectly good prompt.
+        """
+        async with connected() as session:
+            result = await asyncio.wait_for(
+                session.get_prompt(
+                    "guardmem/extract_memories", {"content": "Allergic to penicillin."}
+                ),
+                timeout=_SESSION_TIMEOUT_S,
+            )
+
+            canary = str((result.meta or {})["canary"])
+            block = result.messages[0].content
+            # Narrowed rather than cast: `PromptMessage.content` is a union of
+            # five block types, and a prompt that started returning an image is
+            # a failure this assertion should name rather than crash on.
+            assert isinstance(block, types.TextContent)
+            assert canary
+            assert canary in block.text
+            assert (result.meta or {})["prompt_version"] == "extract_memories@v1"
+
+    async def test_a_prompt_that_cannot_be_served_fails_the_request(self) -> None:
+        """A refusal rendered as a *message* would enter the transcript as
+        though a model had said it, and a later reader could not tell it from
+        content. Failing the request leaves the transcript clean."""
+        async with connected() as session:
+            with pytest.raises(MCPError):
+                await asyncio.wait_for(
+                    session.get_prompt("guardmem/review_brief", {"task_id": "rt_1"}),
+                    timeout=_SESSION_TIMEOUT_S,
+                )
 
 
 class TestTheLifespanOwnsTheProcessResources:

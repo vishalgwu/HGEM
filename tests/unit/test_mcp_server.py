@@ -10,8 +10,10 @@ function of the code.
 
 Three things are pinned:
 
-- **Zero tools.** The step's own acceptance criterion, and the one that changes
-  at S6.2, where this file's expectations should be updated rather than deleted.
+- **What each list answers with.** S6.1's acceptance criterion was zero tools;
+  S6.2 filled the tools and S6.4 filled the resource templates and the prompts.
+  Each was updated here rather than deleted, which is what the original note
+  asked for.
 - **The capability block.** Derived by the SDK from which handlers exist, so it
   is the one place a handler silently going missing shows up. An MCP client
   reads it once, at initialize, and never asks again - a server that stops
@@ -39,7 +41,7 @@ from mcp_server.server import (
     SERVER_NAME,
     SERVER_VERSION,
     _list_prompts,
-    _list_resources,
+    _list_resource_templates,
     _list_tools,
     build_server,
     main,
@@ -77,8 +79,8 @@ class TestTheDoneWhen:
     where this file's expectations should be updated rather than deleted", so:
     the tools are asserted here as a *count*, and their contents belong to
     `test_mcp_tools.py`. What has not changed - and is the half worth keeping -
-    is "without error": listing still answers, resources and prompts still list
-    empty, and the capability block still says what the server can honour.
+    is "without error": every list still answers, and the capability block still
+    says only what the server can honour.
     """
 
     async def test_it_lists_the_four_core_tools(self) -> None:
@@ -98,17 +100,37 @@ class TestTheDoneWhen:
 
         assert result.next_cursor is None
 
-    async def test_it_lists_zero_resources(self) -> None:
-        """`MCP_INTEGRATION.md` §3's four arrive at S6.4."""
-        result = await _list_resources(_NO_CONTEXT, None)
+    async def test_it_lists_the_resource_templates(self) -> None:
+        """S6.4 replaced S6.1's empty list.
 
-        assert result.resources == []
+        The *templates* rather than the concrete resources, because this test
+        has no lifespan context to read a configured namespace from - which is
+        itself the distinction `resources/templates/list` exists for: a template
+        is true of the server, and a resource is true of its configuration.
+        """
+        result = await _list_resource_templates(_NO_CONTEXT, None)
 
-    async def test_it_lists_zero_prompts(self) -> None:
-        """`MCP_INTEGRATION.md` §4's four arrive at S6.4."""
+        assert [t.uri_template for t in result.resource_templates] == [
+            "guardmem://memory/{namespace}",
+            "guardmem://audit/{trace_id}",
+            "guardmem://ontology/{namespace}",
+        ]
+
+    async def test_it_lists_all_four_prompts(self) -> None:
+        """`MCP_INTEGRATION.md` §4's four, two of which decline when invoked.
+
+        Listed rather than hidden: a refusal that names its build step teaches a
+        reader something, and an absence teaches nothing.
+        `test_mcp_prompts.py` owns what each one does.
+        """
         result = await _list_prompts(_NO_CONTEXT, None)
 
-        assert result.prompts == []
+        assert [prompt.name for prompt in result.prompts] == [
+            "guardmem/extract_memories",
+            "guardmem/adjudicate_conflict",
+            "guardmem/review_brief",
+            "guardmem/memory_hygiene_report",
+        ]
 
 
 class TestWhatTheHandshakeAdvertises:
@@ -131,10 +153,14 @@ class TestWhatTheHandshakeAdvertises:
         """Correction 1 on S6.1 - see `server.py`.
 
         `subscribe` promises `notifications/resources/updated`, and nothing in
-        this system can send one: no resource exists until S6.4, and no write
-        path exists to change the state behind it. A client that subscribed
-        would wait for an event that is never coming, and could not tell that
-        from "nothing has changed yet".
+        this system can send one. **S6.4 changed half of the reason and not the
+        conclusion**: the resources now exist, and the snapshot behind
+        `guardmem://memory/{namespace}` really does change when the applier
+        writes and the relay reveals. What is still missing is anything that
+        tells a live *session* so - no bus, no `LISTEN/NOTIFY`, and on stdio no
+        second process to hear one. A client that subscribed would wait for an
+        event that is never coming, and could not tell that from "nothing has
+        changed yet". It moves to S8.4, with the worker.
         """
         assert capabilities.resources is not None
         assert capabilities.resources.subscribe is False
@@ -144,9 +170,9 @@ class TestWhatTheHandshakeAdvertises:
     ) -> None:
         """The same argument as `subscribe`, for the three `listChanged` flags.
 
-        Zero tools is a *fixed* zero at this step - the list changes when a new
-        build ships, not while a session is open - so a client re-listing on
-        notification would be doing it for nothing.
+        All three lists are fixed for the life of a session - they change when
+        a new build ships, not while a client is connected - so a client
+        re-listing on notification would be doing it for nothing.
         """
         assert capabilities.tools is not None
         assert capabilities.prompts is not None

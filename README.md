@@ -188,6 +188,11 @@ Note that §1's block above §1.1 describes the *published* product — `uvx
 guardmem-mcp@latest` against `api.guardmem.ai` — which does not exist yet. §1.1 is
 the one you can paste.
 
+Once connected you get four tools, two attachable resources for the configured
+namespace (the believed-state snapshot and the predicate schema) and four prompts,
+two of which decline by name until the features behind them exist. §3 and §4 say
+which and why.
+
 ---
 
 ## Status

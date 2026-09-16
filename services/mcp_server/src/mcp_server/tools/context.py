@@ -89,20 +89,38 @@ class ToolContext:
     store: VectorStore
 
 
-def context_for(state: ServerState, arguments: dict[str, object]) -> ToolContext:
+def context_for(
+    state: ServerState, arguments: dict[str, object], *, require_namespace: bool = True
+) -> ToolContext:
     """Resolve the tenant and namespace for one tool call.
 
     Args:
         state: The process's resources.
         arguments: The call's arguments. Only `namespace` is read here.
+        require_namespace: Whether this caller is scoped to a namespace at all.
+
+            **Every tool is; `guardmem://audit/{trace_id}` is not.** A trace is
+            minted per proposal and its audit events are keyed by tenant and
+            trace alone - one proposal may write across two namespaces, so
+            scoping its record to one would silently drop half of it. S6.4 found
+            this the hard way: the audit resource refused outright on a server
+            configured with a tenant and no `GM_MCP_DEFAULT_NAMESPACE`, because
+            it was asking for something it does not use.
+
+            Passing `False` yields a context whose `namespace` is the configured
+            default if there is one and `Namespace("")` if there is not, and a
+            caller that passes `False` **must not read `namespace`** - an empty
+            one selects nothing and would look like an empty namespace rather
+            than like a mistake. The tenant is required either way, because
+            every reader here touches governed memory.
 
     Returns:
         The context, with a store already bound to the tenant.
 
     Raises:
         ToolRefusedError: the server has no configured tenant, the configured tenant
-            is not a UUID, no namespace was given and none is configured, or the
-            call's `namespace` is not a string.
+            is not a UUID, the call's `namespace` is not a string, or - when
+            `require_namespace` - none was given and none is configured.
 
     Every failure here is a refusal rather than a fallback, and every message
     names the variable to set. A tool that guessed any of these would produce a
@@ -121,7 +139,11 @@ def context_for(state: ServerState, arguments: dict[str, object]) -> ToolContext
             f"GM_MCP_TENANT_ID is not a UUID: {state.settings.mcp_tenant_id!r}. {_TENANT_HINT}"
         ) from exc
 
-    namespace = _namespace(state, arguments)
+    namespace = (
+        _namespace(state, arguments)
+        if require_namespace
+        else Namespace(state.settings.mcp_default_namespace)
+    )
     tenant_id = TenantId(state.settings.mcp_tenant_id)
     return ToolContext(
         state=state,

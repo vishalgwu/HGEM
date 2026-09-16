@@ -4621,6 +4621,130 @@ next step.
 
 ---
 
+## 2026-09-16 — S6.4: resources and prompts
+
+**Shipped**
+
+- **Three of `MCP_INTEGRATION.md` §3's seven resources**, the ones the notebook
+  names: `guardmem://memory/{namespace}` (`text/markdown`),
+  `guardmem://audit/{trace_id}` (`application/json`) and
+  `guardmem://ontology/{namespace}` (`text/yaml`). Plus
+  `resources/templates/list`, which §3 requires and which is the only way the
+  audit URI is reachable at all - a trace id is minted per proposal, so it can
+  never be *listed*.
+- **S6.4's DONE WHEN is met.** Attaching the namespace resource shows the
+  believed state: 27 live assertions for the demo tenant, grouped by predicate,
+  each with its confidence and the verbatim span it came from, and the retired
+  ones underneath. Driven over real stdio pipes against the spawned binary, not
+  only in the unit suite.
+- **§4's four prompts, two served and two declining** - the same split S6.2 made
+  across the tools, for the same reason. `extract_memories` and
+  `adjudicate_conflict` render the **pipeline's own versioned files**, which is
+  the only way §4's claim (exposing the canonical prompt "reduces schema-gate
+  rejections dramatically") is true rather than aspirational. `review_brief` and
+  `memory_hygiene_report` are listed and refuse by name, at S18.1 and S20.x.
+- **Every served prompt mints a fresh canary and returns it in `_meta`.** The
+  pipeline fills that slot itself and raises `InjectionDetected` on an echo.
+  Handing the prompt to a client moves that check to the client, so the token has
+  to be somewhere it can read without parsing the prompt - otherwise the canary
+  is decoration. A fixed one would be worse than none: guessable, and it would
+  read as protection.
+- **`sys.stderr` is forced to UTF-8 before logging is configured.** Found by
+  reading this step's own output: the server log rendered `§` and `…` as
+  replacement characters under Windows' cp1252, and there are **thirty-nine**
+  section references across the refusal messages, because every one cites the
+  clause it enforces. The client saw them correctly; the *log* - the copy an
+  operator actually has - did not.
+
+**What broke / what I learned**
+
+- **§4's argument lists and the prompt templates disagree, and the templates are
+  not wrong.** §4 gives `extract_memories` as `content, ontology_ref, k`; the file
+  needs `content`, `ontology` and `canary`. `ontology_ref` names a pack and the
+  slot wants the pack, so the ref is checked against the installed one and
+  refused if it names another - substituting `clinical` for a caller who asked
+  for `legal` produces candidates the gate quarantines for reasons they cannot
+  see. `k` has no slot because it is not in the prompt: it is §1.2's *sample*
+  count, so it is validated and returned in `_meta`. `adjudicate_conflict` is
+  the same shape: §4 says `incumbent`, the template says `incumbents`, and the
+  plural is right because §2.2 retrieves ten - so the published singular fills
+  the plural slot and one incumbent is a set of one.
+- **`resources.subscribe` was supposed to arrive here and does not.** S6.1's
+  correction said its home was "the step that has both a resource and a change
+  feed, and the natural home is S6.4". Half arrived: the resources exist and the
+  snapshot genuinely changes, because the applier writes and the relay reveals.
+  Nothing tells a live *session* - no bus, no `LISTEN/NOTIFY`, and on stdio no
+  second process to hear one. It moves to **S8.4**, with the worker, and the
+  capability is asserted `false` rather than left to drift.
+- **A resource refusal is a protocol error and a tool refusal is not.** Opposite
+  choices for a reason worth writing down: a tool's refusal is read by a *model*
+  that can act on it, so it is `isError` text. A resource is attached by a
+  *person* from a UI with no model in the loop, so an empty-but-successful body
+  would put "this namespace has no memory" on their screen when the truth was
+  "you typed it wrong". Prompts go the same way as resources, with a sharper
+  edge: a refusal rendered as a *message* enters the transcript as though a
+  model had said it.
+- **The snapshot is a snapshot, not a listing, and that is a real limit.**
+  `VectorStore` has `search` and `retired` and no "give me everything", and
+  adding one is a protocol change every backend would owe. So it asks for 100
+  against a deterministic vector and **says in the body** whether that was all of
+  them - because a truncated panel that reads like the whole believed state is
+  exactly the failure this resource exists to prevent.
+- **Three fixture details I got wrong by assuming**: the builder is
+  `stored_assertion` not `assertion`, `StoredAssertion` exposes `.predicate`
+  directly rather than through `.claim`, and rows default to `visible=False`
+  because the relay is what sets it. Each was a two-minute fix and each would
+  have been a green test asserting nothing.
+- **One of my own tests would have passed in CI and failed here.** It asserted
+  `resources/list` was empty; that list is keyed by `GM_MCP_DEFAULT_NAMESPACE`,
+  which my `.env` sets at line 188 and which CI has no `.env` to set. Exactly
+  the divergence `test_dependency_consistency.py` exists because of, produced by
+  me, in the same session I wrote that file's history into a report. The
+  integration fixture now pins the variable empty rather than inheriting it.
+- **`Namespace` is an unconstrained `NewType(str)`**, so nothing rejects a slash
+  or a space in one - and a slash would have split the URI path, leaving
+  `guardmem://memory/a/b` to answer quietly about `a`. `uris.uri_for` now
+  encodes (leaving colons readable, because every documented namespace carries
+  one) and pairs with the `unquote` in `_split`. Six namespaces round-trip in a
+  test, including the two that used to break.
+- **The audit resource could not be read at all on a server with no default
+  namespace, and my own test found it.** `context_for` resolves a tenant *and* a
+  namespace because every tool needs both; `guardmem://audit/{trace_id}` needs
+  only the tenant, since a trace is keyed by tenant and trace alone - one
+  proposal may write across two namespaces, so scoping its record to one would
+  drop half of it. The reader was therefore refused for want of something it
+  never uses, with a message about `GM_MCP_DEFAULT_NAMESPACE` that pointed
+  nowhere useful. `context_for(..., require_namespace=False)` is the fix, and it
+  only surfaced because the new integration fixture pins that variable empty -
+  with a developer's `.env` supplying one, this would have shipped and broken
+  for the first operator who did not set it.
+- **S6.4 pushed `test_mcp_memory_tools.py` past the 400-line cap**, and the
+  failure message is the same one that landed last time: "split it along a real
+  seam rather than shaving it." The seam was there - the tools and the resources
+  are different subjects asked of one session - so the session moved to
+  `fixtures/mcp_session.py`, registered as a plugin rather than as a second
+  `conftest.py`, and the resource tests to
+  `tests/integration/test_mcp_resource_reads.py`. **Not** `test_mcp_resources.py`:
+  `tests/` has no `__init__.py`, so two modules with one basename abort
+  collection for the whole run, and the unit file already has that name.
+
+**Still open**
+
+- Four of §3's seven resources, each waiting on the feature it describes.
+- `subscribe`, at S8.4.
+- The Phase-1 exit-gate box, still unticked for the reason yesterday's entry
+  gives: the round trip is evidenced, the click in the app is not mine to make.
+- The merge path, ADR-0011, S18.1's review task, and CHECKPOINT B's transcripts
+  and labels.
+
+**Tomorrow's first step**
+
+**S7.1** - the Neo4j `GraphStore`, behind `GM_GRAPH_BACKEND`. It is the step that
+makes `ServerState.graph_durable` true, which `memory.get_entity` already reports
+and which the blast-radius score reads.
+
+---
+
 ---
 
 ---

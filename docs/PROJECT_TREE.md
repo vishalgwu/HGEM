@@ -241,8 +241,15 @@ guardmem-ai/
 │           ├── server.py
 │           ├── tools/{search.py,propose.py,commit.py,get_entity.py,timeline.py,
 │           │        forget.py,policy.py,audit.py,review.py}
-│           ├── resources/{memory.py,policy.py,ontology.py,audit.py}
-│           └── prompts/{extraction.py,adjudication.py,review_brief.py}
+│           ├── resources/{__init__.py,uris.py,memory.py,ontology.py,audit.py}
+│           │                                    # S6.4. MCP_INTEGRATION §3's three
+│           │                                    #   notebook-named templates; policy.py
+│           │                                    #   arrives with the policy pack
+│           └── prompts/{__init__.py,arguments.py,extraction.py,adjudication.py,
+│                        review_brief.py,hygiene.py}
+│                                                # S6.4. §4's four: two served, and
+│                                                #   review_brief + hygiene decline by
+│                                                #   name until S18.1 and S20.x
 │
 ├── apps/
 │   └── dashboard/                       # Next.js 15 (App Router) + React 19 + TS

@@ -4,19 +4,19 @@ S6.1's DONE WHEN, verbatim: `npx @modelcontextprotocol/inspector uv run
 guardmem-mcp` "connects and lists zero tools without error". That sentence is
 the specification for this module, and both halves of it are load-bearing.
 
-**S6.2 replaced the empty tool list with the four core tools.** They are
-`MCP_INTEGRATION.md` §2.1-§2.4, copied exactly - see `tools/schemas.py`, which
-owns the wording, because a tool description is read by a model rather than by a
-person and changing one changes behaviour. Resources and prompts still list
-empty: they are S6.4, and a list handler that exists returning nothing is what
-makes the capability advertised and honest at the same time.
+**S6.2 replaced the empty tool list with the four core tools**, and **S6.4
+replaced the empty resource and prompt lists.** All three are
+`MCP_INTEGRATION.md` copied exactly - §2.1-§2.4 into `tools/schemas.py`, §3 into
+`resources/`, §4 into `prompts/` - because a description on any of them is read
+by a model rather than by a person, and changing one changes behaviour.
 
-**Two of the four do work and two refuse, on purpose.** `memory.search` and
-`memory.get_entity` read governed memory and are complete. `memory.propose` and
-`memory.commit` validate everything they can and then decline, naming each
-missing dependency - `tools/pipeline.py` has the list and the argument for why a
-plausible-looking invented decision would be the worst thing this repository
-could ship.
+**The same split runs through all three surfaces: build what exists, decline the
+rest by name.** `memory.search` and `memory.get_entity` are complete;
+`memory.propose` and `memory.commit` govern a real write now but still name what
+they cannot do. Three of §3's seven resources are served. Two of §4's four
+prompts are served and two refuse, because there is no review queue (S18.1) and
+nothing measures drift (S20.x). Each refusal names the step it waits on, which
+is the difference between a gap and a mystery.
 
 **1 correction to this step, found by building it.**
 
@@ -26,20 +26,29 @@ could ship.
    and are true the moment a handler exists. The fourth is a claim about what
    the server will *send*: a client that subscribes to a resource is promised
    `notifications/resources/updated` when the underlying state changes, and
-   nothing in this system can produce that notification. The write path does not
-   exist (`pipeline/orchestrator.py` returns decisions and applies none), so
-   there is no change to observe, and no resource exists to subscribe to until
-   S6.4. Advertising it would make every client wait forever for an event that
-   is never coming, and "subscribed and silent" is indistinguishable from
-   "nothing has changed" - a failure with no symptom, which is the class of bug
-   this repository spends its comments on. It belongs at the step that has both
-   a resource and a change feed, and the natural home is S6.4 alongside
-   `guardmem://memory/{namespace}`.
+   nothing in this system can produce that notification. Advertising it would
+   make every client wait forever for an event that is never coming, and
+   "subscribed and silent" is indistinguishable from "nothing has changed" - a
+   failure with no symptom, which is the class of bug this repository spends its
+   comments on.
+
+   **S6.4 was named as its home and is not.** That note said the natural place
+   was "the step that has both a resource and a change feed, and the natural
+   home is S6.4 alongside `guardmem://memory/{namespace}`." Half of it arrived:
+   the resource exists and the snapshot it renders does change, because
+   ADR-0010's applier writes and the relay makes rows visible. The *feed* did
+   not. Nothing tells a live session that a write happened - there is no bus, no
+   `LISTEN/NOTIFY`, and on stdio no second process to hear one - so the
+   capability would still be a promise this server cannot keep. It moves to
+   **S8.4**, the worker, which is the first component that watches writes rather
+   than performing them. `capabilities.resources.subscribe` is `false` in the
+   handshake today, and that is checked rather than assumed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import sys
 from typing import TYPE_CHECKING, Final
@@ -49,6 +58,8 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from mcp_server.lifespan import ConfigurationError, ServerState, lifespan, preflight
+from mcp_server.prompts import PROMPTS, get_prompt
+from mcp_server.resources import RESOURCE_TEMPLATES, list_resources, read_resource
 from mcp_server.tools import TOOLS, call_tool
 
 if TYPE_CHECKING:
@@ -128,25 +139,81 @@ async def _call_tool(
 
 
 async def _list_resources(
-    _ctx: ServerRequestContext[ServerState],
+    ctx: ServerRequestContext[ServerState],
     _params: types.PaginatedRequestParams | None,
 ) -> types.ListResourcesResult:
-    """No resources yet; the four in `MCP_INTEGRATION.md` §3 arrive at S6.4."""
-    return types.ListResourcesResult(resources=[])
+    """The resources this server can name from configuration alone.
+
+    Returns:
+        The two keyed by `GM_MCP_DEFAULT_NAMESPACE`, or nothing when none is
+        set. `resources/list` answers "what can I attach right now"; the
+        variable ones are answered by `resources/templates/list` below.
+    """
+    return types.ListResourcesResult(resources=list_resources(ctx.lifespan_context))
+
+
+async def _list_resource_templates(
+    _ctx: ServerRequestContext[ServerState],
+    _params: types.PaginatedRequestParams | None,
+) -> types.ListResourceTemplatesResult:
+    """The URI shapes a client may construct.
+
+    Returns:
+        S6.4's three templates. `MCP_INTEGRATION.md` §3: "Templates are
+        advertised via `resources/templates/list` so clients can construct URIs
+        for namespaces they discover at runtime" - which is the only way
+        `guardmem://audit/{trace_id}` is reachable at all, since a trace id is
+        minted per proposal and cannot be listed in advance.
+    """
+    return types.ListResourceTemplatesResult(resource_templates=list(RESOURCE_TEMPLATES))
+
+
+async def _read_resource(
+    ctx: ServerRequestContext[ServerState],
+    params: types.ReadResourceRequestParams,
+) -> types.ReadResourceResult:
+    """Read one resource.
+
+    Raises:
+        ToolRefusedError: the URI names nothing this server serves, or the
+            reader declines. Deliberately **not** converted into a successful
+            empty body - `resources/__init__.py` has the argument, and the short
+            version is that a person attaching a resource has no model in the
+            loop to interpret a refusal, so "could not load" must not render as
+            "nothing is known".
+    """
+    return await read_resource(ctx.lifespan_context, str(params.uri))
 
 
 async def _list_prompts(
     _ctx: ServerRequestContext[ServerState],
     _params: types.PaginatedRequestParams | None,
 ) -> types.ListPromptsResult:
-    """No prompts yet; the four in `MCP_INTEGRATION.md` §4 arrive at S6.4.
+    """The four prompts of `MCP_INTEGRATION.md` §4.
 
     Note which prompts these are *not*. `guardmem_core.prompts` holds the
     versioned files the pipeline sends to a model; §4's are the ones this server
     offers to a *client*, for a human to invoke. Same word, opposite direction,
-    and the only overlap is that both are versioned.
+    and the only overlap is that both are versioned - which is exactly the
+    overlap the two served ones exist to exploit.
+
+    Two of the four decline when invoked, and their titles say so, because a
+    client's menu is the last place a person looks before picking one.
     """
-    return types.ListPromptsResult(prompts=[])
+    return types.ListPromptsResult(prompts=list(PROMPTS))
+
+
+async def _get_prompt(
+    ctx: ServerRequestContext[ServerState],
+    params: types.GetPromptRequestParams,
+) -> types.GetPromptResult:
+    """Render one prompt.
+
+    Raises:
+        ToolRefusedError: unknown name, missing argument, or one of the two
+            prompts §4 publishes that this build cannot serve.
+    """
+    return get_prompt(ctx.lifespan_context, params.name, params.arguments)
 
 
 def build_server() -> Server[ServerState]:
@@ -171,7 +238,10 @@ def build_server() -> Server[ServerState]:
         on_list_tools=_list_tools,
         on_call_tool=_call_tool,
         on_list_resources=_list_resources,
+        on_list_resource_templates=_list_resource_templates,
+        on_read_resource=_read_resource,
         on_list_prompts=_list_prompts,
+        on_get_prompt=_get_prompt,
     )
 
 
@@ -221,6 +291,28 @@ def main() -> int:
     server down is the normal end of a session, and a traceback on a normal exit
     trains whoever reads the log to ignore tracebacks.
     """
+    # stderr is forced to UTF-8 before anything writes to it. Python picks the
+    # console encoding otherwise, which on Windows is cp1252, and this server's
+    # diagnostics are full of `§` - thirty-nine section references across the
+    # refusal messages alone, because every one of them cites the clause it is
+    # enforcing. Under cp1252 each becomes a replacement character, so the log a
+    # Claude Desktop user is told to read ("MCP_INTEGRATION.md ?2.1") points at
+    # nothing. The client sees the text correctly either way; it is the *log*
+    # that loses it, which is the copy an operator actually has.
+    #
+    # `errors="replace"` rather than the default: a log write that raises
+    # `UnicodeEncodeError` inside a logging handler is swallowed and the line is
+    # simply lost, which is a worse failure than a mangled character. Same
+    # reasoning as the Makefile's `PYTHONIOENCODING := utf-8`, which exists
+    # because `lint-imports` hit this on its spinner.
+    #
+    # Guarded by an `isinstance` rather than a `hasattr`, and not only to satisfy
+    # `mypy`: `sys.stderr` is typed `TextIO`, which has no `reconfigure`, and at
+    # runtime it is whatever the host put there. Under `pytest`'s capture it is
+    # not a `TextIOWrapper` at all, so an unguarded call fails the one place this
+    # function is easiest to test.
+    if isinstance(sys.stderr, io.TextIOWrapper):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(
         stream=sys.stderr,
         level=logging.INFO,

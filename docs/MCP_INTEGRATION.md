@@ -166,6 +166,19 @@ Its log is `%APPDATA%\Claude\logs\mcp-server-guardmem.log`.
 pool and parses the ontology *before* the first response is written, so a bad
 `GM_DATABASE_URL` fails the handshake rather than the first call.
 
+Since **S6.4** it also advertises resources and prompts. In Claude Desktop's attach
+menu you should find two entries for the configured namespace — **Believed memory**
+and **Predicate schema** — and four prompts, two of which say "not available in this
+build" in their own titles. Attaching *Believed memory* is S6.4's acceptance check:
+it renders every live assertion grouped by predicate, each with its confidence and
+the verbatim span it came from, and lists what has been retired underneath. If it
+says "GuardMem believes nothing about this namespace yet", the namespace is readable
+and empty — run `make seed`, and check `GM_MCP_DEFAULT_NAMESPACE` matches what the
+seed wrote (`patient:7781`).
+
+`guardmem://audit/{trace_id}` is deliberately not in that menu: a trace id is minted
+per proposal, so a client constructs that URI from one a tool result gave it. See §3.
+
 **The gate.** Say to Claude Desktop:
 
 > Remember that the patient's preferred pharmacy is CVS #4021.
@@ -456,6 +469,30 @@ snapshot changes, which is how a desktop client keeps a live memory panel accura
 **Templates** are advertised via `resources/templates/list` so clients can construct URIs for
 namespaces they discover at runtime.
 
+**What S6.4 serves, and what it does not.** Three of the seven: `memory/{namespace}`,
+`audit/{trace_id}` and `ontology/{namespace}`. The rest arrive with the feature they describe —
+`timeline` with §2.5, `policy` with the policy pack, `queue/pending` with S18.1's review queue, and
+the entity card alongside `memory.get_entity`'s graph half.
+
+Three things about the three that exist are worth knowing before reading one:
+
+- **`subscribe` is advertised as `false`.** The resources now exist and the snapshot behind
+  `memory/{namespace}` really does change, but nothing tells a live *session* that a write
+  happened — no bus, no `LISTEN/NOTIFY`, and on stdio no second process to hear one. A client that
+  subscribed would wait for an event that never comes, and could not tell that from "nothing has
+  changed". It arrives with the worker at **S8.4**.
+- **`resources/list` returns only what configuration already answers**, which is the two keyed by
+  `GM_MCP_DEFAULT_NAMESPACE`. `audit/{trace_id}` is template-only by nature: a trace id is minted
+  per proposal, so there is no "the" trace to offer.
+- **A bad URI fails the request; it does not return an empty body.** A person attaches a resource
+  from a UI and there is no model in that loop to interpret a refusal, so "could not load" and
+  "nothing is known" must not render the same way.
+
+`memory/{namespace}` is a **snapshot, not a listing**: `VectorStore` has no "give me everything"
+method, so it asks for up to 100 live assertions and says in the body whether that was all of them.
+Retrieval ranking is meaningless until a real embedder lands — `HashEmbedder` hashes text — so the
+subset is stable but arbitrary when a namespace exceeds the ceiling.
+
 ---
 
 ## 4. Prompts
@@ -466,6 +503,28 @@ namespaces they discover at runtime.
 | `guardmem/adjudicate_conflict` | `candidate`, `incumbent`, `ontology_ref` | Structured conflict reasoning: entailment, contradiction, temporal ordering, recommended resolution. |
 | `guardmem/review_brief` | `task_id` | Renders a flagged candidate as a plain-language brief for a human reviewer — the same copy the dashboard uses, so a reviewer working in Claude Desktop sees an identical framing. |
 | `guardmem/memory_hygiene_report` | `namespace`, `window` | Narrated summary of drift, stale facts, and contradiction pressure for a namespace. |
+
+**Two are served at S6.4 and two decline.** `extract_memories` and `adjudicate_conflict` render the
+**pipeline's own versioned files**, which is the only way the claim above — that exposing the
+canonical prompt reduces schema-gate rejections — is true rather than aspirational. A paraphrase
+would be a second description of a schema, free to drift from the gate enforcing it.
+
+`review_brief` and `memory_hygiene_report` are published and refuse by name: there is no review task
+to render until **S18.1**, and drift and contradiction pressure are unmeasured, so a hygiene report
+would silently omit two of its three findings and read as a clean bill of health. Each refusal names
+the step it waits on, which is what makes it a gap rather than a mystery.
+
+**Three notes for anyone invoking the served two.**
+
+- **The rendered text carries a one-time canary, returned in `_meta`.** The pipeline fills that slot
+  itself and rejects any completion echoing it — a model repeating its instructions is a model that
+  read the content as instructions. Invoking the prompt moves that check to **you**: compare
+  `_meta.canary` against your completion and discard it on a match. The token is fresh per call.
+- **`ontology_ref` names a pack and is checked, not substituted.** A server with `clinical`
+  installed refuses a request for `legal` rather than quietly serving the wrong vocabulary, because
+  the resulting candidates would be quarantined for reasons the caller cannot see.
+- **`k` is not in the prompt text.** It is `MEMORY_ENGINE.md` §1.2's sample count — a property of
+  the call — and it comes back in `_meta` so a caller can reproduce the pipeline's sampling.
 
 ---
 
