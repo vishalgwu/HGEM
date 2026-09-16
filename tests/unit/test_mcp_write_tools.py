@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from fixtures.assertions import ENTITY
 from fixtures.conflict import candidate
 from fixtures.decisions import conflict, risk
 from fixtures.extraction import response
@@ -105,6 +106,7 @@ def _one_governed() -> PipelineResult:
         governed=[
             GovernedCandidate(
                 candidate=candidate(predicate="allergy", obj="penicillin"),
+                subject_id=ENTITY,
                 record=DecisionRecord(
                     decision=Decision.HITL_REVIEW,
                     reason_codes=["R_ABOVE_RHO_HI"],

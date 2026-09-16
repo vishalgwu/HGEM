@@ -29,20 +29,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 from guardmem_core.llm.entailment import LLMEntailer
+from guardmem_core.memory.applier import Applied, apply
 from guardmem_core.memory.entities import NamespaceEntityResolver
+from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.pipeline.deps import Deps
 from guardmem_core.pipeline.l2_validate import LLMJudge
 from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
+from guardmem_core.pipeline.per_candidate import CandidateFailure
 from mcp_server.tools.context import ToolRefusedError
 
 if TYPE_CHECKING:
     from guardmem_core.pipeline.orchestrator import PipelineResult
-    from guardmem_core.pipeline.per_candidate import CandidateFailure
     from guardmem_core.schemas.candidate import MemoryCandidate
     from guardmem_core.schemas.verdict import DecisionRecord
     from mcp_server.tools.context import ToolContext
 
-__all__ = ["deps_for", "result_of"]
+__all__ = ["apply_all", "deps_for", "result_of"]
 
 # What `DecisionRecord.policy_version` records while no policy pack exists.
 # S12.2 builds the engine; `override_signals` already takes the string and
@@ -108,7 +110,70 @@ def deps_for(context: ToolContext) -> Deps:
     )
 
 
-def result_of(result: PipelineResult, failures: list[CandidateFailure]) -> dict[str, Any]:
+async def apply_all(
+    context: ToolContext, result: PipelineResult
+) -> tuple[dict[str, Applied], list[CandidateFailure]]:
+    """Apply every decision, one transaction each.  ADR-0010
+
+    Args:
+        context: The call's tenant and namespace.
+        result: What the pipeline decided.
+
+    Returns:
+        What became of each candidate, by candidate id, and one
+        `CandidateFailure` per apply that raised.
+
+    **A failed apply is attributed, not propagated.** `run()` already returns
+    per-candidate failures rather than losing a batch, and the same argument is
+    stronger here: a supersession that lost its race rolls back its own
+    transaction and must not discard nineteen writes that committed. The caller
+    reports it beside the rest.
+
+    Sequential rather than concurrent, deliberately. Each apply holds a pooled
+    connection for the length of a transaction, and a proposal with forty
+    candidates fanned out would take forty connections from a pool sized for a
+    process. `Deps.max_concurrent_scores` bounds the *scoring* fan-out because
+    that is model-bound; this is database-bound and the pool is the bound.
+
+    The store is built here rather than taken from `context.store`, which is
+    typed as the `VectorStore` Protocol so unit tests can drive the handlers
+    against a fake. The applier needs the concrete class - ADR-0010 puts
+    `write_in` and `supersede_in` there on purpose - and a composition root is
+    where naming one is allowed.
+    """
+    state = context.state
+    store = PgVectorStore(
+        state.pool,
+        state.embedder,
+        tenant_id=context.tenant_id,
+        timeout_s=state.settings.store_timeout_s,
+    )
+    applied: dict[str, Applied] = {}
+    failures: list[CandidateFailure] = []
+    for governed in result.governed:
+        try:
+            outcome = await apply(
+                governed,
+                store=store,
+                pool=state.pool,
+                tenant_id=context.tenant_id,
+                trace_id=result.trace_id,
+                timeout_s=state.settings.store_timeout_s,
+            )
+        except Exception as exc:
+            failures.append(
+                CandidateFailure(candidate_id=governed.candidate.candidate_id, error=exc)
+            )
+        else:
+            applied[outcome.candidate_id] = outcome
+    return applied, failures
+
+
+def result_of(
+    result: PipelineResult,
+    failures: list[CandidateFailure],
+    applied: dict[str, Applied] | None = None,
+) -> dict[str, Any]:
     """Map a pipeline result onto §2.2's published result object.
 
     Args:
@@ -118,11 +183,16 @@ def result_of(result: PipelineResult, failures: list[CandidateFailure]) -> dict[
     Returns:
         §2.2's object, plus the two fields below.
 
-    **`applied` is an amendment to §2.2 and it is not optional.** The published
-    example carries `assertion_id` on an `auto_write`; nothing writes, so there
-    is no id to carry, and a caller reading `"decision": "auto_write"` with no
-    further signal would reasonably conclude the fact is now in memory. The
-    field says plainly that it is not. It becomes `true` when the applier lands.
+    **`applied` is an amendment to §2.2 and it is not optional.** §2.2's example
+    carries `assertion_id` on an `auto_write`, and a caller reading
+    `"decision": "auto_write"` with no further signal would conclude the fact is
+    in memory. Now that ADR-0010's applier exists it usually is - so the field
+    reports what actually happened rather than a constant, and an `assertion_id`
+    appears on exactly the candidates that produced a row.
+
+    `applied` is `None` when nothing was applied at all, which is what a caller
+    of `result_of` outside the write path passes. It reads as `false`, because
+    no row was written.
 
     **`failed` is the second.** §2.2 has no field for a candidate that raised,
     and `run()` returns them *beside* the decisions precisely so one bad
@@ -133,15 +203,19 @@ def result_of(result: PipelineResult, failures: list[CandidateFailure]) -> dict[
     hold a DSN or a span of untrusted source text, out of anything a caller
     sees.
     """
+    outcomes = applied or {}
     return {
         "trace_id": str(result.trace_id),
         # §2.2's own vocabulary: "decided" for strict, "accepted" for async.
         # `_require_mode` refuses async until S8.4, so this is always the former.
         "status": "decided",
-        "candidates": [_candidate(item.candidate, item.record) for item in result.governed],
+        "candidates": [
+            _candidate(item.candidate, item.record, outcomes.get(str(item.candidate.candidate_id)))
+            for item in result.governed
+        ],
         "dropped_noise": result.dropped_noise,
         "quarantined": len(result.quarantined),
-        "applied": False,
+        "applied": any(o.assertion_id for o in outcomes.values()),
         "failed": [
             {"candidate_id": str(failure.candidate_id), "code": _code_of(failure)}
             for failure in failures
@@ -149,22 +223,30 @@ def result_of(result: PipelineResult, failures: list[CandidateFailure]) -> dict[
     }
 
 
-def _candidate(candidate: MemoryCandidate, record: DecisionRecord) -> dict[str, Any]:
+def _candidate(
+    candidate: MemoryCandidate, record: DecisionRecord, applied: Applied | None
+) -> dict[str, Any]:
     """One entry of §2.2's `candidates` array.
 
     Args:
         candidate: The proposed fact.
         record: What was decided about it.
 
+    Args (continued):
+        applied: What the applier did with it, or `None` when nothing was
+            applied.
+
     Returns:
-        The published fields, and no `assertion_id` - see `result_of`.
+        §2.2's published fields, with `assertion_id` where a row was written and
+        `not_applied` where one was not. The two are exclusive: a caller reads
+        one or the other and never has to infer from an absence.
 
     `predicate` and `object` come from the *candidate*, which is the only place
     they exist: `MEMORY_ENGINE.md` §0 gives `DecisionRecord` eight fields and
     none of them says what was decided about. `GovernedCandidate` pairs the two
     so this mapping cannot put one candidate's verdict beside another's fact.
     """
-    return {
+    entry: dict[str, Any] = {
         "candidate_id": str(candidate.candidate_id),
         "predicate": candidate.predicate,
         "object": candidate.object,
@@ -173,6 +255,13 @@ def _candidate(candidate: MemoryCandidate, record: DecisionRecord) -> dict[str, 
         "risk": record.risk.risk,
         "reason_codes": list(record.reason_codes),
     }
+    if applied is None:
+        return entry
+    if applied.assertion_id is not None:
+        entry["assertion_id"] = str(applied.assertion_id)
+    elif applied.reason is not None:
+        entry["not_applied"] = applied.reason
+    return entry
 
 
 def _code_of(failure: CandidateFailure) -> str:

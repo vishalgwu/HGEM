@@ -39,22 +39,22 @@ import asyncpg
 
 from guardmem_core.errors import ConcurrencyConflict
 from guardmem_core.memory.outbox import INSERT_OUTBOX, outbox_params
-from guardmem_core.memory.vector.base import ScoredAssertion, embed_text
+from guardmem_core.memory.vector.base import ScoredAssertion
 from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.memory.vector.queries import (
     SUPERSEDE,
+    fetch_citations,
     nearest_statement,
     predicates,
     retired_statement,
 )
 from guardmem_core.memory.vector.rowmap import (
-    EMBEDDING_DIM,
     INSERT_ASSERTION,
     INSERT_PROVENANCE,
-    SELECT_PROVENANCE,
+    PreparedWrite,
     assertion_from_row,
     assertion_params,
-    provenance_from_row,
+    embed_batch,
     provenance_params,
 )
 from guardmem_core.types import AssertionId, Namespace, TenantId
@@ -65,9 +65,8 @@ if TYPE_CHECKING:
     from guardmem_core.memory.vector.base import Embedder
     from guardmem_core.memory.vector.pool import Conn
     from guardmem_core.schemas.entity import StoredAssertion
-    from guardmem_core.schemas.receipt import Provenance
 
-__all__ = ["PgVectorStore"]
+__all__ = ["PgVectorStore", "PreparedWrite"]
 
 
 class PgVectorStore:
@@ -123,47 +122,86 @@ class PgVectorStore:
             StoreUnavailable: Postgres is unreachable.
             ValueError: an embedding came back with the wrong dimension.
 
-        One transaction is not an optimisation, and it carries two separate
-        invariants. `assertion_requires_provenance` is a DEFERRABLE INITIALLY
-        DEFERRED constraint trigger that fires at COMMIT, so an assertion and
-        its provenance written in separate transactions are rejected -
-        correctly, as an unsourced write. And `ARCHITECTURE.md` §2.4 requires
-        the assertion row and its outbox event to commit together: an assertion
-        that landed without its event would be invisible with nothing left in
-        the system that could ever flip it, which is not a partial write but a
-        permanently unreadable one.
+        One transaction is not an optimisation, and it carries two invariants.
+        `assertion_requires_provenance` is a DEFERRABLE INITIALLY DEFERRED
+        constraint trigger that fires at COMMIT, so an assertion whose citations
+        went to a different transaction is rejected - correctly, as an unsourced
+        write. And `ARCHITECTURE.md` §2.4 requires the assertion row and its
+        outbox event to commit together: an assertion that landed without its
+        event would be invisible with nothing left that could ever flip it,
+        which is not a partial write but a permanently unreadable one.
 
-        **The outbox row is written here rather than by the router**, and that
-        is the one place this class's Postgres-specificity is load-bearing
-        rather than incidental. Atomicity between two tables is a property of a
-        Postgres transaction, and this method owns the only one in the write
-        path. A `VectorStore` that cannot make that guarantee - Qdrant, above
-        `PRD.md` FR-4.1's threshold - needs its own coordination story, which is
-        exactly what §2.4 means by the backend being an operator decision.
+        Idempotent by `ON CONFLICT DO NOTHING`, taken over `DO UPDATE`
+        deliberately. S3.3 replays this after a relay restart, and by then the
+        row may legitimately have been superseded. An overwrite would resurrect
+        it - clear `valid_to`, drop `superseded_by` - returning a fact the
+        system had retired, through the front door of a *retry*. It is also why
+        the outbox id is derived rather than generated: a replay must not
+        enqueue a second event for a dispatched write.
 
-        Idempotent by `ON CONFLICT DO NOTHING`, which is a stronger choice than
-        it looks and is taken over `DO UPDATE` deliberately. S3.3 replays this
-        call after a relay restart, and by then the row may legitimately have
-        been superseded by a later proposal. An overwrite would resurrect it -
-        clear `valid_to`, drop `superseded_by`, and return a fact the system had
-        already retired, through the front door of a *retry*. Doing nothing is
-        the only replay semantics that cannot undo a decision, and it is why the
-        outbox id is derived from the assertion id rather than generated: a
-        replay must not enqueue a second event for a write already dispatched.
+        A thin wrapper over `prepare` and `write_in` since ADR-0010, which is
+        what keeps this path and the applier's from drifting.
+        """
+        prepared = await self.prepare(assertions)
+        if prepared is None:
+            return
+        async with self._transaction() as connection:
+            await self.write_in(connection, prepared)
+
+    async def prepare(self, assertions: Sequence[StoredAssertion]) -> PreparedWrite | None:
+        """Embed a batch and build its rows, outside any transaction.
+
+        Args:
+            assertions: What is about to be written.
+
+        Returns:
+            The three row sets `write_in` needs, or `None` for an empty batch -
+            which is a normal outcome, not an error, when every candidate in a
+            proposal was rejected.
+
+        Raises:
+            ValueError: an embedding came back with the wrong dimension.
+            ProviderUnavailable: propagated from the embedder.
+
+        **Split from `write_in` so the embedding never happens inside a
+        transaction.** Embedding is a network call and a transaction holds a
+        pooled connection; one inside the other means a slow provider occupies a
+        connection another tenant's request is waiting for. `upsert` has always
+        embedded first - this names the seam so ADR-0010's applier shares it.
         """
         if not assertions:
-            return
-        vectors = await self._embed(assertions)
-        rows = [
-            assertion_params(assertion, self._tenant_id, vector)
-            for assertion, vector in zip(assertions, vectors, strict=True)
-        ]
-        citations = [params for assertion in assertions for params in provenance_params(assertion)]
-        events = [outbox_params(assertion, self._tenant_id) for assertion in assertions]
-        async with self._transaction() as connection:
-            await connection.executemany(INSERT_ASSERTION, rows, timeout=self._timeout_s)
-            await connection.executemany(INSERT_PROVENANCE, citations, timeout=self._timeout_s)
-            await connection.executemany(INSERT_OUTBOX, events, timeout=self._timeout_s)
+            return None
+        vectors = await embed_batch(self._embedder, assertions)
+        return PreparedWrite(
+            assertions=[
+                assertion_params(assertion, self._tenant_id, vector)
+                for assertion, vector in zip(assertions, vectors, strict=True)
+            ],
+            citations=[
+                params for assertion in assertions for params in provenance_params(assertion)
+            ],
+            events=[outbox_params(assertion, self._tenant_id) for assertion in assertions],
+        )
+
+    async def write_in(self, connection: Conn, prepared: PreparedWrite) -> None:
+        """Write a prepared batch inside the caller's transaction.  ADR-0010
+
+        Args:
+            connection: A connection with a transaction open and
+                `app.tenant_id` set. `pool.tenant_transaction` produces one.
+            prepared: What `prepare` built.
+
+        Raises:
+            StoreUnavailable: propagated by the caller's transaction.
+
+        On the concrete class and deliberately not on the `VectorStore`
+        Protocol - **ADR-0010** owns that argument in full. `upsert` is a thin
+        wrapper over `prepare` + this, so the two write paths cannot drift: a
+        column added to `INSERT_ASSERTION` reaches both, or neither.
+        """
+        await connection.executemany(INSERT_ASSERTION, prepared.assertions, timeout=self._timeout_s)
+        await connection.executemany(INSERT_PROVENANCE, prepared.citations, timeout=self._timeout_s)
+        await connection.executemany(INSERT_OUTBOX, prepared.events, timeout=self._timeout_s)
 
     async def search(
         self,
@@ -209,7 +247,9 @@ class PgVectorStore:
         statement = nearest_statement(clauses, vector_param, f"${len(params)}")
         async with self._transaction() as connection:
             rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
-            citations = await self._citations(connection, [row["id"] for row in rows])
+            citations = await fetch_citations(
+                connection, [row["id"] for row in rows], timeout_s=self._timeout_s
+            )
         # `<=>` is cosine *distance*; the protocol publishes similarity. Converted
         # here, at the one place that knows which direction the operator runs in.
         return [
@@ -267,7 +307,9 @@ class PgVectorStore:
         statement = retired_statement(clauses, f"${len(params)}")
         async with self._transaction() as connection:
             rows = await connection.fetch(statement, *params, timeout=self._timeout_s)
-            citations = await self._citations(connection, [row["id"] for row in rows])
+            citations = await fetch_citations(
+                connection, [row["id"] for row in rows], timeout_s=self._timeout_s
+            )
         return [assertion_from_row(row, citations[row["id"]]) for row in rows]
 
     async def supersede(self, old_id: AssertionId, new_id: AssertionId, at: datetime) -> None:
@@ -295,9 +337,28 @@ class PgVectorStore:
         distinguishes them.
         """
         async with self._transaction() as connection:
-            status = await connection.execute(
-                SUPERSEDE, at, new_id, old_id, timeout=self._timeout_s
-            )
+            await self.supersede_in(connection, old_id, new_id, at)
+
+    async def supersede_in(
+        self, connection: Conn, old_id: AssertionId, new_id: AssertionId, at: datetime
+    ) -> None:
+        """Retire `old_id` inside the caller's transaction.  ADR-0010
+
+        Args:
+            connection: As `write_in`.
+            old_id: The incumbent being retired.
+            new_id: What replaces it.
+            at: World-time the supersession takes effect.
+
+        Raises:
+            ConcurrencyConflict: no live row with that id in this tenant.
+
+        **Raising rolls the caller's transaction back, and that is the point:**
+        a lost race must not leave the successor stored beside a still-live
+        incumbent, which is two live values for a `ONE` predicate - invariant I2
+        broken by a retry. ADR-0010.
+        """
+        status = await connection.execute(SUPERSEDE, at, new_id, old_id, timeout=self._timeout_s)
         if status.rsplit(" ", maxsplit=1)[-1] == "0":
             raise ConcurrencyConflict(
                 f"assertion {old_id} is not live in tenant {self._tenant_id}: it was "
@@ -320,46 +381,3 @@ class PgVectorStore:
         three times is three chances to pass someone else's.
         """
         return tenant_transaction(self._pool, self._tenant_id, timeout_s=self._timeout_s)
-
-    async def _embed(self, assertions: Sequence[StoredAssertion]) -> list[list[float]]:
-        """Embed a batch, checking the shape the column declares.
-
-        Args:
-            assertions: The batch being written.
-
-        Returns:
-            One vector per assertion, in order.
-
-        Raises:
-            ValueError: the embedder returned the wrong count or dimension.
-        """
-        vectors = await self._embedder.embed([embed_text(a) for a in assertions])
-        if len(vectors) != len(assertions):
-            raise ValueError(
-                f"embedder returned {len(vectors)} vectors for {len(assertions)} assertions"
-            )
-        for vector in vectors:
-            if len(vector) != EMBEDDING_DIM:
-                raise ValueError(
-                    f"embedder returned a {len(vector)}-dimension vector; "
-                    f"assertion.embedding is VECTOR({EMBEDDING_DIM}). Check GM_EMBED_MODEL."
-                )
-        return vectors
-
-    async def _citations(
-        self, connection: Conn, ids: Sequence[object]
-    ) -> dict[object, list[Provenance]]:
-        """Fetch every citation for `ids`, grouped by assertion.
-
-        One query for the whole page rather than one per row. `StoredAssertion`
-        requires `min_length=1` provenance, so this is not enrichment that could
-        be skipped when it gets expensive - it is part of constructing the
-        object, and N+1 here would be paid on every recall.
-        """
-        grouped: dict[object, list[Provenance]] = {id_: [] for id_ in ids}
-        if not ids:
-            return grouped
-        rows = await connection.fetch(SELECT_PROVENANCE, list(ids), timeout=self._timeout_s)
-        for row in rows:
-            grouped[row["assertion_id"]].append(provenance_from_row(row))
-        return grouped

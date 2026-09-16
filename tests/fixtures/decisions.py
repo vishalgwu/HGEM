@@ -83,12 +83,28 @@ def risk(
     )
 
 
-def conflict(hint: str = "coexist", kind: ConflictKind = ConflictKind.NONE) -> ConflictReport:
-    """A Layer 2 report. Only `resolution_hint` reaches the matrix."""
+def conflict(
+    hint: str = "coexist",
+    kind: ConflictKind = ConflictKind.NONE,
+    *,
+    incumbent_assertion_id: str | None = None,
+) -> ConflictReport:
+    """A Layer 2 report.
+
+    Args:
+        hint: §2.3's action. The only field the decision matrix reads.
+        kind: The classification.
+        incumbent_assertion_id: Which live assertion this conflicts with.
+            `None` for the common case - most facts are novel - and set by
+            ADR-0010's applier tests, which need a real id to supersede.
+
+    Returns:
+        The report.
+    """
     return ConflictReport.model_validate(
         {
             "kind": kind,
-            "incumbent_assertion_id": None,
+            "incumbent_assertion_id": incumbent_assertion_id,
             "entailment": 0.0,
             "contradiction": 0.0,
             "cosine": 0.0,

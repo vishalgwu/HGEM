@@ -28,7 +28,7 @@ from typing import Any
 import httpx
 import pytest
 
-from fixtures.assertions import TENANT, WHEN
+from fixtures.assertions import ENTITY, TENANT, WHEN
 from fixtures.conflict import candidate
 from fixtures.decisions import conflict, risk
 from fixtures.mcp import settings
@@ -51,6 +51,7 @@ def governed(*, entropy: float = 0.25, confidence: float = 0.8) -> GovernedCandi
         candidate=candidate(
             predicate="allergy", obj="penicillin", verbatim="allergic to penicillin"
         ),
+        subject_id=ENTITY,
         record=DecisionRecord(
             decision=Decision.HITL_REVIEW,
             reason_codes=[],

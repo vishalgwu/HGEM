@@ -155,7 +155,8 @@ guardmem-ai/
 │   │       │   │   │                    #   embed_text + Claim moved here at S4.2
 │   │       │   │   ├── pool.py          # S3.2; process-wide asyncpg pool, vector codec registered;
 │   │       │   │   │                    #   S3.3 added tenant_transaction, shared with the relay
-│   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both directions
+│   │       │   │   ├── rowmap.py        # S3.2; assertion/provenance row shape, both
+│   │       │   │   │                    #   directions. PreparedWrite + embed_batch at ADR-0010
 │   │       │   │   ├── hash_embedder.py # S3.6 audit; the one deterministic Embedder,
 │   │       │   │   │                    #   shared by the seed and the suite, so they cannot drift
 │   │       │   │   ├── pgvector_store.py

@@ -35,13 +35,17 @@ from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.receipt import Provenance, SourceTier
 from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
 
-__all__ = ["NS", "TENANT", "WHEN", "citation", "stored_assertion"]
+__all__ = ["ENTITY", "NS", "TENANT", "WHEN", "citation", "stored_assertion"]
 
 # Shared defaults. `NS` and `WHEN` were declared separately in each of the three
 # modules this replaced, with the same two values.
 NS: Final = Namespace("patient:8812")
 WHEN: Final = datetime(2026, 3, 14, 9, 30, tzinfo=UTC)
 TENANT: Final = TenantId("11111111-1111-1111-1111-111111111111")
+# The resolved subject `stored_assertion` defaults to, named so callers that
+# need to agree with it - ADR-0010's `GovernedCandidate.subject_id`, say - can
+# say so rather than repeating the literal.
+ENTITY: Final = EntityId("e-1")
 
 
 def citation(
@@ -87,7 +91,7 @@ def stored_assertion(
     assertion_id: str | None = None,
     tenant_id: TenantId = TENANT,
     namespace: Namespace = NS,
-    subject: str = "e-1",
+    subject: str = ENTITY,
     predicate: str = "allergy",
     obj: ObjectValue = "penicillin",
     confidence: float = 0.9,

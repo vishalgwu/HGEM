@@ -149,14 +149,17 @@ confirmation. This is the behavior that makes governance visible rather than mys
 
 **Two fields the server adds, and why (S6.2's write half).**
 
-- `applied` (boolean). The example above carries `assertion_id` on an
-  `auto_write`; nothing writes yet - `run()` reaches a decision and applies
-  none, because `RULES.md` non-negotiable #4 binds the audit event to the state
-  change and the applier that composes them needs its own ADR. So there is no id
-  to carry, and a caller reading `"decision": "auto_write"` with no further
-  signal would reasonably conclude the fact is in memory. `applied: false` says
-  it is not. It becomes `true` with the applier, and `assertion_id` returns with
-  it.
+- `applied` (boolean). True when any candidate in this proposal produced a row.
+  ADR-0010's applier writes the assertion, its citation, its outbox event and
+  its audit events in **one transaction**, so `RULES.md` non-negotiable #4 holds
+  by construction. A candidate that wrote nothing carries `not_applied` instead
+  of `assertion_id` - `decision_reject`, `decision_hitl_review`,
+  `decision_escalate`, or `merge_not_implemented` - so a caller reads what
+  happened rather than inferring it from a missing field.
+
+  The row is **not yet visible**. The outbox event commits with it and the relay
+  applies the graph side and sets `visible`, which is §2.4 unchanged: a reader
+  sees nothing until both sides land.
 - `failed` (array of `{candidate_id, code}`). `run()` returns a failed candidate
   *beside* the decisions rather than discarding the batch, and §2.2 has no field
   for one. Omitting them would mean a fact the caller submitted vanished from

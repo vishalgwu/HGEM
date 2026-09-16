@@ -29,11 +29,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from guardmem_core.memory.vector.rowmap import ASSERTION_COLUMNS
+from guardmem_core.memory.vector.rowmap import (
+    ASSERTION_COLUMNS,
+    SELECT_PROVENANCE,
+    provenance_from_row,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
+    from guardmem_core.memory.vector.pool import Conn
+    from guardmem_core.schemas.receipt import Provenance
     from guardmem_core.types import Namespace
 
 __all__ = [
@@ -179,3 +186,35 @@ def retired_statement(clauses: list[str], limit_param: str) -> str:
         f"WHERE {' AND '.join(complemented)} "
         f"ORDER BY valid_to DESC LIMIT {limit_param}"
     )
+
+
+async def fetch_citations(
+    connection: Conn, ids: Sequence[object], *, timeout_s: float
+) -> dict[object, list[Provenance]]:
+    """Every citation for `ids`, grouped by assertion.
+
+    Args:
+        connection: An open connection with the tenant applied.
+        ids: The assertion ids on this page of results.
+        timeout_s: Per-statement ceiling.
+
+    Returns:
+        A citation list per id, empty for an id with none - so a caller indexes
+        rather than branching.
+
+    One query for the whole page rather than one per row. `StoredAssertion`
+    requires `min_length=1` provenance, so this is not enrichment that could be
+    skipped when it gets expensive - it is part of constructing the object, and
+    an N+1 here would be paid on every recall.
+
+    Here rather than on the store because `SELECT_PROVENANCE` is SQL and this
+    module is where the SQL lives; the store is left with the methods a caller
+    actually calls.
+    """
+    grouped: dict[object, list[Provenance]] = {id_: [] for id_ in ids}
+    if not ids:
+        return grouped
+    rows = await connection.fetch(SELECT_PROVENANCE, list(ids), timeout=timeout_s)
+    for row in rows:
+        grouped[row["assertion_id"]].append(provenance_from_row(row))
+    return grouped

@@ -2120,9 +2120,17 @@ no similarity row - so every duplicate the suite finds is found by object
 equality, which is the route that has to hold when a real judge is unhelpful.
 
 What the suite assumes rather than proves is named in its own docstring: the
-*applier* that turns a resolution into a store call does not exist until S5.6,
-so those four lines live in the test. It proves the decision layer keeps I2
-given an applier that honours the hint - not that S5.6's will.
+*applier* that turns a resolution into a store call does not exist yet, so
+those four lines live in the test. It proves the decision layer keeps I2 given
+an applier that honours the hint - not that the real one will.
+
+**It arrived at ADR-0010, not at S5.6, and it honours two hints of three.**
+`memory/applier.py` inserts on `coexist` and inserts-then-retires on
+`supersede`, both inside one transaction, which is the case this suite's four
+lines model. **`merge` it audits and does not apply**: a merge is an `UPDATE` of
+`corroboration_count`, and a replayed increment is not idempotent the way a
+replayed insert is. So the assumption above holds for the two hints that write a
+row, and the third is a named gap rather than a silent one.
 
 Three mutants, three kills: dropping the equality row breaks I2 directly
 (`2 live values for a ONE predicate`), counting citations instead of independent
@@ -2622,6 +2630,11 @@ Replay re-runs with pinned model/prompt/policy versions from the audit record an
    widening the protocol or teaching the store about audit, and both are
    ADR-sized. A DECISION event *can* stand alone - three of the four outcomes
    change no state - so `append_decision` ships and the WRITE event does not.
+   **That ADR is ADR-0010**, and the composition it describes is
+   `memory/applier.py`: one `tenant_transaction` per candidate, opened outside
+   the pipeline, with `PgVectorStore` growing connection-taking variants and the
+   `VectorStore` Protocol untouched. `run()` still writes nothing - the decision
+   layer stays pure and its test still asserts the store is empty.
 6. **`scripts/` became a package, which open item #35 predicted.** It said the
    bare module names were "harmless today; the same trap as the duplicate
    `conftest` if either tree grows a matching basename". What grew was a test
@@ -2993,6 +3006,37 @@ Also added: `GM_LLM_PROVIDER`, `GM_OLLAMA_URL`, `GM_OLLAMA_MODEL` and
 `GM_OLLAMA_TIMEOUT_S`, with `llm/providers/selection.py` as the one place that
 reads them. `.env.example` selects `ollama`, because both keys in it are blank
 and a fresh checkout should start.
+
+**Correction 7, 2026-09-16: `applied` is true now, and correction 6's first
+bullet is history.**
+
+ADR-0010 built the applier, so `memory.propose` no longer decides and discards.
+An `auto_write` inserts the assertion, its citation and its outbox event, retires
+the incumbent where §2.3 said supersede, and appends the audit events - all in
+**one transaction**, which is what `RULES.md` non-negotiable #4 has always
+required and what nothing enforced until now. The response carries a real
+`assertion_id`.
+
+**This is the step that closed open item #18.** The audit chain was built,
+tested and tamper-evident at S5.5 and no write path had ever appended to it.
+Eleven steps with a chain and no caller, and the first thing to extend it was
+this tool.
+
+Two things a reader of the response should know:
+
+- **`not_applied` is a field, and it is not an error.** Three of §3.4's four
+  decisions write nothing and that is the system working; a caller has to tell a
+  `reject` from a write that was attempted and lost. `decision_reject`,
+  `decision_hitl_review`, `decision_escalate` - and `merge_not_implemented`,
+  which is the one gap ADR-0010 left open deliberately.
+- **A written row is invisible until the relay runs.** The applier commits the
+  assertion and the outbox event; the graph side lands asynchronously and the
+  relay flips `visible`. So a `memory.search` immediately after a successful
+  `memory.propose` finds nothing, by design - a partial write is unretrievable
+  rather than briefly wrong.
+
+`memory.commit` still declines, and still for the reason correction 6 gives: the
+applier was never what blocked it. Its confidence is - **ADR-0011**.
 
 **Five corrections to this step, found by building it.**
 

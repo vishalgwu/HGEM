@@ -18,15 +18,21 @@ as is a decision about meaning, not about column order - see `base.embed_text`.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 from uuid import NAMESPACE_URL, uuid5
 
+from guardmem_core.memory.vector.base import embed_text
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.receipt import Provenance, SourceTier
 from guardmem_core.types import AssertionId, EntityId, Namespace, TenantId, TraceId
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from asyncpg import Record
+
+    from guardmem_core.memory.vector.base import Embedder
 
 __all__ = [
     "ASSERTION_COLUMNS",
@@ -55,6 +61,29 @@ ASSERTION_COLUMNS: Final = (
     "confidence, risk, valid_from, valid_to, recorded_at, retracted_at, "
     "superseded_by, corroboration_count, trace_id, visible"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedWrite:
+    """The three row sets one batch of assertions becomes.  ADR-0010
+
+    Attributes:
+        assertions: One parameter tuple per assertion row.
+        citations: One per `Provenance`, which is why this is not
+            `len(assertions)` long - a corroborated fact carries several.
+        events: One outbox event per assertion, keyed by a derived id so a
+            replay enqueues nothing new.
+
+    A value rather than three loose lists, because the three have to be written
+    in one transaction and in this order: `assertion_requires_provenance` is a
+    DEFERRABLE INITIALLY DEFERRED trigger that fires at COMMIT, so an assertion
+    whose citations went to a different transaction is rejected as an unsourced
+    write. Passing them together makes that hard to get wrong by accident.
+    """
+
+    assertions: list[tuple[object, ...]]
+    citations: list[tuple[object, ...]]
+    events: list[tuple[object, ...]]
 
 
 def assertion_params(
@@ -237,3 +266,42 @@ SELECT_PROVENANCE: Final = """
     WHERE assertion_id = ANY($1::uuid[])
     ORDER BY captured_at
 """
+
+
+async def embed_batch(
+    embedder: Embedder, assertions: Sequence[StoredAssertion]
+) -> list[list[float]]:
+    """Embed a batch and check it against the shape the column declares.
+
+    Args:
+        embedder: The `Embedder` the store was built with.
+        assertions: The batch being written.
+
+    Returns:
+        One vector per assertion, in order.
+
+    Raises:
+        ValueError: the embedder returned the wrong count or the wrong
+            dimension. Both are configuration errors that reach Postgres as an
+            opaque type failure otherwise - `assertion.embedding` is
+            `VECTOR(1024)` and a 1536-dimension vector from a different model is
+            rejected by the column with a message about vectors rather than
+            about `GM_EMBED_MODEL`.
+
+    Here rather than on the store because `EMBEDDING_DIM` is here: the number
+    being checked against is the column's declared shape, and this module owns
+    the row shapes. A free function rather than a method for the same reason -
+    nothing about it needs a tenant or a pool.
+    """
+    vectors = await embedder.embed([embed_text(a) for a in assertions])
+    if len(vectors) != len(assertions):
+        raise ValueError(
+            f"embedder returned {len(vectors)} vectors for {len(assertions)} assertions"
+        )
+    for vector in vectors:
+        if len(vector) != EMBEDDING_DIM:
+            raise ValueError(
+                f"embedder returned a {len(vector)}-dimension vector; "
+                f"assertion.embedding is VECTOR({EMBEDDING_DIM}). Check GM_EMBED_MODEL."
+            )
+    return vectors

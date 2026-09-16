@@ -43,7 +43,9 @@ from guardmem_core.pipeline.l3_score import (
 )
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.candidate import MemoryCandidate
+from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.verdict import DecisionRecord
+from guardmem_core.types import EntityId
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -83,7 +85,20 @@ class GovernedCandidate(GMModel):
 
     Attributes:
         candidate: The proposed fact, as Layer 1 extracted it.
+        subject_id: The entity the candidate resolved to. Carried because it
+            exists nowhere else afterwards - `MemoryCandidate.subject` is the
+            surface form the speaker used, `StoredAssertion.subject_id` is the
+            resolved entity, and the resolution happens inside `_decide_one`.
+            ADR-0010's applier needs it to write a row at all.
         record: What Layer 3 decided.
+        incumbent: The live assertion the decision was taken *against*, where
+            there was one - the row `ConflictReport.incumbent_assertion_id`
+            names. Carried because ADR-0010's applier needs it and cannot get it
+            any other way: §2.4's merge folds a duplicate into the incumbent
+            rather than inserting, which means calling `dedupe.merge` with the
+            whole object. Re-reading it by id after the fact would be a second
+            read of state that may have moved, and the decision was made against
+            *this* version.
 
     **The pairing is structural because positional pairing is the bug this
     codebase keeps catching.** `LLMJudge` checks its judgement count because a
@@ -103,7 +118,9 @@ class GovernedCandidate(GMModel):
     """
 
     candidate: MemoryCandidate
+    subject_id: EntityId
     record: DecisionRecord
+    incumbent: StoredAssertion | None = None
 
 
 async def score_candidate(
@@ -129,8 +146,13 @@ async def score_candidate(
     """
     async with limit:
         try:
-            record = await _decide_one(verdict, samples, proposal, deps)
-            return GovernedCandidate(candidate=verdict.candidate, record=record)
+            record, subject_id, incumbent = await _decide_one(verdict, samples, proposal, deps)
+            return GovernedCandidate(
+                candidate=verdict.candidate,
+                subject_id=subject_id,
+                record=record,
+                incumbent=incumbent,
+            )
         except Exception as exc:
             return CandidateFailure(candidate_id=verdict.candidate.candidate_id, error=exc)
 
@@ -140,8 +162,12 @@ async def _decide_one(
     samples: Sequence[Sequence[ExtractedFact]],
     proposal: Proposal,
     deps: Deps,
-) -> DecisionRecord:
+) -> tuple[DecisionRecord, EntityId, StoredAssertion | None]:
     """Layer 2 for one candidate, then Layer 3 over what it found.
+
+    Returns the decision, the entity the subject resolved to, and the
+    incumbent it was taken against. All three are in scope only here, and
+    ADR-0010's applier needs all three - see `GovernedCandidate`.
 
     Split at that seam rather than run as one function: Layer 2 asks what is
     already believed and needs two stores and a judge, Layer 3 asks what to
@@ -171,7 +197,7 @@ async def _decide_one(
         embedder=deps.embedder,
     )
     conflict = await detect(candidate, incumbents, spec, deps.nli)
-    return await _score_and_decide(
+    record = await _score_and_decide(
         verdict,
         samples,
         deps,
@@ -182,6 +208,7 @@ async def _decide_one(
         incumbents=incumbents,
         conflict=conflict,
     )
+    return record, subject_id, _incumbent_of(conflict, incumbents)
 
 
 async def _score_and_decide(
@@ -295,4 +322,32 @@ async def _confidence_for(
         sources=1,
         conflict=conflict,
         weights=deps.weights,
+    )
+
+
+def _incumbent_of(conflict: ConflictReport, incumbents: IncumbentSet) -> StoredAssertion | None:
+    """The live assertion this decision was taken against, if there was one.
+
+    Args:
+        conflict: Layer 2's report; `incumbent_assertion_id` names the row.
+        incumbents: What retrieval found.
+
+    Returns:
+        The matching assertion, or `None` when the candidate conflicted with
+        nothing - which is the common case, since most facts are novel.
+
+    Looked up in what retrieval already returned rather than re-read from the
+    store. The decision was taken against *this* version of the row, and a
+    second read could return one that has since been superseded - so the applier
+    would merge into a fact the scorer never saw.
+    """
+    if conflict.incumbent_assertion_id is None:
+        return None
+    return next(
+        (
+            scored.assertion
+            for scored in incumbents.nearest
+            if scored.assertion.assertion_id == conflict.incumbent_assertion_id
+        ),
+        None,
     )

@@ -4355,6 +4355,76 @@ reachable, which is the Day-7 gate.
 
 ---
 
+## 2026-09-16 — ADR-0010 implemented: the audit chain has a caller
+
+**Shipped**
+
+- **`memory/applier.py`.** One transaction per candidate: assertion, citation,
+  outbox event, supersession, and the audit events. `RULES.md` non-negotiable #4
+  holds by construction rather than by convention.
+- **`PgVectorStore` split at the seam ADR-0010 named**: `prepare` (embeds,
+  outside any transaction) + `write_in` / `supersede_in` (inside the caller's).
+  `upsert` and `supersede` are thin wrappers, so the two write paths cannot
+  drift. The `VectorStore` Protocol is untouched.
+- **`GovernedCandidate` carries `subject_id` and `incumbent`** — both exist only
+  inside `_decide_one` and the applier cannot write a row without the first.
+- **`memory.propose` returns real `assertion_id`s**, and `not_applied` with a
+  reason where it wrote nothing.
+- 11 integration tests against real Postgres; 1607 total, 98.25%.
+
+**What broke / what I learned**
+
+- **Open item #18 is closed after eleven steps.** The chain was built, tested
+  and tamper-evident at S5.5 and no write path had ever appended to it. It works.
+- **The rollback test is the one that earns the design.** Superseding an
+  already-retired assertion raises, the transaction rolls back, and *both* the
+  successor row and the `DECISION` event that was appended first disappear with
+  it. Two transactions would have left a decided-but-unwritten fact on the
+  chain, or worse, a successor beside a live incumbent — two live values for a
+  `ONE` predicate, invariant I2 broken by a retry.
+- **I drafted the applier with merge in it and then cut it, and cutting was
+  right.** §2.4's merge is an `UPDATE` of `corroboration_count`, not an insert,
+  and the idempotency is not the same shape: a replayed insert is a no-op by
+  derived id, a replayed **increment** is not. Getting that wrong inflates the
+  one number §3.2 uses to decide a fact is corroborated — which is exactly what
+  a poisoning attempt wants. It is audited as a decision, applied as nothing,
+  and `Applied.reason` says `merge_not_implemented`.
+- **I shaved three docstrings before finding the real seam, and the test said
+  so.** `pgvector_store.py` went over the 400-line cap and I trimmed prose
+  twice, getting to 424, then 400 with no margin. The failure message reads
+  "Split it along a real seam rather than shaving it." The seam was there:
+  `embed_batch` belongs beside `EMBEDDING_DIM` in `rowmap` (it checks against
+  that constant) and `fetch_citations` beside `SELECT_PROVENANCE` in `queries`.
+  381 lines, and both modules read better.
+  **I had also duplicated ADR-0010's argument into three docstrings** — the ADR
+  owns it, and citing it is what convention #1 asks for.
+- **`valid_from` is the citation's capture time, not `now()`.** A fact proposed
+  today about a conversation last week became true last week, and using the
+  apply-time clock would make a point-in-time query answer wrongly for the
+  window in between. There is a test for it because it is invisible otherwise.
+- **A row is written invisible and stays that way.** The applier never touches
+  `visible`; the relay does, after the graph side lands. Asserted, because it is
+  the property that makes a partial write unretrievable rather than briefly
+  wrong.
+
+**Still open**
+
+- **The merge path**, with its replay question answered properly.
+- **ADR-0011: `memory.commit`'s confidence** without a sampling distribution.
+- **S6.3** is now reachable — its DONE WHEN is a row in Postgres with a span, a
+  score and an audit event, and that exists. It wants a Claude Desktop
+  round-trip to close.
+- S18.1's review task, so a `HITL_REVIEW` produces a ticket and not only an
+  audit row.
+- CHECKPOINT B: transcripts and labels, still no code.
+
+**Tomorrow's first step**
+
+**S6.3** — connect Claude Desktop and have a conversation that writes a fact.
+It is the Day-7 gate, and for the first time every piece behind it exists.
+
+---
+
 ---
 
 ---

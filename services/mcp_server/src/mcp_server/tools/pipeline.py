@@ -54,7 +54,7 @@ from guardmem_core.schemas.receipt import SourceTier
 from guardmem_core.schemas.turn import Turn, TurnRole
 from guardmem_core.types import TraceId, TurnId
 from mcp_server.tools.context import ToolRefusedError
-from mcp_server.tools.governing import deps_for, result_of
+from mcp_server.tools.governing import apply_all, deps_for, result_of
 
 if TYPE_CHECKING:
     from mcp_server.tools.context import ToolContext
@@ -130,7 +130,8 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
         subject_hint=hints.get("subject"),
     )
     result, failures = await run(proposal, deps_for(context))
-    return result_of(result, failures)
+    applied, apply_failures = await apply_all(context, result)
+    return result_of(result, [*failures, *apply_failures], applied)
 
 
 async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
