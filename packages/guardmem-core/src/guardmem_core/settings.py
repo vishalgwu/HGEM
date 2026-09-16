@@ -104,6 +104,34 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
+    # Which adapter the composition roots build. S9.2 replaces this with a
+    # *router* that picks per tier and falls back across providers; until then a
+    # process talks to one provider and this is the honest way to say which.
+    #
+    # `anthropic` is the default because `model_fast` and its siblings are Claude
+    # ids. `ollama` exists because it needs no credential, which is what makes
+    # CHECKPOINT B runnable at all on a machine with no key - and because a
+    # provider that costs nothing is the one a developer can leave running.
+    llm_provider: Literal["anthropic", "openai", "ollama"] = "anthropic"
+
+    # Only read when `llm_provider` is `ollama`. Not a `HttpUrl`: the adapter
+    # joins paths onto it and `httpx` wants a string base URL, so validating it
+    # into a different type here would only mean converting it back.
+    ollama_url: str = "http://localhost:11434"
+    # A tag, and RULES.md 3 wants a pinned id - `_reject_floating_tag` refuses
+    # `:latest` and the adapter's docstring says why a tag is still weaker
+    # evidence than a Claude id. The three `model_*` fields above are Claude ids
+    # and cannot serve a local run, which is why this is separate rather than
+    # another spelling of `model_fast`.
+    ollama_model: str = "llama3.1:8b"
+    # Separate from `llm_timeout_s`, and much larger, because it is a different
+    # kind of wait. A hosted API that has not answered in 20 seconds is in
+    # trouble; a local 7B model answering a cold prompt took over a minute on
+    # the machine this was written on, and a 40-turn transcript exceeded ten.
+    # One shared ceiling would either fire on a healthy local run or hide a sick
+    # hosted one.
+    ollama_timeout_s: float = Field(600.0, gt=0)
+
     # RULES.md 3: pinned ids, never floating aliases, or replay is dishonest.
     # Current Claude ids are complete as written - appending a date suffix to
     # one does not make it more specific, it makes it invalid.

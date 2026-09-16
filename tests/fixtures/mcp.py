@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from fixtures.assertions import NS, TENANT
-from fixtures.fakes import FakeGraphStore, FakeVectorStore
+from fixtures.fakes import FakeGraphStore, FakeLLM, FakeVectorStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.schemas import load_ontology
 from guardmem_core.settings import Settings
@@ -76,6 +76,10 @@ def state(**overrides: object) -> ServerState:
         "graph": FakeGraphStore(),
         "embedder": HashEmbedder(),
         "ontology": load_ontology("clinical"),
+        # S6.2's write half put a model client on the state. Scripted and
+        # empty by default: the two read tools never call a model, and a
+        # test that needs `memory.propose` to reach one passes its own.
+        "llm": FakeLLM(),
     }
     return ServerState(**(base | overrides))  # type: ignore[arg-type]
 

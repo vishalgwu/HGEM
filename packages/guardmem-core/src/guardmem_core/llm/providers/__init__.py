@@ -20,8 +20,10 @@ quoted.
 
 **Constructed nowhere in this package.** Every adapter takes an already-built
 transport, because `RULES.md` §2.2 puts client creation in lifespan - one per
-provider, never per request. `common.tier_models` is the only thing that reads
-`Settings`, and it is called once.
+provider, never per request. `common.tier_models` and `selection.build_llm` are
+the only things that read `Settings`, and both are called once, by a composition
+root. `build_llm` chooses *which* adapter from configuration; it still builds no
+transport.
 
 S9.2 routes between these, S9.3 adds the breaker and the cross-provider
 fallback `ARCHITECTURE.md` §4 requires, and S10.1 turns `cost_usd` into a
@@ -34,6 +36,7 @@ from guardmem_core.llm.providers.common import MAX_SAMPLES, TierModels, tier_mod
 from guardmem_core.llm.providers.ollama_client import OllamaClient
 from guardmem_core.llm.providers.openai_client import OpenAIClient
 from guardmem_core.llm.providers.pricing import PRICES, estimate_cost
+from guardmem_core.llm.providers.selection import build_llm
 
 __all__ = [
     "MAX_SAMPLES",
@@ -42,6 +45,7 @@ __all__ = [
     "OllamaClient",
     "OpenAIClient",
     "TierModels",
+    "build_llm",
     "estimate_cost",
     "tier_models",
 ]

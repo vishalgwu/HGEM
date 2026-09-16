@@ -6,33 +6,30 @@ not a bypass, it just skips L1 extraction and requires the caller to supply
 provenance explicitly." The argument reading differs; everything after it is the
 same call into `guardmem_core.pipeline.run`.
 
-**Neither can run today, and the reason is not in this file.** `run()` takes a
-`Deps`, and it cannot be built yet. Two members have no implementation anywhere
-in this repository and a third is implemented but not wired:
+**`memory.propose` runs. `memory.commit` does not, and the reason moved.**
 
-- `EntityResolver` - saying which entity a candidate is about. **Decided by
-  ADR-0008 and not yet implemented**: resolution binds rather than matches, so
-  it reads `hints.subject` or a subject-bound namespace and refuses otherwise.
-- `CandidateClassifier` - §3.3's `pii_class` and `irreversibility`. **Decided
-  by ADR-0009 and not yet implemented**: they become required `PredicateSpec`
-  fields and this protocol is deleted, because a deploying organisation's policy
-  is what the ontology already holds.
-- `EntailFn` now has a producer - `llm/entailment.py`'s `LLMEntailer` - and is
-  still not injectable here, because the callable is sync and the producer is
-  async. `entropy.py` names the resolution: the caller precomputes the pairs and
-  passes a lookup, which is a change to the orchestrator's `_score_and_decide`.
+`propose` governs raw text end to end as of S6.2's write half: noise filter,
+K-sample extraction, span linking, schema gate, incumbent retrieval, conflict
+detection, confidence, impact, decision. It returns real numbers from a real
+model. What it does **not** do is write - `run()` applies no decision until the
+applier exists - so the result carries `applied: false` rather than letting a
+caller read `auto_write` as "stored". `governing.result_of` owns that mapping
+and says why.
 
-`LLMClient` was on this list until **S9.1** and is not any more; three provider
-adapters implement it.
+The four dependencies that blocked this are closed: `LLMClient` at S9.1,
+`EntailFn` at S5.1's correction 4, `EntityResolver` by ADR-0008,
+`CandidateClassifier` by ADR-0009 - which deleted it rather than implementing
+it. `MISSING_DEPENDENCIES` and `_require_pipeline` are gone with them, and they
+had gone stale first: they were still naming all three after all three landed,
+which is the tool telling a caller something untrue.
 
-So these handlers validate their arguments completely and then refuse, naming
-every missing piece and the step that builds it. **That is deliberately not a
-stub that returns a plausible decision.** A `memory.propose` that answered
-`auto_write` with an invented confidence would be the single most harmful thing
-this repository could ship: the product's entire claim is that a fact was
-governed before it was believed, and a tool that says so without having done it
-is worse than no tool. `_require_pipeline` is the one function to delete when
-the last of the three above is closed.
+`commit` still refuses, and **not** for a missing part. §2.3 says it "skips L1
+extraction", so no model draws anything, so §3.1's semantic entropy has no
+sampling distribution to be taken over - and that term is `w_H = 0.35` of `C`.
+Reading §3.1's "H_norm := 0 when K = 1" onto a fact nobody sampled would hand
+every committed assertion 0.35 of its confidence for free, on the one path
+built for high-trust payloads. That is a decision for an ADR rather than
+something to settle inside a handler, and the refusal says so in full.
 
 **Two more fields of §2.2 need steps that do not exist**, recorded here so they
 are not mistaken for oversights when the rest is wired:
@@ -47,14 +44,22 @@ are not mistaken for oversights when the rest is wired:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
+from uuid import uuid4
 
+from guardmem_core.llm.base import Tier
+from guardmem_core.pipeline.orchestrator import Proposal, run
+from guardmem_core.schemas.receipt import SourceTier
+from guardmem_core.schemas.turn import Turn, TurnRole
+from guardmem_core.types import TraceId, TurnId
 from mcp_server.tools.context import ToolRefusedError
+from mcp_server.tools.governing import deps_for, result_of
 
 if TYPE_CHECKING:
     from mcp_server.tools.context import ToolContext
 
-__all__ = ["MISSING_DEPENDENCIES", "run_commit", "run_propose"]
+__all__ = ["run_commit", "run_propose"]
 
 # §2.2's `source_tier` enum, exactly as published, and `SourceTier`'s members.
 # Checked here so a bad tier is a tool error naming the vocabulary rather than a
@@ -71,45 +76,6 @@ _K_BY_RISK_HINT: Final = {"low": 1, "default": 3, "high": 5}
 
 _MODES: Final = frozenset({"async", "strict"})
 
-# What a caller is told is missing, in the order a reader should think about it:
-# the two that need a decision first, then the one that needs only wiring.
-MISSING_DEPENDENCIES: Final = (
-    "EntityResolver (surface form to EntityId; specified in no document, needs an ADR)",
-    "CandidateClassifier (§3.3's pii_class and irreversibility; ADR-0009 moves "
-    "both onto PredicateSpec and deletes this protocol)",
-    "the orchestrator's entailment wiring (LLMEntailer exists; `_score_and_decide` "
-    "has to assemble the pairs and await one lookup before scoring)",
-)
-
-
-def _require_pipeline(what: str) -> None:
-    """Refuse a call that would need `pipeline.run`.
-
-    Args:
-        what: The tool being called, for the message.
-
-    Raises:
-        ToolRefusedError: always, today. This is the whole function.
-
-    **Delete this when the last missing dependency is closed** - it is the
-    single place the two write tools are gated, so wiring a real `Deps` is a
-    change to one call site rather than a hunt through two handlers.
-
-    The message lists every missing dependency rather than the first one,
-    because they are not sequential: an operator who closed `EntityResolver`
-    alone would hit the next refusal and reasonably conclude the work was
-    open-ended. S9.1 is the proof - it closed `LLMClient`, which was first on
-    this list, and three entries remained.
-    """
-    raise ToolRefusedError(
-        f"{what} cannot run: the decision pipeline is not wired in this build. "
-        "Missing - " + "; ".join(MISSING_DEPENDENCIES) + ". "
-        "This tool deliberately does not return an invented decision: the "
-        "product's claim is that a fact was governed before it was believed, and "
-        "a tool that says so without having done it is worse than no tool. "
-        "`memory.search` and `memory.get_entity` read governed memory and do work."
-    )
-
 
 async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Answer §2.2: submit candidate facts for governance.
@@ -124,20 +90,47 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
     Raises:
         ToolRefusedError: an argument is invalid, or the pipeline is not wired.
 
-    Arguments are validated **before** the refusal, deliberately. A caller
-    getting "the pipeline is not wired" for a call that was also malformed
-    learns one problem and ships the other; and when the pipeline is wired, every
-    one of these checks is already the right check rather than something written
-    in a hurry against a tool that had never run.
+    Arguments are validated **before** anything is governed, deliberately. A
+    caller whose call was also malformed learns one problem and ships the other,
+    and a model call is the expensive thing to make before finding out the
+    `source_tier` was a typo.
+
+    **`idempotency_key` is read and not yet honoured.** §2.2 publishes it, and
+    what it would suppress is a duplicate *write* - there is no write, so there
+    is nothing to deduplicate. It becomes load-bearing with the applier, and
+    validating it now means the check is already the right one then.
     """
-    _require_content(arguments)
-    _require_source_tier(arguments)
-    _require_risk_hint(arguments)
+    content = _require_content(arguments)
+    tier = _require_source_tier(arguments)
+    k = _require_risk_hint(arguments)
     _require_mode(arguments)
-    _require_hints(arguments)
+    hints = _require_hints(arguments)
     _require_idempotency_key(arguments)
-    _require_pipeline("memory.propose")
-    raise AssertionError("unreachable until the pipeline is wired")  # pragma: no cover
+
+    proposal = Proposal(
+        trace_id=TraceId(f"tr_{uuid4().hex[:12]}"),
+        tenant_id=context.tenant_id,
+        namespace=context.namespace,
+        # §2.2's `content` is one string; `Proposal.turns` is the structured
+        # form the noise filter needs. One turn, because a caller sending raw
+        # text has not told us where its boundaries are - S8.1's gateway is
+        # what splits a real conversation, and inventing boundaries here would
+        # put fabricated `turn_id`s into provenance.
+        turns=[
+            Turn(
+                turn_id=TurnId("t1"),
+                role=TurnRole.USER,
+                text=content,
+                captured_at=datetime.now(UTC),
+            )
+        ],
+        source_tier=SourceTier(tier),
+        k=k,
+        tier=Tier.FAST,
+        subject_hint=hints.get("subject"),
+    )
+    result, failures = await run(proposal, deps_for(context))
+    return result_of(result, failures)
 
 
 async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -164,8 +157,18 @@ async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[st
     """
     _require_assertions(arguments)
     _require_idempotency_key(arguments)
-    _require_pipeline("memory.commit")
-    raise AssertionError("unreachable until the pipeline is wired")  # pragma: no cover
+    raise ToolRefusedError(
+        "memory.commit is not wired, and the reason is a scoring question rather "
+        "than a missing part. §2.3 says commit 'skips L1 extraction' - so there "
+        "are no K samples, and MEMORY_ENGINE.md §3.1's semantic entropy has no "
+        "sampling distribution to be taken over. That term is w_H = 0.35 of C. "
+        "Reading §3.1's 'H_norm := 0 when K = 1' onto a fact no model drew would "
+        "hand every committed assertion 0.35 of its confidence for free, on the "
+        "one path built for high-trust payloads - which is the largest unearned "
+        "number this system could produce. It needs a decision recorded in an "
+        "ADR, not an implementation chosen here. memory.propose governs raw "
+        "text today and is the path with a defined score."
+    )
 
 
 # --- §2.2 argument reading --------------------------------------------------

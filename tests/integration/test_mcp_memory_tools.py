@@ -3,20 +3,21 @@
     "from the Inspector you can propose a fact, get a decision back, and then
     find it via `memory.search` with its provenance."
 
-**The middle clause cannot be satisfied and this module is where that is
-recorded as a test rather than as a paragraph.** `memory.propose` needs
-`pipeline.run`, and `Deps` cannot be built: an `EntityResolver` and a
-`CandidateClassifier` have no implementation, and the entailer S5.1 now has is
-not wired into the orchestrator. So the step's acceptance splits in two:
+**The middle clause is satisfied as of S6.2's write half, up to the model.**
+`memory.propose` builds a real `Deps` and runs the pipeline; a CI runner has no
+provider, so the call fails at the first completion and that is what is asserted
+- the last step failing proves every earlier one was wired. So the step's
+acceptance splits in two:
 
 - the half that **is** satisfied - "find it via `memory.search` with its
   provenance" - is asserted here end to end, over the MCP protocol, against the
   twenty-eight assertions `make seed` writes through the real path. Those spans
   were located in a real transcript by `link_span`, which is what makes this a
   provenance test rather than a fixture test.
-- the half that is not is asserted as a **refusal that names what is missing**,
-  so that the day the pipeline is wired this test fails and has to be rewritten
-  into the round trip the step actually asks for. A skip would go green forever.
+- the half that is not - seeing the row afterwards - waits on the applier.
+  `run()` reaches a decision and writes nothing, so there is no row to find, and
+  `memory.propose` says so with `applied: false` rather than letting a caller
+  infer it.
 
 Driven over the SDK's in-memory transport for the reason
 `test_mcp_stdio.py` gives: the pipe is the SDK's code, and spawning a
@@ -38,7 +39,6 @@ from mcp.shared.memory import create_client_server_memory_streams
 from fixtures.seed import PATIENT_NAME
 from guardmem_core.settings import get_settings
 from mcp_server.server import build_server
-from mcp_server.tools.pipeline import MISSING_DEPENDENCIES
 
 _TIMEOUT_S: Final = 30.0
 
@@ -62,6 +62,15 @@ def _server_env(
     _connection, tenant = demo
     monkeypatch.setenv("GM_DATABASE_URL", app_role_dsn)
     monkeypatch.setenv("GM_MCP_TENANT_ID", tenant)
+    # Pin the provider rather than inheriting one. Ollama is the only adapter
+    # that constructs without a credential, so it is the only choice that makes
+    # `memory.propose` reach the *pipeline* deterministically - on a developer's
+    # machine, on a runner, and with or without a key in `.env`. The port is
+    # deliberately one nothing listens on: the call must fail at the model and
+    # nowhere earlier, which is what proves every step before it was wired.
+    monkeypatch.setenv("GM_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("GM_OLLAMA_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("GM_OLLAMA_TIMEOUT_S", "5.0")
     get_settings.cache_clear()
     yield tenant
     get_settings.cache_clear()
@@ -244,15 +253,26 @@ class TestTheHalfOfTheDoneWhenThatWorks:
 
 
 @pytest.mark.usefixtures("_server_env")
-class TestTheHalfThatIsBlocked:
-    """ "propose a fact, get a decision back" - which cannot happen yet.
+class TestTheWriteHalf:
+    """ "propose a fact, get a decision back" - which now happens.
 
-    Asserted as a refusal rather than skipped. A skip is green forever; this
-    fails the day the pipeline is wired, and the person who wires it is exactly
-    the person who should be made to write the round trip S6.2 actually asks for.
+    What this cannot assert is the *decision*, because a runner has no model.
+    What it does assert is that the whole chain is wired: a real MCP client, a
+    real server built from the real `lifespan`, a real `Deps`, a real Postgres -
+    and that the only thing left missing is the provider, reported as
+    `GM_PROVIDER` rather than as a refusal about unwired parts.
+
+    That distinction is the test. The class this replaced asserted the tool
+    declined because dependencies were missing, and went on passing after all of
+    them landed, because it walked a tuple nobody had emptied.
     """
 
-    async def test_propose_declines_and_names_what_is_missing(self, namespace: str) -> None:
+    async def test_propose_reaches_the_pipeline_and_only_the_model_is_missing(
+        self, namespace: str
+    ) -> None:
+        """`GM_PROVIDER` is the signal. A runner has no Ollama, so the first
+        model call fails - which is the *last* thing that fails, and proves
+        every step before it was wired."""
         async with connected() as session:
             result = await call(
                 session,
@@ -266,14 +286,49 @@ class TestTheHalfThatIsBlocked:
 
         assert result.is_error
         text = result.content[0].text
-        # Walks the tuple rather than naming entries: the list shrinks as the
-        # gaps close - S9.1 removed `LLMClient`, S5.1's entailer removed
-        # `EntailFn` - and a spelled-out assertion fails on those commits for
-        # the wrong reason. What must hold is that the refusal reaches a real
-        # MCP client with every remaining gap named.
-        assert MISSING_DEPENDENCIES, "a refusal that names nothing is a shrug"
-        for missing in MISSING_DEPENDENCIES:
-            assert missing in text
+        assert "GM_PROVIDER" in text, (
+            f"propose should now fail at the model rather than refusing as unwired. Got: {text}"
+        )
+
+    async def test_propose_still_refuses_async_because_nothing_would_decide(
+        self, namespace: str
+    ) -> None:
+        """§2.2's *default* mode, and the one part of the write half that is
+        still genuinely unbuilt: S8.4's queue."""
+        async with connected() as session:
+            result = await call(
+                session,
+                "memory.propose",
+                {"content": "x", "namespace": namespace, "mode": "async"},
+            )
+
+        assert result.is_error
+        assert "S8.4" in result.content[0].text
+
+    async def test_commit_refuses_for_the_scoring_question_not_a_missing_part(
+        self, namespace: str
+    ) -> None:
+        """§2.3 skips extraction, so §3.1's entropy has no samples. That is
+        `w_H = 0.35` of `C`, and inventing it is a decision for an ADR."""
+        async with connected() as session:
+            result = await call(
+                session,
+                "memory.commit",
+                {
+                    "assertions": [
+                        {
+                            "subject": "patient:7781",
+                            "predicate": "allergy",
+                            "object": "penicillin",
+                            "provenance": [{"verbatim": "allergic to penicillin"}],
+                        }
+                    ],
+                    "namespace": namespace,
+                },
+            )
+
+        assert result.is_error
+        assert "no K samples" in result.content[0].text
 
     async def test_commit_refuses_an_unsourced_write_before_anything_else(
         self, namespace: str

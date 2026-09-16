@@ -42,8 +42,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+import httpx
 from pydantic import ValidationError
 
+from guardmem_core.llm.providers import build_llm
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
@@ -53,6 +55,7 @@ from guardmem_core.settings import Settings, get_settings
 if TYPE_CHECKING:
     import asyncpg
 
+    from guardmem_core.llm.base import LLMClient
     from guardmem_core.memory.graph.base import GraphStore
     from guardmem_core.memory.vector.base import Embedder
     from guardmem_core.schemas.ontology import Ontology
@@ -115,6 +118,21 @@ class ServerState:
         ontology: The validated predicate pack, loaded once. `load_ontology` is
             itself cached, so this field is about making the dependency visible
             rather than about avoiding a second parse.
+        llm: The model provider, selected by `settings.llm_provider` and built
+            once (S6.2's write half). Process-scoped for `RULES.md` §2.2's
+            reason - one client per provider, never per request - and typed as
+            the Protocol so S9.2's router replaces it without a handler
+            noticing.
+
+            **`None` when no provider is configured, and the server still
+            starts.** The first version of this raised at startup instead, on
+            the reasoning that a server which cannot govern should say so
+            immediately - and it took `memory.search` and `memory.get_entity`
+            down with it. Those two read governed memory, call no model, and are
+            the half of this surface that has worked since S6.2. A blank
+            `GM_ANTHROPIC_API_KEY` is a well-formed environment with a tool
+            unavailable, not a broken process; `deps_for` refuses the two write
+            tools by name and the read tools go on working.
         graph_durable: Whether `graph` survives this process. **False today**,
             and `memory.get_entity` reports it so an empty neighbour list is
             readable as "this process has no graph" rather than "this entity is
@@ -138,6 +156,7 @@ class ServerState:
     graph: GraphStore
     embedder: Embedder
     ontology: Ontology
+    llm: LLMClient | None
     graph_durable: bool = False
 
 
@@ -217,6 +236,9 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
         FileNotFoundError: the ontology pack is not installed, which on an
             editable checkout means a typo and on a wheel means the `.yaml`
             files were not packaged.
+    A provider whose credential is missing is **logged and not raised** - see
+    `ServerState.llm`. The two read tools need no model and must not be taken
+    down by a key nobody set.
 
     The DSN is converted with `libpq_dsn` because `GM_DATABASE_URL` carries
     SQLAlchemy's `postgresql+asyncpg://` marker for Alembic's benefit and
@@ -225,10 +247,19 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
     """
     settings = get_settings()
     pool = await create_pool(libpq_dsn(str(settings.database_url)))
+    # Opened unconditionally, and only Ollama uses it. `build_llm` explains why:
+    # opening it conditionally would put an `if` around an `async with` here,
+    # and an unused client on a mock transport costs nothing.
+    http = httpx.AsyncClient(base_url=settings.ollama_url)
     try:
+        llm = _llm_or_none(settings, http)
         _LOGGER.info(
             "guardmem-mcp started",
-            extra={"env": settings.env, "ontology": DEFAULT_ONTOLOGY},
+            extra={
+                "env": settings.env,
+                "ontology": DEFAULT_ONTOLOGY,
+                "llm_provider": settings.llm_provider,
+            },
         )
         yield ServerState(
             settings=settings,
@@ -236,6 +267,7 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
             graph=NetworkXGraphStore(),
             embedder=HashEmbedder(),
             ontology=load_ontology(DEFAULT_ONTOLOGY),
+            llm=llm,
             # NetworkX holds the graph in memory, so it is empty in every new
             # process and nothing repopulates it - the outbox rebuilds by
             # replaying, and a seeded database has no undispatched events. S7.1
@@ -243,5 +275,38 @@ async def lifespan(_server: object = None) -> AsyncIterator[ServerState]:
             graph_durable=False,
         )
     finally:
+        await http.aclose()
         await pool.close()
         _LOGGER.info("guardmem-mcp stopped")
+
+
+def _llm_or_none(settings: Settings, http: httpx.AsyncClient) -> LLMClient | None:
+    """Build the configured provider, or log why there is none.
+
+    Args:
+        settings: The process configuration.
+        http: The client Ollama would use.
+
+    Returns:
+        The adapter, or `None` when `build_llm` refuses for want of a
+        credential.
+
+    **A warning rather than a raise**, and the level matters: a server serving
+    two of its four tools is degraded, not broken, and `RULES.md` §6 wants that
+    visible in the log rather than discovered when somebody calls the third. The
+    message carries the provider name because "no credential" without it sends
+    an operator to check the wrong variable.
+
+    Only `ValueError` is caught. `build_llm` raises it for a missing key and for
+    a blank model id - both configuration - and anything else coming out of an
+    SDK constructor is a real fault that should stop the process.
+    """
+    try:
+        return build_llm(settings, http)
+    except ValueError as exc:
+        _LOGGER.warning(
+            "no model provider: %s. memory.search and memory.get_entity work; "
+            "memory.propose will refuse.",
+            exc,
+        )
+        return None

@@ -4217,6 +4217,79 @@ each reaches the checkpoint's 200, and nothing in the code is in the way of it.
 
 ---
 
+## 2026-09-16 — S6.2's write half: `memory.propose` governs
+
+**Shipped**
+
+- **`memory.propose` runs the pipeline.** Raw text in over MCP, a real decision
+  out: noise filter, K-sample extraction, span linking, schema gate, incumbent
+  retrieval, conflict detection, confidence, impact, matrix. `_require_pipeline`
+  and `MISSING_DEPENDENCIES` are deleted.
+- **`llm/providers/selection.py`** - `build_llm`, the one place that turns
+  `GM_LLM_PROVIDER` into an adapter. `checkpoint_b_generate` had its own copy;
+  now there is one.
+- **`tools/governing.py`** - the request composition root (`deps_for`) and
+  §2.2's result mapping (`result_of`), split from `pipeline.py` at the cap.
+- Four new settings, `.env.example`, and the notebook's correction 6 on S6.2.
+- 1592 tests, 98.71%.
+
+**What broke / what I learned**
+
+- **The refusal had rotted before I touched it.** `MISSING_DEPENDENCIES` still
+  named `EntityResolver`, `CandidateClassifier` and the entailment wiring after
+  all three had landed, so `memory.propose` was declining with reasons that were
+  no longer true - and two tests *walked the tuple*, so they passed while the
+  tool lied. A refusal is a claim like any other and rots like one; the test
+  that walks a list of reasons cannot tell you the list is wrong.
+- **I took the read tools down and the suite told me immediately.** I made a
+  missing credential fail at startup, reasoning that a server which cannot
+  govern should say so at once. Every MCP integration test failed, including the
+  six for `memory.search` and `memory.get_entity` - which call no model. A blank
+  key is a well-formed environment with one tool unavailable, not a broken
+  process. `ServerState.llm` is optional now, the absence is logged once, and
+  `deps_for` refuses the two write tools by name.
+- **`memory.commit` is not blocked on a missing part, and that took reading §2.3
+  properly to see.** It "skips L1 extraction", so nothing samples anything, so
+  §3.1's semantic entropy has no distribution to be taken over - and that term
+  is `w_H = 0.35` of `C`. Reading §3.1's "H_norm := 0 when K = 1" onto a fact no
+  model drew would hand every committed assertion a third of its confidence for
+  free, on the one path built for high-trust payloads. The refusal now says
+  exactly that. **It is an ADR, not a handler decision.**
+- **I guessed the call sequence and was wrong twice.** Scripting a `FakeLLM` for
+  a full `run()`, I assumed extraction came first; the noise filter calls the
+  model before it, so `FakeLLM` repeated its last reply and `extract` refused
+  with "asked for 3 samples and received 4". Measured it - noise, canonical,
+  spread(n=k-1) - and the test helper now says so. `extract`'s refusal is
+  load-bearing rather than fussy: absorbing a short sample set would *raise*
+  confidence exactly when the provider was misbehaving.
+- **A scripted edit failed silently again and the assertion caught it.**
+  `"Five corrections to this step"` is not unique in the notebook, so an
+  `s.index` anchor found the wrong step. Same failure mode as the truncation two
+  days ago; the difference was asserting the count first. Anchoring inside the
+  S6.2 section fixed it.
+- **`applied: false` is the field I am most sure about.** §2.2's example carries
+  `assertion_id` on an `auto_write`, nothing writes, and a caller reading
+  `auto_write` with no further signal would conclude the fact was stored. That
+  is the one output this product must never fabricate.
+
+**Still open**
+
+- **The applier, and its ADR.** `run()` reaches a decision and writes nothing,
+  so S6.3's DONE WHEN - "see the row in Postgres with a source span, a
+  confidence score, and an audit event" - is unreachable. This is the last
+  structural gap in the write path.
+- **`memory.commit`'s scoring question**, which is the same ADR's neighbour.
+- `review_task_id` and `eta_minutes` need S18.1; `mode: async` needs S8.4.
+- CHECKPOINT B: still transcripts and labels, still no code.
+
+**Tomorrow's first step**
+
+**ADR-0010: the applier**, and `memory.commit`'s entropy alongside it. Both are
+about what happens at the transaction boundary, and deciding them together is
+cheaper than twice.
+
+---
+
 ---
 
 ---

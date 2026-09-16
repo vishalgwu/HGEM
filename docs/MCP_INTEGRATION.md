@@ -147,6 +147,27 @@ Result:
 should proceed *without* treating the fact as established, and may tell the user it's pending
 confirmation. This is the behavior that makes governance visible rather than mysterious.
 
+**Two fields the server adds, and why (S6.2's write half).**
+
+- `applied` (boolean). The example above carries `assertion_id` on an
+  `auto_write`; nothing writes yet - `run()` reaches a decision and applies
+  none, because `RULES.md` non-negotiable #4 binds the audit event to the state
+  change and the applier that composes them needs its own ADR. So there is no id
+  to carry, and a caller reading `"decision": "auto_write"` with no further
+  signal would reasonably conclude the fact is in memory. `applied: false` says
+  it is not. It becomes `true` with the applier, and `assertion_id` returns with
+  it.
+- `failed` (array of `{candidate_id, code}`). `run()` returns a failed candidate
+  *beside* the decisions rather than discarding the batch, and §2.2 has no field
+  for one. Omitting them would mean a fact the caller submitted vanished from
+  the answer. The stable `code` is carried and never the message, per
+  `RULES.md` §1.5.
+
+**`memory.propose` needs a model provider and `memory.search` does not.** A
+server started with no credential logs a warning, serves the two read tools, and
+refuses the two write tools by name. Set `GM_LLM_PROVIDER` - `ollama` needs no
+key.
+
 ### 2.3 `memory.commit`
 For agents that already have structured, high-trust facts (e.g. a signed EHR payload). Still passes
 the full pipeline — `commit` is not a bypass, it just skips L1 extraction and requires the caller to

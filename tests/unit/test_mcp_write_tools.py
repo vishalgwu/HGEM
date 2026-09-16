@@ -1,63 +1,153 @@
-"""The two tools that decline, and the dispatch around all four.  S6.2
+"""The two write tools, and the dispatch around all four.  S6.2
 
 Split from `test_mcp_tools.py` at `RULES.md` §2.4's 400-line cap, along the seam
-the tool surface already has: `memory.search` and `memory.get_entity` read
-governed memory and work; `memory.propose` and `memory.commit` validate
-everything they can and then refuse, because the decision pipeline has no
-entity resolver, no candidate classifier, and no entailment wiring in the
-orchestrator.
+the tool surface has: `memory.search` and `memory.get_entity` read governed
+memory; `memory.propose` and `memory.commit` write to it - or would.
 
-**These are the most important tests in the S6.2 suite.** A `memory.propose`
-that returned `auto_write` with a plausible confidence would be the single most
-harmful thing this repository could ship - the product's claim is that a fact
-was governed before it was believed - so what is asserted here is that it
-declines, and that the refusal names what is missing rather than being a shrug.
+**`propose` governs for real now.** It runs the whole pipeline and returns real
+numbers, so what these tests assert changed with it: the arguments it refuses
+before spending a model call, and that the result never claims more than it did.
+`applied: false` and the absent `assertion_id` are the two that matter - a
+`memory.propose` returning `auto_write` in a way a caller reads as "stored"
+would be the single most harmful thing this repository could ship, because the
+product's whole claim is that a fact was governed before it was believed.
+
+`commit` still refuses, and **for a reason rather than a gap**: §2.3 skips
+extraction, so §3.1's entropy has no samples to be taken over, and that is 0.35
+of `C` that would otherwise be handed over free.
+
+The class these replaced walked a `MISSING_DEPENDENCIES` tuple to prove the
+tools declined. That tuple outlived its contents - all three entries were closed
+and the tool went on citing them - which is the drift this suite exists to catch
+and did not.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
 from typing import Any
 
 import pytest
 
-from fixtures.assertions import NS, TENANT, WHEN, stored_assertion
-from fixtures.mcp import context, settings, state, store_with
-from mcp_server.tools import _HANDLERS, _summarise, call_tool
-from mcp_server.tools.context import ToolRefusedError, context_for
-from mcp_server.tools.pipeline import MISSING_DEPENDENCIES, run_commit, run_propose
-from mcp_server.tools.search import run_search
+from fixtures.conflict import candidate
+from fixtures.decisions import conflict, risk
+from fixtures.extraction import response
+from fixtures.fakes import FakeLLM
+from fixtures.mcp import context
+from guardmem_core.errors import ProviderUnavailable
+from guardmem_core.pipeline.orchestrator import PipelineResult
+from guardmem_core.pipeline.per_candidate import CandidateFailure, GovernedCandidate
+from guardmem_core.schemas.verdict import ConfidenceReport, Decision, DecisionRecord
+from guardmem_core.types import CandidateId, TraceId
+from mcp_server.tools.context import ToolContext, ToolRefusedError
+from mcp_server.tools.governing import result_of
+from mcp_server.tools.pipeline import _K_BY_RISK_HINT, run_commit, run_propose
 
 
-class TestProposeAndCommitRefuseRatherThanInvent:
-    """The most important tests in this module.
+def governing_context(k: int = 3) -> ToolContext:
+    """A context whose model extracts nothing, so `propose` runs and decides.
 
-    A `memory.propose` that returned `auto_write` with a plausible confidence
-    would be the single most harmful thing this repository could ship: the
-    product's claim is that a fact was governed before it was believed. These
-    assert that it declines, and that the message names what is missing.
+    Args:
+        k: How many samples the risk hint will ask for. §1.2's ladder is
+            low 1, default 3, high 5.
+
+    Returns:
+        A `ToolContext` whose `propose` reaches a real, empty result.
+
+    **The point is that it runs.** These tests used to prove "this argument is
+    accepted" by asserting the call reached a `pipeline is not wired` refusal,
+    which stopped being a signal the moment the pipeline was wired. Extracting
+    zero facts is the cheapest way to reach a real result: no candidates means
+    no resolver, no store and no scoring, so the assertion is about argument
+    handling and nothing else.
+
+    **`k` is a parameter because `extract` refuses a short sample set**, and
+    that refusal is load-bearing rather than fussy - `MEMORY_ENGINE.md` §3.1
+    sets `H_norm := 0` at K = 1, so absorbing a provider that returned fewer
+    samples than asked would *raise* confidence exactly when the provider was
+    misbehaving. The canonical draw is one sample and the spread draw is the
+    other `k - 1`.
+
+    **Three replies, and the first is the noise filter.** Measured rather than
+    assumed: `run()` calls `NoiseClassification`, then the canonical
+    `ExtractionBatch` at temperature 0, then the spread at 0.7 with `n = k - 1`.
+    Omitting the first made `FakeLLM` repeat its last reply, so the canonical
+    draw received the spread's sample set and `extract` refused with "asked for
+    3 samples and received 4" - a confusing failure and the right one.
+
+    At `k = 1` there is no spread draw at all - `_draw` returns after the
+    canonical one - so scripting an empty third reply would fail on
+    `LLMResponse`'s own `min_length=1`, which is the model refusing to describe
+    a completion that returned nothing.
+    """
+    nothing = json.dumps({"facts": []})
+    keep_everything = json.dumps({"verdicts": []})
+    draws = [response(nothing)] if k == 1 else [response(nothing), response(*[nothing] * (k - 1))]
+    return context(llm=FakeLLM(responses=[response(keep_everything), *draws]))
+
+
+def _empty_result() -> PipelineResult:
+    """A result with no candidates, for the fields that do not depend on one."""
+    return PipelineResult(
+        trace_id=TraceId("tr_1"),
+        governed=[],
+        quarantined=[],
+        rejected=[],
+        dropped_noise=0,
+        dropped_unsourced=0,
+    )
+
+
+def _one_governed() -> PipelineResult:
+    """A result carrying one candidate and the decision about it."""
+    return PipelineResult(
+        trace_id=TraceId("tr_1"),
+        governed=[
+            GovernedCandidate(
+                candidate=candidate(predicate="allergy", obj="penicillin"),
+                record=DecisionRecord(
+                    decision=Decision.HITL_REVIEW,
+                    reason_codes=["R_ABOVE_RHO_HI"],
+                    confidence=ConfidenceReport(
+                        semantic_entropy=0.1,
+                        grounding=0.9,
+                        schema_fit=1.0,
+                        corroboration=0.0,
+                        consistency=1.0,
+                        confidence=0.91,
+                        weights_version="v1",
+                    ),
+                    risk=risk(),
+                    conflict=conflict(),
+                    thresholds_version="v1",
+                    policy_version="none",
+                ),
+            )
+        ],
+        quarantined=[],
+        rejected=[],
+        dropped_noise=0,
+        dropped_unsourced=0,
+    )
+
+
+class TestProposeGovernsAndSaysWhatItDidNotDo:
+    """`memory.propose` reaches a real decision as of S6.2's write half.
+
+    What is unit-testable here is the *edges*: the arguments it refuses before
+    spending a model call, and the result shape it produces. The full path -
+    noise filter, K-sample extraction, resolver, scoring - needs a database and
+    is `tests/integration/test_mcp_memory_tools.py`'s.
+
+    The class this replaced asserted that `propose` refused, walking a
+    `MISSING_DEPENDENCIES` tuple. That tuple outlived its contents: all three
+    entries were closed and the tool went on citing them, which is the shape of
+    failure this suite exists to catch and did not.
     """
 
-    async def test_propose_names_every_missing_dependency(self) -> None:
-        """Walks `MISSING_DEPENDENCIES` rather than listing its entries.
-
-        The list changes as the gaps close - S9.1 removed `LLMClient` from it -
-        and a test that spelled the entries out failed on that commit for the
-        wrong reason, asserting the shape of a sentence rather than the property
-        that every gap is named. `tests/unit/test_errors.py` walks the exception
-        hierarchy for the same reason.
-        """
-        with pytest.raises(ToolRefusedError) as caught:
-            await run_propose(context(), {"content": "The patient prefers CVS.", "mode": "strict"})
-
-        message = str(caught.value)
-        assert MISSING_DEPENDENCIES, "a refusal that names nothing is a shrug"
-        for missing in MISSING_DEPENDENCIES:
-            assert missing in message
-
-    async def test_propose_validates_arguments_before_refusing(self) -> None:
-        """A caller whose call was *also* malformed should learn that too, and
-        when the pipeline is wired these checks are already the right ones."""
+    async def test_it_validates_arguments_before_spending_a_model_call(self) -> None:
+        """A caller whose call was malformed should learn that first, and an
+        extraction is the expensive thing to do before finding out."""
         with pytest.raises(ToolRefusedError, match="`source_tier` must be one of"):
             await run_propose(context(), {"content": "x", "source_tier": "gossip"})
 
@@ -67,6 +157,78 @@ class TestProposeAndCommitRefuseRatherThanInvent:
         with pytest.raises(ToolRefusedError, match=r"S8\.4"):
             await run_propose(context(), {"content": "x", "mode": "async"})
 
+    async def test_an_empty_result_still_reports_that_nothing_was_applied(self) -> None:
+        """`applied` is not conditional on there being candidates.
+
+        A caller has to be able to read "nothing was stored" off any answer,
+        including one where the noise filter ate everything - otherwise the
+        field means "we had something and did not write it" rather than "this
+        server does not write".
+        """
+        empty = PipelineResult(
+            trace_id=TraceId("tr_1"),
+            governed=[],
+            quarantined=[],
+            rejected=[],
+            dropped_noise=3,
+            dropped_unsourced=0,
+        )
+
+        payload = result_of(empty, [])
+
+        assert payload["applied"] is False
+        assert payload["candidates"] == []
+        assert payload["dropped_noise"] == 3
+        assert payload["status"] == "decided"
+
+    async def test_a_decision_carries_the_fact_it_was_about(self) -> None:
+        """`MEMORY_ENGINE.md` §0 gives `DecisionRecord` no identity, so the
+        predicate and object can only come from the candidate. Reading them off
+        the pair is what stops one verdict being printed beside another's
+        fact."""
+        payload = result_of(_one_governed(), [])
+
+        entry = payload["candidates"][0]
+        assert entry["predicate"] == "allergy"
+        assert entry["object"] == "penicillin"
+        assert entry["decision"] == "hitl_review"
+
+    async def test_no_candidate_carries_an_assertion_id(self) -> None:
+        """§2.2's example shows one on an `auto_write`. Nothing writes, so
+        there is no id - and inventing one would be the single most harmful
+        thing this tool could return."""
+        payload = result_of(_one_governed(), [])
+
+        assert "assertion_id" not in payload["candidates"][0]
+
+    async def test_a_failed_candidate_is_reported_rather_than_dropped(self) -> None:
+        """`run()` returns failures beside decisions so one bad provider reply
+        does not discard the batch. Omitting them here would mean a fact the
+        caller submitted vanished from the answer."""
+        failure = CandidateFailure(
+            candidate_id=CandidateId("c_9"),
+            error=ProviderUnavailable("ollama is not running"),
+        )
+
+        payload = result_of(_empty_result(), [failure])
+
+        assert payload["failed"] == [{"candidate_id": "c_9", "code": "GM_PROVIDER"}]
+
+    async def test_a_failure_carries_a_code_and_never_the_message(self) -> None:
+        """`RULES.md` §1.5 keeps exception strings - which can hold a DSN or a
+        span of untrusted source text - out of anything a caller sees."""
+        failure = CandidateFailure(
+            candidate_id=CandidateId("c_9"),
+            error=RuntimeError("postgresql://user:hunter2@db/prod"),
+        )
+
+        payload = result_of(_empty_result(), [failure])
+
+        assert payload["failed"][0]["code"] == "GM_UNKNOWN"
+        assert "hunter2" not in str(payload)
+
+
+class TestCommitRefusesForAReasonRatherThanAGap:
     async def test_commit_refuses_an_unsourced_assertion_before_anything_else(self) -> None:
         """§2.3: "there is no unsourced write path in this API". That rule needs
         no pipeline, so it is enforced with no pipeline - the caller is told the
@@ -105,104 +267,6 @@ class TestProposeAndCommitRefuseRatherThanInvent:
     async def test_commit_requires_the_four_documented_keys(self) -> None:
         with pytest.raises(ToolRefusedError, match="missing"):
             await run_commit(context(), {"assertions": [{"subject": "s"}]})
-
-
-class TestTenancyIsRefusedRatherThanGuessed:
-    def test_an_unconfigured_tenant_is_refused(self) -> None:
-        """No auth exists (S8.2), so the tenant is configuration. A default here
-        would be a cross-tenant read that succeeds and returns the wrong rows."""
-        with pytest.raises(ToolRefusedError, match="GM_MCP_TENANT_ID"):
-            context_for(state(settings=settings()), {})
-
-    def test_a_non_uuid_tenant_is_refused_at_the_edge(self) -> None:
-        with pytest.raises(ToolRefusedError, match="not a UUID"):
-            context_for(state(settings=settings(mcp_tenant_id="demo-clinic")), {})
-
-    def test_a_call_may_name_its_own_namespace(self) -> None:
-        resolved = context_for(state(), {"namespace": "patient:9001"})
-
-        assert resolved.namespace == "patient:9001"
-
-    def test_the_configured_namespace_is_the_default(self) -> None:
-        """§2.1: "defaults to server-configured namespace"."""
-        assert context_for(state(), {}).namespace == NS
-
-    def test_no_namespace_and_no_default_is_refused(self) -> None:
-        unset = settings(mcp_tenant_id=str(TENANT))
-
-        with pytest.raises(ToolRefusedError, match="GM_MCP_DEFAULT_NAMESPACE"):
-            context_for(state(settings=unset), {})
-
-
-class TestDispatch:
-    async def test_an_unknown_tool_is_a_result_not_an_exception(self) -> None:
-        """A model that hallucinated a tool name can read the list of real ones
-        and try again; a protocol error is for the client's developer."""
-        result = await call_tool(state(), "memory.teleport", {})
-
-        assert result.is_error
-        assert "unknown tool" in result.content[0].text  # type: ignore[union-attr]
-
-    async def test_a_refusal_carries_is_error_and_the_reason(self) -> None:
-        result = await call_tool(state(), "memory.search", {})
-
-        assert result.is_error
-        assert "`query` is required" in result.content[0].text  # type: ignore[union-attr]
-
-    async def test_an_unexpected_error_does_not_leak_its_message(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """An exception string can carry a DSN, a row, or a span of untrusted
-        source text. `RULES.md` §1.5 keeps all three out of anything a caller
-        sees; the traceback goes to the log instead.
-
-        It also must not surface as JSON-RPC "Invalid request parameters", which
-        is what the SDK does with an uncaught handler exception - blaming the
-        caller for a server bug. That is how the zero-vector `NaN` in
-        `get_entity` hid for a debugging session.
-        """
-        secret = "postgresql://user:hunter2@host/db"  # pragma: allowlist secret
-
-        async def explode(_context: object, _arguments: object) -> dict[str, Any]:
-            raise RuntimeError(secret)
-
-        monkeypatch.setitem(_HANDLERS, "memory.search", explode)
-
-        result = await call_tool(state(), "memory.search", {"query": "x"})
-
-        assert result.is_error
-        text = result.content[0].text  # type: ignore[union-attr]
-        assert "hunter2" not in text
-        assert "internal error" in text
-
-
-class TestTheSummaryAModelReads:
-    async def test_it_reports_the_retired_count_because_that_changes_behaviour(self) -> None:
-        superseded = stored_assertion(predicate="home_address", obj="old", visible=True)
-        successor = stored_assertion(predicate="home_address", obj="new", visible=True)
-        store = await store_with(superseded, successor)
-        await store.supersede(superseded.assertion_id, successor.assertion_id, WHEN)
-
-        payload = await run_search(context(store), {"query": "address"})
-
-        assert "1 retired and excluded" in _summarise("memory.search", payload)
-
-    async def test_a_point_in_time_query_recovers_a_retired_assertion(self) -> None:
-        """`as_of` is the axis `ADR-0002` exists to make answerable, and the one
-        that separates "superseded" from "deleted"."""
-        before = datetime(2026, 1, 1, tzinfo=UTC)
-        superseded = stored_assertion(
-            predicate="home_address", obj="old", visible=True, valid_from=before
-        )
-        successor = stored_assertion(predicate="home_address", obj="new", visible=True)
-        store = await store_with(superseded, successor)
-        await store.supersede(superseded.assertion_id, successor.assertion_id, WHEN)
-
-        result = await run_search(
-            context(store), {"query": "address", "as_of": "2026-02-01T00:00:00+00:00"}
-        )
-
-        assert [a["object"] for a in result["assertions"]] == ["old"]
 
 
 class TestEveryPublishedConstraintIsEnforced:
@@ -254,29 +318,35 @@ class TestEveryPublishedConstraintIsEnforced:
             "tool_output",
             "retrieved_web",
         ):
-            with pytest.raises(ToolRefusedError, match="pipeline is not wired"):
-                await run_propose(
-                    context(), {"content": "x", "mode": "strict", "source_tier": tier}
-                )
+            payload = await run_propose(
+                governing_context(), {"content": "x", "mode": "strict", "source_tier": tier}
+            )
+
+            assert payload["status"] == "decided"
 
     async def test_propose_accepts_every_published_risk_hint(self) -> None:
         for hint in ("low", "default", "high"):
-            with pytest.raises(ToolRefusedError, match="pipeline is not wired"):
-                await run_propose(context(), {"content": "x", "mode": "strict", "risk_hint": hint})
+            payload = await run_propose(
+                governing_context(_K_BY_RISK_HINT[hint]),
+                {"content": "x", "mode": "strict", "risk_hint": hint},
+            )
+
+            assert payload["status"] == "decided"
 
     async def test_well_formed_hints_are_accepted(self) -> None:
-        """`hints.subject` is the one route by which a proposal could be governed
-        before an `EntityResolver` is specified, so it has to survive."""
-        with pytest.raises(ToolRefusedError, match="pipeline is not wired"):
-            await run_propose(
-                context(),
-                {
-                    "content": "x",
-                    "mode": "strict",
-                    "hints": {"subject": "e-1", "predicates_of_interest": ["allergy"]},
-                    "idempotency_key": "idem-1",
-                },
-            )
+        """`hints.subject` reaches `Proposal.subject_hint`, which ADR-0008 makes
+        the caller's way of naming the entity outright."""
+        payload = await run_propose(
+            governing_context(),
+            {
+                "content": "x",
+                "mode": "strict",
+                "hints": {"subject": "e-1", "predicates_of_interest": ["allergy"]},
+                "idempotency_key": "idem-1",
+            },
+        )
+
+        assert payload["status"] == "decided"
 
     @pytest.mark.parametrize(
         ("arguments", "message"),
@@ -298,7 +368,7 @@ class TestEveryPublishedConstraintIsEnforced:
         A caller sending one object rather than a list of one is not making a
         mistake, and refusing it would be this server inventing a constraint the
         document does not state."""
-        with pytest.raises(ToolRefusedError, match="pipeline is not wired"):
+        with pytest.raises(ToolRefusedError, match="no K samples"):
             await run_commit(
                 context(),
                 {

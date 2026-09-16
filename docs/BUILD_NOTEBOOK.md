@@ -2956,6 +2956,44 @@ DONE WHEN: from the Inspector you can propose a fact, get a decision back, and t
 
 COMMIT: `feat(s6.2): core mcp tools`
 
+**Correction 6, 2026-09-16: the write half is in, and correction 1 below is now
+history rather than status.**
+
+`memory.propose` builds a real `Deps` and runs the whole pipeline. The four
+dependencies correction 1 names are closed - `LLMClient` at S9.1, `EntailFn` at
+S5.1's correction 4, `EntityResolver` by ADR-0008, `CandidateClassifier` by
+ADR-0009, which deleted it rather than implementing it. `MISSING_DEPENDENCIES`
+and `_require_pipeline` are gone.
+
+They had gone **stale** first, and that is the part worth keeping: all three
+entries were closed and the tool went on citing them, so `memory.propose` was
+refusing with reasons that were no longer true. A refusal is a claim like any
+other and rots like one.
+
+Three things this step decided that the notebook did not say:
+
+- **`applied: false`.** §2.2's example carries `assertion_id` on an
+  `auto_write`; nothing writes, so a caller reading `auto_write` with no further
+  signal would conclude the fact was stored. The field says it was not.
+  `MCP_INTEGRATION.md` §2.2 records this and `failed` as amendments.
+- **No provider must not take the read tools down.** The first version raised at
+  startup when no credential was set, on the reasoning that a server which
+  cannot govern should say so immediately - and it broke `memory.search` and
+  `memory.get_entity`, which call no model and are the half that has worked
+  since this step. `ServerState.llm` is now optional, the absence is logged, and
+  `deps_for` refuses the two write tools by name.
+- **`memory.commit` still declines, and no longer for a missing part.** §2.3
+  skips L1 extraction, so nothing samples anything, so §3.1's semantic entropy
+  has no distribution to be taken over - and that term is `w_H = 0.35` of `C`.
+  Reading §3.1's "H_norm := 0 when K = 1" onto a fact no model drew would hand
+  every committed assertion a third of its confidence for free, on the one path
+  built for high-trust payloads. That needs an ADR.
+
+Also added: `GM_LLM_PROVIDER`, `GM_OLLAMA_URL`, `GM_OLLAMA_MODEL` and
+`GM_OLLAMA_TIMEOUT_S`, with `llm/providers/selection.py` as the one place that
+reads them. `.env.example` selects `ollama`, because both keys in it are blank
+and a fresh checkout should start.
+
 **Five corrections to this step, found by building it.**
 
 1. **THE DONE WHEN IS HALF-SATISFIABLE, AND THIS IS THE STEP THAT PROVES IT.** "Find it via
