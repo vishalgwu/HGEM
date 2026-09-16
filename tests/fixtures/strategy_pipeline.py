@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 from fixtures.strategy_primitives import _ID, _NAMESPACES, _TENANT_IDS, _TRACE_IDS
 from guardmem_core.llm.base import Tier
 from guardmem_core.pipeline.orchestrator import PipelineResult, Proposal
+from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas import GMModel
 from guardmem_core.schemas.receipt import SourceTier
 
@@ -29,7 +30,9 @@ __all__ = ["pipeline_strategies"]
 
 
 def pipeline_strategies(
-    turns: st.SearchStrategy[object], records: st.SearchStrategy[object]
+    turns: st.SearchStrategy[object],
+    records: st.SearchStrategy[object],
+    candidates: st.SearchStrategy[object],
 ) -> dict[type[GMModel], st.SearchStrategy[GMModel]]:
     """Build the registry entries, given the generators these compose.
 
@@ -38,6 +41,11 @@ def pipeline_strategies(
     them back would make the two modules import each other.
     """
     return {
+        # ADR-0009's sibling change: a `DecisionRecord` cannot say what it is
+        # about, so the pipeline pairs it with the candidate. Drawn loosely
+        # like everything else here - the pairing being *correct* is
+        # `test_orchestrator.py`'s business, not a serialisation property's.
+        GovernedCandidate: st.builds(GovernedCandidate, candidate=candidates, record=records),
         Proposal: st.builds(
             Proposal,
             trace_id=_TRACE_IDS,
@@ -55,7 +63,10 @@ def pipeline_strategies(
         PipelineResult: st.builds(
             PipelineResult,
             trace_id=_TRACE_IDS,
-            decisions=st.lists(records, max_size=2),
+            governed=st.lists(
+                st.builds(GovernedCandidate, candidate=candidates, record=records),
+                max_size=2,
+            ),
             quarantined=st.lists(_ID, max_size=3),
             rejected=st.lists(_ID, max_size=3),
             dropped_noise=st.integers(min_value=0, max_value=50),

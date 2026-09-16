@@ -485,11 +485,17 @@ Two further gaps are not dependencies. The harness has no `generate`
 subcommand, so nothing fills a corpus; and the seed transcript is forty turns
 for one patient supporting 28 facts, which is not 200 candidates.
 
-So what is built is the *measurement*, not the thing measured: the metric, the
-diagnostics, the label format, the self-consistency check on the labels, and a
-command that runs the eight manual verifications by running the tests that
-establish them. Those eight pass. The discrimination number does not exist, and
-this section is here so that it is not mistaken for one that does.
+The harness is now complete: generation, the metric, the diagnostics, the label
+format, the self-consistency check on the labels, and a command that runs the
+eight manual verifications by running the tests that establish them. Those eight
+pass, and `generate` has been driven for real — proposals in, an unlabelled
+corpus out, scored end to end.
+
+What does not exist is the **corpus** and the **labels**. One conversation is
+one subject, and the shipped transcript is forty turns for one patient; reaching
+the checkpoint's 200 candidates means writing more conversations, and then
+reading them. The discrimination number does not exist, and this section is here
+so that it is not mistaken for one that does.
 
 That Postgres is a testcontainer, started by the suite from the repository's own
 `initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
@@ -523,10 +529,9 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself**, and for the first time nothing is in
-front of it but the measurement — no missing dependency, no undecided design, no
-credential. What remains is a corpus generator, a wider transcript, and a
-labelling session.
+The next step is **Checkpoint B itself**, and nothing is in front of it but the
+measurement — no missing dependency, no undecided design, no credential, and no
+missing tooling. What remains is transcripts and a labelling session.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and

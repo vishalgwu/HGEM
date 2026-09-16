@@ -1,6 +1,7 @@
 """CHECKPOINT B's harness.  BUILD_NOTEBOOK.md, after Day 5
 
     uv run python -m scripts.checkpoint_b verify
+    uv run python -m scripts.checkpoint_b generate corpus.jsonl --proposals p.jsonl
     uv run python -m scripts.checkpoint_b template corpus.jsonl
     uv run python -m scripts.checkpoint_b score corpus.jsonl
     uv run python -m scripts.checkpoint_b agreement first.jsonl second.jsonl
@@ -28,19 +29,17 @@ So this ships as everything except generation:
 
 `score` works end to end today against a corpus file.
 
-**Correction, 2026-09-15.** This docstring used to end "the day S9.1 lands the
-only new thing needed is the loop that fills one". S9.1 has landed and that is
-not true: `run()` takes a `Deps` that cannot be built yet, so the loop has
-nothing to call. What is left, after three decisions taken the same day:
+**Generation shipped 2026-09-15** as `scripts/checkpoint_b_generate.py`, after
+the four things that had been in its way: no `LLMClient` (S9.1), no
+`EntityResolver` (ADR-0008), no producer for two of §3.3's risk features
+(ADR-0009), and an Ollama grammar that could not compile the extraction schema.
+It is a separate module because composing a real `Deps` - a pool, a provider, a
+resolver, an ontology - is a composition root, and this file is a CLI.
 
-- `EntailFn` has a producer (`llm/entailment.py`) and is not wired - sync
-  callable, async producer, so the orchestrator assembles the pairs.
-- `EntityResolver` has a decision (ADR-0008) and no implementation.
-- `CandidateClassifier` has a decision (ADR-0009) and is being deleted, not
-  implemented.
-
-The corpus also has to come from more than the seed transcript, which is forty
-turns for one patient.
+So all four subcommands work. What is *not* solved is the corpus: one
+conversation is one subject under one namespace, and the shipped transcript is
+forty turns for one patient. Reaching the checkpoint's 200 candidates means more
+conversations, which is why `generate` reads a proposals file.
 """
 
 from __future__ import annotations
@@ -54,11 +53,18 @@ from typing import TYPE_CHECKING, Final
 
 from guardmem_core.eval import Labelled, agreement_rate, discriminate
 from guardmem_core.eval.discrimination import SELF_AGREEMENT_FLOOR, Verdict
+from scripts.checkpoint_b_generate import generate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 REPO_ROOT: Final = pathlib.Path(__file__).resolve().parent.parent
+
+# A fixed scratch tenant rather than a fresh uuid per run. `generate` writes an
+# entity per namespace through the resolver, and a random tenant would leave a
+# new set behind on every attempt - on a gate that is expected to be re-run
+# against several providers, that is a slow leak into the demo database.
+_SCRATCH_TENANT: Final = "00000000-0000-5000-a000-0000c4ec4b00"
 
 # CHECKPOINT B's manual verification table, each row bound to the test that
 # actually establishes it. Running them beats reading them: the table says
@@ -155,7 +161,7 @@ def template(path: pathlib.Path) -> int:
             "predicate": "allergy",
             "object": "penicillin",
             "verbatim": "I'm allergic to penicillin - it gives me hives",
-            "scores": {"confidence": 0.0, "grounding": 0.0, "semantic_entropy": 0.0},
+            "scores": {"confidence": 0.0, "grounding": 0.0, "uncertainty": 0.0},
         },
         {
             "candidate_id": "c_2",
@@ -164,7 +170,7 @@ def template(path: pathlib.Path) -> int:
             "predicate": "allergy",
             "object": "sulfa",
             "verbatim": "allergic to sulfa drugs",
-            "scores": {"confidence": 0.0, "grounding": 0.0, "semantic_entropy": 0.0},
+            "scores": {"confidence": 0.0, "grounding": 0.0, "uncertainty": 0.0},
         },
     ]
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
@@ -285,6 +291,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="CHECKPOINT B harness")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("verify", help="run the tests behind B1-B8")
+    generate_parser = sub.add_parser(
+        "generate", help="run the pipeline over proposals and write an unlabelled corpus"
+    )
+    generate_parser.add_argument("path", type=pathlib.Path)
+    generate_parser.add_argument(
+        "--proposals",
+        type=pathlib.Path,
+        default=None,
+        help="JSONL, one conversation per line. Omitted, the shipped seed transcript is "
+        "used - one subject, which is a starting point and not 200 candidates.",
+    )
+    generate_parser.add_argument(
+        "--provider",
+        choices=("ollama", "anthropic"),
+        default="ollama",
+        help="ollama needs no credential; anthropic refuses rather than falling back.",
+    )
+    generate_parser.add_argument(
+        "--tenant",
+        default=_SCRATCH_TENANT,
+        help="Tenant to generate under. Defaults to a fixed scratch tenant, so a "
+        "re-run reuses its entities instead of littering new ones.",
+    )
     template_parser = sub.add_parser("template", help="write an empty corpus file")
     template_parser.add_argument("path", type=pathlib.Path)
     score_parser = sub.add_parser("score", help="the AUROC gate over a labelled corpus")
@@ -296,6 +325,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "verify":
         return verify()
+    if args.command == "generate":
+        return generate(args.path, args.proposals, args.provider, args.tenant)
     if args.command == "template":
         return template(args.path)
     if args.command == "score":

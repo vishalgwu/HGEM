@@ -4144,6 +4144,79 @@ architectural is in front of it any more.
 
 ---
 
+## 2026-09-15 — `checkpoint_b generate`: the harness is complete
+
+**Shipped**
+
+- **`scripts/checkpoint_b_generate.py`.** The gate's step 3 - "run the pipeline,
+  collect `C` for each" - and the last missing piece of a harness that has been
+  three-quarters built since Day 5. Reads a proposals JSONL (one conversation
+  per line), runs each through `run()`, writes an unlabelled corpus.
+- **Driven for real**, against a local model and a real Postgres: two
+  conversations in, a corpus out, labelled by hand and fed to `score`, which
+  returned FAIL with exit code 2. The whole pipe composes.
+- **`GovernedCandidate`** - a candidate paired with its decision - and 14 unit
+  tests. 1564 tests, 98.89%.
+
+**What broke / what I learned**
+
+- **A `DecisionRecord` cannot say what it is about, and that stopped the
+  generator dead.** `MEMORY_ENGINE.md` §0 gives it eight fields - decision,
+  reason codes, three reports, two versions, an escalation flag - and not one is
+  an identity. `decide()` takes reports and thresholds, not a candidate, so
+  there was nowhere for one to come from. Correct for replay, which is what §0
+  designed it for; useless for a corpus, where every row needs a subject, a
+  predicate, an object and a verbatim for a human to read.
+  Fixed in `PipelineResult`, which is S5.6's own model rather than §0's, so no
+  spec amendment was needed. **Whether §0 should carry a `candidate_id` is still
+  open** and S18/S19 will force it - a HITL queue and a review UI need the fact
+  beside the verdict exactly as this did.
+- **The pairing is structural, not positional**, and that was deliberate.
+  `decisions` and a parallel `candidates` list would have been the smaller
+  change and the same bug `LLMJudge` guards against - "a short list silently
+  attributes one incumbent's score to a different incumbent", except here the
+  mismatch lands in front of a reviewer.
+- **The shipped template ranked entropy backwards.** `auroc` reports the
+  probability a kept candidate *outranks* a rejected one, so every score must be
+  higher-is-better. `H_norm` is uncertainty; a raw `semantic_entropy` key would
+  have reported an AUROC below 0.5 for a working entropy term and read as
+  evidence against it. Rows now carry `uncertainty = 1 - H_norm`, which is both
+  what §3.2 weighs and what diagnostic 1 asks for in those words. The template
+  is corrected too.
+- **`Turn.model_validate` on a dict from JSONL is refused**, because `GMModel`
+  is strict: `"user"` is not a `TurnRole` and an ISO string is not a `datetime`.
+  This is S5.6's audit-payload trap in a new place, and the fix is the same -
+  `model_validate_json`. A unit test caught it, which is the only reason it did
+  not surface as a confusing failure halfway through a long corpus run.
+- **I diagnosed a rejection wrongly and measuring stopped me writing it down.**
+  Two of four candidates came back `REJECT(SCHEMA)`, and the obvious story was
+  that the clinical pack's critical predicates are `coded` and a 7B model will
+  not produce RxNorm. Checked it: `allergy` with a plain `"penicillin"` is
+  **admitted**. The real cause is still unknown, and it is hard to know because
+  `PipelineResult.rejected` carries ids and nothing else - which is a real gap
+  for a corpus workflow, where "why was this dropped" is the question.
+- **The 40-turn seed transcript timed out** at a 600-second per-request ceiling
+  on a local model. Not a bug; a reason the corpus wants many short
+  conversations rather than a few long ones, which is also what gets it to 200.
+
+**Still open**
+
+- **THE GATE. It is now a corpus and a labelling session, nothing else.** Every
+  dependency is implemented, every decision is taken, the harness is complete
+  and runs for free on a local model.
+- **`PipelineResult.rejected` is ids only**, so a generator cannot report what
+  the schema gate threw away or why.
+- **Whether `DecisionRecord` should carry a candidate id** - a §0 question, and
+  S18.1/S19.2 will force it.
+- The applier (#44); `make dev-reset && make seed` still owed from ADR-0008.
+
+**Tomorrow's first step**
+
+**Write the transcripts.** Twenty short conversations at roughly ten candidates
+each reaches the checkpoint's 200, and nothing in the code is in the way of it.
+
+---
+
 ---
 
 ---

@@ -53,7 +53,11 @@ from guardmem_core.pipeline.inputs import render_content
 from guardmem_core.pipeline.l1_extract.extractor import ExtractionContext, extract
 from guardmem_core.pipeline.l1_extract.noise_filter import filter_noise
 from guardmem_core.pipeline.l2_validate import gate
-from guardmem_core.pipeline.per_candidate import CandidateFailure, score_candidate
+from guardmem_core.pipeline.per_candidate import (
+    CandidateFailure,
+    GovernedCandidate,
+    score_candidate,
+)
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.receipt import SourceTier
 from guardmem_core.schemas.turn import Turn
@@ -113,7 +117,8 @@ class PipelineResult(GMModel):
 
     Attributes:
         trace_id: The proposal's trace.
-        decisions: One record per candidate that was scored, in candidate order.
+        governed: One candidate-and-record pair per candidate that was scored,
+            in candidate order.
         quarantined: Candidate ids the schema gate sent to quarantine - §2.1's
             unknown predicate. Not scored, and not failures either.
         rejected: Candidate ids the gate rejected outright, `REJECT(SCHEMA)`.
@@ -127,11 +132,22 @@ class PipelineResult(GMModel):
     """
 
     trace_id: TraceId
-    decisions: list[DecisionRecord]
+    governed: list[GovernedCandidate]
     quarantined: list[str]
     rejected: list[str]
     dropped_noise: int
     dropped_unsourced: int
+
+    @property
+    def decisions(self) -> list[DecisionRecord]:
+        """Just the records, in candidate order.
+
+        Derived rather than stored: `governed` is the one source of truth, and a
+        second list would be free to disagree with it. Here because most callers
+        want the verdicts and not the facts - the decision mix on a dashboard,
+        the audit payloads, every assertion in the orchestrator's own suite.
+        """
+        return [item.record for item in self.governed]
 
 
 async def run(proposal: Proposal, deps: Deps) -> tuple[PipelineResult, list[CandidateFailure]]:
@@ -182,7 +198,7 @@ async def run(proposal: Proposal, deps: Deps) -> tuple[PipelineResult, list[Cand
     return (
         PipelineResult(
             trace_id=proposal.trace_id,
-            decisions=[o for o in scored if isinstance(o, DecisionRecord)],
+            governed=[o for o in scored if isinstance(o, GovernedCandidate)],
             quarantined=[v.candidate.candidate_id for v in admitted.quarantined],
             rejected=[v.candidate.candidate_id for v in admitted.rejected],
             dropped_noise=len(denoised.dropped),

@@ -251,7 +251,7 @@ SCHEMA_STRATEGIES: dict[type[GMModel], st.SearchStrategy[GMModel]] = {
     **EVAL_STRATEGIES,
     # The orchestrator's own models (S5.6), which compose two of the
     # generators below - hence the call rather than a dict.
-    **pipeline_strategies(_TURNS, DECISION_RECORDS),
+    **pipeline_strategies(_TURNS, DECISION_RECORDS, _memory_candidates()),
     Turn: _TURNS,
     DroppedTurn: _DROPPED_TURNS,
     NoiseResult: st.builds(

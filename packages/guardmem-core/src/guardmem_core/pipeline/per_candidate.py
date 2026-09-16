@@ -41,6 +41,9 @@ from guardmem_core.pipeline.l3_score import (
     score_confidence,
     score_impact,
 )
+from guardmem_core.schemas.base import GMModel
+from guardmem_core.schemas.candidate import MemoryCandidate
+from guardmem_core.schemas.verdict import DecisionRecord
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -50,14 +53,10 @@ if TYPE_CHECKING:
     from guardmem_core.pipeline.orchestrator import Proposal
     from guardmem_core.schemas.candidate import ExtractedFact
     from guardmem_core.schemas.ontology import PredicateSpec
-    from guardmem_core.schemas.verdict import (
-        ConfidenceReport,
-        ConflictReport,
-        DecisionRecord,
-    )
+    from guardmem_core.schemas.verdict import ConfidenceReport, ConflictReport
     from guardmem_core.types import CandidateId, EntityId, Namespace, TraceId
 
-__all__ = ["CandidateFailure", "score_candidate"]
+__all__ = ["CandidateFailure", "GovernedCandidate", "score_candidate"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,17 +78,48 @@ class CandidateFailure:
     error: Exception
 
 
+class GovernedCandidate(GMModel):
+    """One candidate and what was decided about it.
+
+    Attributes:
+        candidate: The proposed fact, as Layer 1 extracted it.
+        record: What Layer 3 decided.
+
+    **The pairing is structural because positional pairing is the bug this
+    codebase keeps catching.** `LLMJudge` checks its judgement count because a
+    short reply "would read one fact's contradiction as another's"; the same
+    hazard applies here and is worse, because a mismatched decision is attached
+    to a fact a *reviewer* then reads.
+
+    It exists because a `DecisionRecord` cannot say what it is about.
+    `MEMORY_ENGINE.md` §0 declares its eight fields and none of them is an
+    identity - `decide()` takes reports and thresholds, not a candidate, so
+    there was nowhere for one to come from. That is fine for replay, which is
+    what §0 designed it for, and not fine for anything that has to *show* a
+    decision: this, the HITL queue (S18.1) and the review UI (S19.2) all need
+    the fact beside the verdict. Whether §0 should carry a `candidate_id` is a
+    spec question and needs an ADR; this model is `PipelineResult`'s own and
+    answers it for the pipeline without pre-empting that.
+    """
+
+    candidate: MemoryCandidate
+    record: DecisionRecord
+
+
 async def score_candidate(
     verdict: GatedCandidate,
     samples: Sequence[Sequence[ExtractedFact]],
     proposal: Proposal,
     deps: Deps,
     limit: asyncio.Semaphore,
-) -> DecisionRecord | CandidateFailure:
+) -> GovernedCandidate | CandidateFailure:
     """Layers 2 and 3 for one candidate, under the concurrency bound.
 
     Returns:
-        The decision record, or a `CandidateFailure` naming the exception.
+        The candidate paired with its decision, or a `CandidateFailure`
+        naming the exception. Paired rather than the record alone because a
+        `DecisionRecord` cannot say what it is about - see
+        `GovernedCandidate`.
 
     Catching `Exception` is deliberate and is the narrowest thing that works
     here: a candidate is one unit of work among many, and the alternative is a
@@ -99,7 +129,8 @@ async def score_candidate(
     """
     async with limit:
         try:
-            return await _decide_one(verdict, samples, proposal, deps)
+            record = await _decide_one(verdict, samples, proposal, deps)
+            return GovernedCandidate(candidate=verdict.candidate, record=record)
         except Exception as exc:
             return CandidateFailure(candidate_id=verdict.candidate.candidate_id, error=exc)
 
