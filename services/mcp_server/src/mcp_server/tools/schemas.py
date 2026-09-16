@@ -27,14 +27,19 @@ validated by the pipeline's own schema gate, which is where `MEMORY_ENGINE.md`
 §2.1 puts that decision, and duplicating the ontology into a JSON Schema here
 would put the predicate vocabulary in two places.
 
-**No `outputSchema` on any of them, deliberately.** MCP lets a server publish
-one and validates `structuredContent` against it - a real guarantee, and one
-worth having. But §2.1-§2.4 publish *example* results rather than schemas, so
-writing them here means inventing a contract the spec of record does not state,
-in the one file whose whole job is to copy it faithfully. **S7.3 is the step
-that owns tool contract tests** ("validate every tool's inputSchema/outputSchema
-with jsonschema; assert no drift"), and it is the right place to add them -
-alongside the check that they match what the handlers actually return.
+**`outputSchema` arrived at S7.3, for three of the four.** S6.2 left them out
+because §2.1-§2.4 publish *example* results rather than schemas, so writing one
+here would have meant inventing a contract the spec of record does not state -
+in the file whose whole job is to copy it faithfully. S7.3 owns tool contract
+tests, and `tools/outputs.py` resolves it the only honest way: each schema is
+read off the handler that produces it, and the contract suite validates real
+handler output against it, so it transcribes a contract rather than inventing
+one. It is not decoration - the MCP *client* compiles a validator per tool and
+checks every `structuredContent` it receives.
+
+`memory.commit` still has none, and for S6.2's reason unchanged: it declines in
+this build, so it returns no `structuredContent`, and a schema for a payload
+nothing produces is a contract nobody can check.
 """
 
 from __future__ import annotations
@@ -42,6 +47,12 @@ from __future__ import annotations
 from typing import Final
 
 import mcp_types as types
+
+from mcp_server.tools.outputs import (
+    GET_ENTITY_OUTPUT,
+    PROPOSE_OUTPUT,
+    SEARCH_OUTPUT,
+)
 
 __all__ = ["COMMIT", "GET_ENTITY", "PROPOSE", "SEARCH", "TOOLS", "TOOLS_BY_NAME"]
 
@@ -77,6 +88,7 @@ SEARCH: Final = types.Tool(
         },
         "required": ["query"],
     },
+    output_schema=SEARCH_OUTPUT,
 )
 
 PROPOSE: Final = types.Tool(
@@ -125,6 +137,7 @@ PROPOSE: Final = types.Tool(
         },
         "required": ["content"],
     },
+    output_schema=PROPOSE_OUTPUT,
 )
 
 COMMIT: Final = types.Tool(
@@ -180,6 +193,7 @@ GET_ENTITY: Final = types.Tool(
         },
         "required": ["entity_id"],
     },
+    output_schema=GET_ENTITY_OUTPUT,
 )
 
 # Declaration order is S6.2's implementation order - search, propose, commit,

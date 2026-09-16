@@ -1109,6 +1109,8 @@ typer==0.27.2
     #   mcp
     #   spacy
     #   weasel
+types-jsonschema==4.26.0.20260518
+    # via -r requirements/dev.txt
 types-networkx==3.6.1.20260911
     # via -r requirements/dev.txt
 types-pyyaml==6.0.12.20260906

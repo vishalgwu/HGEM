@@ -128,6 +128,13 @@ dev = [
   # turned every graph call into `Any` - which is exactly the override S3.2
   # deleted for `asyncpg`, having watched it hide a real annotation error.
   "types-networkx==3.6.1.20260911",
+  # The fourth, at S7.3. `jsonschema` was already pinned in requirements/dev.txt
+  # for this step and ships no `py.typed`, so `mypy --strict` fails outright on
+  # the contract suite's import. The alternative - an `ignore_missing_imports`
+  # override - is the one S3.2 deleted for `asyncpg` after watching it hide a
+  # real annotation error, and it would turn every validator call into `Any` in
+  # the module whose entire job is to check shapes.
+  "types-jsonschema==4.26.0.20260518",
   # gates (S1.2) - RULES.md 4 puts secret scanning in pre-commit AND CI
   "pre-commit==4.6.2",
   "detect-secrets==1.5.0",

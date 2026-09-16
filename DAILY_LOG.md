@@ -4931,6 +4931,87 @@ and assert no drift. `tests/contract/` has been an empty directory with a
 
 ---
 
+## 2026-09-16 — S7.3: the tool contract, and who actually enforces it
+
+    "Validate every tool's inputSchema/outputSchema with jsonschema; assert no
+    drift."
+
+`tests/contract/` has held a `.gitkeep` since S1.1 waiting for this. The
+interesting half of the step was the one S6.2 deferred *to* it by name.
+
+**Shipped**
+
+- **`tools/outputs.py`** - an `outputSchema` for the three tools that return a
+  payload. S6.2 left them out with a reason: "§2.1-§2.4 publish *example*
+  results rather than schemas, so writing them here means inventing a contract
+  the spec of record does not state." The resolution is that every schema is
+  **read off the handler that produces it**, and the contract suite validates
+  real handler output against it - so it transcribes a contract rather than
+  inventing one, and cannot drift from the handler without a test failing.
+- **`memory.commit` still has none**, for S6.2's reason unchanged: it declines
+  in this build, so it returns no `structuredContent`, and a schema for a
+  payload nothing produces is a contract nobody can check. `DECLINES` names it,
+  so growing a payload without a schema fails a test.
+- **Two layers of contract test.** `test_tool_schemas.py` checks every schema
+  against the JSON Schema metaschema, checks the schema against the *code that
+  enforces it*, and validates real payloads. `test_tool_result_validation.py`
+  drives a real session over real Postgres and lets **the SDK's own validator**
+  do the checking.
+- **`types-jsonschema` pinned in all four dependency artifacts**, which is the
+  convention `types-pyyaml`, `asyncpg-stubs` and `types-networkx` already set.
+  `jsonschema` ships no `py.typed`, and the `ignore_missing_imports` alternative
+  is the override S3.2 deleted for `asyncpg` after watching it hide a real
+  annotation error - it would have turned every validator call into `Any` in the
+  one module whose whole job is checking shapes.
+
+**What broke / what I learned**
+
+- **An `outputSchema` is not documentation - the CLIENT enforces it.**
+  `mcp/client/session.py` compiles one validator per tool from `tools/list` and
+  checks every successful `structuredContent`. So declaring one is a real
+  guarantee, and also a real risk: a schema that were wrong would break callers
+  rather than tests. That is why they are read off the handlers and why real
+  payloads are validated against them in two places.
+- **A tool that declares a schema and returns nothing raises**, with "has an
+  output schema but did not return structured content". Checked the SDK before
+  trusting it: the validation is gated on `not result.is_error`, so refusals are
+  exempt - which is the only reason declaring a schema on `memory.search` does
+  not turn every refusal into a protocol error. There is a test pinning that
+  this server's refusals really do carry `isError`.
+- **`additionalProperties` is open on the wire and closed in CI**, deliberately.
+  A published schema that forbade unknown keys would make *adding* a field a
+  breaking change for every existing client, which is backwards for a wire
+  format. Drift still has to fail, so the exact key set is asserted in the
+  contract suite instead. Loose on the wire, strict in CI.
+- **The drift worth catching is not in the schemas, it is between them and the
+  code.** `limit`'s ceiling, its default, `min_confidence`'s floor, the token
+  budget, the `source_tier` enum, the `decision` enum - every one is written
+  twice, once where a client reads it and once where a handler enforces it. Two
+  copies of a fact is a fact that can disagree with itself, and this
+  disagreement is the silent kind: a client trusting a default the handler does
+  not apply gets different results than it asked for, with nothing raising.
+- **Mutation-checked before believing them.** "The assertion is that nothing
+  raises" is only a test if something *would*. Adding one required key the
+  handler never returns failed six tests across both layers.
+- **S6.2's deferral was pinned by a test, and that is why the reversal was
+  safe.** `test_no_tool_publishes_an_output_schema` asserted the absence and its
+  docstring named S7.3 as the step that owned the question - so adding the
+  schemas failed it, loudly, in the right place. Updated rather than deleted,
+  the way S6.1's "lists zero tools" was at S6.2: it now pins *which* tools have
+  one, and the schemas themselves are `tests/contract/`'s to own.
+
+**Still open**
+
+- S7.4, the week-1 retro, and then the Phase-1 exit gate.
+- `memory.commit`'s schema, with its implementation.
+- Everything carried: the merge path, ADR-0011, S18.1, and CHECKPOINT B.
+
+**Tomorrow's first step**
+
+**S7.4** - the retro, and the question it asks honestly.
+
+---
+
 ---
 
 ---

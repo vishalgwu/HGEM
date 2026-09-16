@@ -106,12 +106,30 @@ class TestTheSchemasAreTheDocument:
         ]
         assert properties["source_tier"]["default"] == "unverified_user"
 
-    def test_no_tool_publishes_an_output_schema(self) -> None:
-        """Deliberate, and worth pinning so it is a decision rather than a
-        forgetting. §2.1-§2.4 publish example results, not schemas; writing one
-        here would invent a contract the spec of record does not state. **S7.3**
-        owns tool contract tests and is where they belong."""
-        assert all(tool.output_schema is None for tool in TOOLS)
+    def test_only_the_tool_that_declines_publishes_no_output_schema(self) -> None:
+        """S6.2 pinned "no tool publishes one" and said why: §2.1-§2.4 publish
+        example results rather than schemas, so writing one would invent a
+        contract the spec of record does not state - and that **S7.3** owned the
+        question.
+
+        S7.3 answered it, so this is updated rather than deleted. Three tools
+        publish a schema now, each read off the handler that produces it, which
+        is what makes it a transcription rather than an invention.
+        `memory.commit` still publishes none, for S6.2's reason unchanged: it
+        declines, and a schema for a payload nothing produces is a contract
+        nobody can check.
+
+        The detail lives in `tests/contract/`, which owns the schemas
+        themselves; what is pinned here is only which tools have one, because
+        that is a fact about this module's `TOOLS`.
+        """
+        by_name = {tool.name: tool.output_schema for tool in TOOLS}
+
+        assert by_name["memory.commit"] is None
+        assert all(
+            by_name[name] is not None
+            for name in ("memory.search", "memory.propose", "memory.get_entity")
+        )
 
 
 class TestSearchReadsGovernedMemory:

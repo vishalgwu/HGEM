@@ -247,7 +247,11 @@ guardmem-ai/
 │       └── src/mcp_server/
 │           ├── server.py
 │           ├── tools/{search.py,propose.py,commit.py,get_entity.py,timeline.py,
-│           │        forget.py,policy.py,audit.py,review.py}
+│           │        forget.py,policy.py,audit.py,review.py,outputs.py}
+│           │                                    # outputs.py at S7.3: the outputSchemas,
+│           │                                    #   read off the handlers and validated
+│           │                                    #   against real payloads. The CLIENT
+│           │                                    #   enforces them, so they must be exact
 │           ├── resources/{__init__.py,uris.py,memory.py,ontology.py,audit.py}
 │           │                                    # S6.4. MCP_INTEGRATION §3's three
 │           │                                    #   notebook-named templates; policy.py

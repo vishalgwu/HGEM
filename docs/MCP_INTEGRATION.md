@@ -449,6 +449,26 @@ authors debugging why their writes keep landing in review.
 
 ---
 
+**Every tool that returns a payload publishes an `outputSchema` (S7.3), and the client
+enforces it.** The MCP client compiles one validator per tool from `tools/list` and checks every
+successful `structuredContent` against it, so a result that does not conform raises inside the SDK
+before your code sees it. Three of the four publish one; `memory.commit` does not, because it
+declines in this build and a schema for a payload nothing produces is a contract nobody can check.
+
+Two things follow for an integrator:
+
+- **`provenance` carries `minItems: 1`.** `RULES.md` non-negotiable #1 — no unsourced write — stated
+  on the wire. You can rely on every returned assertion having a citation rather than defending
+  against one that does not.
+- **Unknown keys are allowed.** The schemas leave `additionalProperties` open so that adding a field
+  is not a breaking change for existing clients. Drift is caught in this repo's contract suite,
+  which asserts the exact key set, rather than by rejecting your session.
+
+Refusals are exempt: a failed call carries `isError` and no `structuredContent`, and the validator
+skips it.
+
+---
+
 ## 3. Resources
 
 Resources are read-only context an agent (or a human in Claude Desktop) can attach directly.
