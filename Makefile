@@ -40,7 +40,8 @@ SVC_SRC   := services/mcp_server/src
 CACHES    := .ruff_cache .mypy_cache .pytest_cache .import_linter_cache \
              .hypothesis htmlcov .coverage coverage.xml
 
-.PHONY: help hooks fmt lint imports typecheck test test-all audit clean \
+.PHONY: help hooks fmt lint imports typecheck test test-all test-integration \
+        audit clean \
         dev down migrate seed eval
 
 help:
@@ -52,6 +53,7 @@ help:
 	@echo   typecheck - mypy --strict on guardmem-core, the services, tests and scripts
 	@echo   test - unit and property suites with coverage
 	@echo   test-all - every suite with coverage
+	@echo   test-integration - the integration suite only, needs Docker
 	@echo   audit - pip-audit over the installed dependency set
 	@echo   clean - delete tool caches and coverage output
 	@echo   dev - start the local datastore stack, from step S1.3
@@ -118,6 +120,19 @@ test:
 # integration suite covers fully would be a worse lie than not measuring it.
 test-all:
 	$(UV) pytest --cov
+
+# The integration suite alone, and the target CI's `integration` job calls.
+# Deliberately not `--cov`: this job measures nothing on its own, and a coverage
+# floor applied to a suite that never touches the pipeline would fail the job for
+# a reason unrelated to the invariants it exists to check. The floor belongs to
+# `test` and `test-all`, which is where it is.
+#
+# CI ran `uv run pytest tests/integration -q` directly until this target existed,
+# which is precisely the Makefile/CI drift the header of ci.yml warns about: the
+# suite's invocation lived in two places and only one of them was the documented
+# interface.
+test-integration:
+	$(UV) pytest tests/integration -q
 
 audit:
 	$(UV) pip-audit

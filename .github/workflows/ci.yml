@@ -159,7 +159,11 @@ jobs:
         run: docker pull pgvector/pgvector:0.8.6-pg16
 
       - name: Test
-        run: uv run pytest tests/integration -q
+        # Through the Makefile, like every other gate in this file - see the
+        # header. `make test-integration`, not `make test-all`: the pgvector
+        # fixture is what this job exists to exercise, and the unit and property
+        # suites already ran in `gates`.
+        run: make test-integration
 
   hooks:
     name: pre-commit
