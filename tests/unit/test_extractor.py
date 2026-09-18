@@ -156,10 +156,16 @@ class TestTheCanonicalCandidates:
         assert result.candidates[0].extracted_by == "gpt-4o-mini"
 
     async def test_the_prompt_version_ties_a_candidate_to_the_file_that_made_it(self) -> None:
+        """v2 since 2026-09-17, and the bump is the point of the test.
+
+        The version travels into the audit record, so it has to name the file
+        that actually produced the facts. v1 is kept on disk rather than
+        rewritten precisely so that a record naming it still replays honestly.
+        """
         llm = two_call_llm()
         result = await run_extract(llm, k=3)
 
-        assert result.candidates[0].prompt_version == "extract_memories@v1"
+        assert result.candidates[0].prompt_version == "extract_memories@v2"
 
     async def test_an_empty_extraction_is_a_valid_answer(self) -> None:
         # The prompt says so explicitly. A model that believes it must return

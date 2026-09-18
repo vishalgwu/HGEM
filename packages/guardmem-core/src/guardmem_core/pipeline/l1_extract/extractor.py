@@ -77,7 +77,9 @@ from guardmem_core.types import CandidateId, Namespace, TenantId, TraceId
 __all__ = ["ExtractionBatch", "ExtractionContext", "extract"]
 
 _PROMPT_NAME: Final = "extract_memories"
-_PROMPT_VERSION: Final = 1
+# Bumped, never edited in place: `version_id` is the filename and is recorded on
+# every candidate. v2's frontmatter carries what changed and why.
+_PROMPT_VERSION: Final = 2
 
 _CANARY_BYTES: Final = 8
 
