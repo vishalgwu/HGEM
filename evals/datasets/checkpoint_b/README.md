@@ -47,6 +47,33 @@ None of that is a label. Which candidates survive extraction is the pipeline's
 answer; which deserve to survive is the labeller's, and the two disagreeing is
 the entire point of the gate.
 
+## Extraction is not deterministic on a local model
+
+Measured on `llama3.1:8b` with `extract_memories@v2`, same input, five repeats:
+
+| conversation | result |
+|---|---|
+| `patient:9001` | 4-5 admitted, 0 rejected, 0 quarantined, every run |
+| `patient:9013` | 3 admitted in four runs; **0 admitted / 7 quarantined in the fifth** |
+
+The failing run degenerates into predicates the ontology does not declare -
+`has = "84 kilos"`, `lost = "private cover"`, `is = "still running"` - which the
+gate quarantines, so the conversation contributes nothing.
+
+Two consequences for anyone building or reading a corpus from here:
+
+- **A single generation pass under-samples, invisibly.** Roughly one
+  conversation in five can contribute zero candidates, and the total gives no
+  hint which. Count per-conversation yields and re-run the empty ones.
+- **The corpus samples the model's variance as well as the scorer's quality.**
+  For a gate whose entire purpose is measuring how well `C` separates good
+  writes from bad, an unstable extractor underneath it is a real confound. This
+  is a measured argument for generating on a frontier model rather than a
+  preference.
+
+The object-shape half is stable: 0 rejections in 5 of 5 runs, both
+conversations. That was `extract_memories@v1`'s bug and v2 fixes it.
+
 ## Labelling
 
 `keep` is `null` on every row and `discriminate` refuses a corpus with any row

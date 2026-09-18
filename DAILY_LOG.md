@@ -5235,14 +5235,18 @@ the extraction contract**, which is a better day's work than a weak AUROC.
   rows in memory and writes only after every proposal completes, so Ollama
   dropping out at conversation 16 threw away fifteen conversations of model
   time. Worth fixing before a 200-candidate run.
-- **I called the invented predicates a model weakness and was wrong.**
-  `patient:9013` produced `has = "stress"`, `has = "84 kilos"`, `lost =
-  "private cover"` under v1 - eight quarantined, zero admitted - and I recorded
-  that as "not a prompt bug". v2 fixed it too: the same conversation now gives
-  three admitted and zero quarantined. A model shown an unclear output contract
-  degrades in more than one way at once, and attributing the second symptom to
-  the model rather than the prompt would have sent the next person shopping for
-  a bigger model instead of reading the prompt.
+- **The invented predicates are a RELIABILITY distribution, and I called it
+  twice from one sample each time.** `patient:9013` produced `has = "stress"`,
+  `lost = "private cover"` under v1 - eight quarantined, zero admitted - which I
+  recorded as "not a prompt bug". One v2 run came back 3 admitted / 0
+  quarantined, so I wrote the opposite into a commit message: v2 fixed it, my
+  earlier call was wrong. The next run put all seven invented predicates back.
+
+  Measured properly, n=5 on v2: **four runs 3 admitted / 0 quarantined, one run
+  0 admitted / 7 quarantined.** So v2 substantially improves it and does not
+  categorically fix it, and neither thing I wrote was the truth. The object
+  shape half is the part that is deterministic - 0 rejections in 5 of 5 runs
+  across both conversations.
 - **Two wrong theories, checked before believing them.** I assumed coded slots
   were rejecting plain strings, and that `primary_dx`/`blood_type` were failing
   their `trusted_system` tier. Neither holds: coded accepts any string, and
@@ -5263,14 +5267,30 @@ Three conversations, same three that failed:
 | `patient:9008` | 0 admitted, 6 rejected | **6 admitted, 0 rejected** |
 | `patient:9013` | 0 admitted, 8 quarantined | **3 admitted, 0 quarantined** |
 
-`allergy = "penicillin"`, `weight_kg = 84.0` - bare string, bare float. Nineteen
-lost candidates became thirteen admitted ones.
+`allergy = "penicillin"`, `weight_kg = 84.0` - bare string, bare float.
+
+**Read that table as one sample, because that is what it is.** The 9013 row held
+in four of five repeats and collapsed to 0 admitted / 7 quarantined in the
+fifth. The 9001 and 9008 rows are the stable finding; 9013 is a coin that mostly
+lands the right way up.
+
+**The lesson is one already written down here and in the memory file - "run the
+code against a real model before believing a score" - and believing n=1 is that
+same error wearing different clothes.** It cost two wrong entries in this log
+and an overstated claim in `5c72583`, pushed before it was measured. A single
+green run is a sample, and a prompt change that shifts a model's behaviour is
+exactly the kind of thing that needs a distribution rather than an anecdote.
 
 **Tomorrow's first step**
 
 Regenerate the corpus end to end on v2 and report the real yield against the
-checkpoint's 200. Fix the generator's all-or-nothing write first: one transient
-provider blip currently discards the whole run.
+checkpoint's 200. Two things first:
+
+1. **Fix the generator's all-or-nothing write** - one transient provider blip
+   currently discards the whole run.
+2. **Count conversations that yield zero candidates**, and re-run those. At
+   roughly one conversation in five degenerating, a single pass under-samples in
+   a way that is invisible in the total.
 
 ---
 
