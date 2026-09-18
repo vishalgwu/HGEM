@@ -42,7 +42,6 @@ import asyncpg
 import httpx
 
 from guardmem_core.errors import ProviderUnavailable
-from guardmem_core.llm.base import Tier
 from guardmem_core.llm.entailment import LLMEntailer
 from guardmem_core.llm.providers import build_llm
 from guardmem_core.memory.entities import NamespaceEntityResolver
@@ -53,26 +52,27 @@ from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.pipeline.deps import Deps
 from guardmem_core.pipeline.l2_validate import LLMJudge
 from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
-from guardmem_core.pipeline.orchestrator import Proposal, run
+from guardmem_core.pipeline.orchestrator import run
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.ontology import load_ontology
-from guardmem_core.schemas.receipt import SourceTier
-from guardmem_core.schemas.turn import Turn
 from guardmem_core.settings import Settings, get_settings
-from guardmem_core.types import Namespace, TenantId, TraceId
+from guardmem_core.types import TenantId
+from scripts.checkpoint_b_proposals import read_proposals
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
-
     from guardmem_core.llm.base import LLMClient
 
 __all__ = ["generate"]
 
-# `MEMORY_ENGINE.md` §1.2's default. Not the `high` ladder rung: K=5 is five
-# completions per proposal and the gate needs hundreds of candidates, so the
-# cost ladder is the reason to stay at 3. Diagnostic 4 ("is K too small?") is
-# what changes it, and it changes it for a re-run rather than for the first one.
-_K: Final = 3
+# K comes from `Settings.default_k`, not a literal here. It was `_K: Final = 3`
+# until 2026-09-18, on the cost ladder; the 88-candidate run then measured
+# `uncertainty` at three distinct values while it carried `w_H = 0.35`, the
+# largest weight in `C`, so the heaviest term was also the coarsest.
+#
+# Reading the setting is the point rather than swapping one literal for another:
+# a hardcoded K left `GM_DEFAULT_K` decorative *for this script*, so an operator
+# could set 5, sample 3, and get a corpus disagreeing with its own configuration
+# with nothing raising.
 
 # The gate's own sample size, from the checkpoint's step 1.
 _TARGET: Final = 200
@@ -154,7 +154,8 @@ async def _generate(
             build_llm(settings, http) as llm,
         ):
             deps = _deps(llm, pool, tenant, settings)
-            for index, proposal in enumerate(_read_proposals(proposals, tenant), start=1):
+            batch = read_proposals(proposals, tenant, settings.default_k)
+            for index, proposal in enumerate(batch, start=1):
                 try:
                     result, failures = await run(proposal, deps)
                 except ProviderUnavailable:
@@ -222,80 +223,6 @@ def _row(item: GovernedCandidate) -> dict[str, Any]:
             "consistency": confidence.consistency,
         },
     }
-
-
-def _read_proposals(path: pathlib.Path | None, tenant: TenantId) -> Iterator[Proposal]:
-    """Read the proposals to govern, one conversation per line.
-
-    Args:
-        path: The JSONL file, or `None` for the shipped seed transcript.
-        tenant: The tenant to generate under.
-
-    Yields:
-        One `Proposal` per line.
-
-    Raises:
-        ValueError: a line is not an object with `namespace` and `turns`.
-
-    **The default is a starting point and the checkpoint's own instruction is
-    wrong about it.** Step 1 says "take 200 candidates from the seed
-    transcript"; that transcript is forty turns for one patient supporting 28
-    seeded facts, so it cannot produce 200 of anything. One conversation is one
-    subject under one namespace, so reaching 200 means more conversations - and
-    that is corpus work rather than code, which is why this reads a file.
-
-    Each line is `{"namespace": ..., "turns": [...], "source_tier": ...}`.
-    `source_tier` defaults to `verified_user`, matching `MCP_INTEGRATION.md`
-    §2.2's own default being the weaker `unverified_user` only because a gateway
-    cannot vouch for a caller; a transcript assembled for an eval can.
-    """
-    if path is None:
-        from scripts.demo_tenant_data import NAMESPACE, TRANSCRIPT
-
-        print("no --proposals given; using the shipped seed transcript (one subject)")
-        yield _proposal(tenant, NAMESPACE, list(TRANSCRIPT), SourceTier.VERIFIED_USER, 1)
-        return
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"{path}:{number}: {exc}") from exc
-        if not isinstance(raw, dict) or "namespace" not in raw or "turns" not in raw:
-            raise ValueError(f"{path}:{number}: needs an object with `namespace` and `turns`")
-        yield _proposal(
-            tenant,
-            Namespace(str(raw["namespace"])),
-            # `model_validate_json`, NOT `model_validate`. `GMModel` is strict,
-            # so a dict carrying `"user"` for a `TurnRole` and an ISO string
-            # for a `datetime` is refused - the same trap S5.6 hit with audit
-            # payloads. Round-tripping through JSON is what accepts the
-            # identical data, and a JSONL file is JSON to begin with.
-            [Turn.model_validate_json(json.dumps(turn)) for turn in raw["turns"]],
-            SourceTier(raw.get("source_tier", "verified_user")),
-            number,
-        )
-
-
-def _proposal(
-    tenant: TenantId, namespace: Namespace, turns: Sequence[Turn], tier: SourceTier, number: int
-) -> Proposal:
-    """Build one proposal.
-
-    The trace id is derived from the line number rather than random, so a
-    re-run over the same file produces the same traces and `replay_trace.py`
-    has something stable to reproduce.
-    """
-    return Proposal(
-        trace_id=TraceId(f"tr_ckb_{number:04d}"),
-        tenant_id=tenant,
-        namespace=namespace,
-        turns=list(turns),
-        source_tier=tier,
-        k=_K,
-        tier=Tier.FAST,
-    )
 
 
 def _provider_settings(provider: str, settings: Settings) -> Settings:

@@ -36,7 +36,13 @@ from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import OllamaClient, build_llm
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.verdict import ConfidenceReport, Decision, DecisionRecord
-from scripts.checkpoint_b_generate import _provider_settings, _read_proposals, _row
+from scripts.checkpoint_b_generate import _provider_settings, _row
+from scripts.checkpoint_b_proposals import read_proposals
+
+# `_read_proposals` takes K explicitly rather than reading `Settings`, so these
+# tests pin their own value: what they assert is namespace and trace derivation,
+# neither of which depends on the sample size.
+_TEST_K = 3
 
 
 def governed(*, entropy: float = 0.25, confidence: float = 0.8) -> GovernedCandidate:
@@ -146,7 +152,7 @@ class TestReadProposals:
             encoding="utf-8",
         )
 
-        proposals = list(_read_proposals(path, TENANT))
+        proposals = list(read_proposals(path, TENANT, _TEST_K))
 
         assert [p.namespace for p in proposals] == ["patient:0", "patient:1", "patient:2"]
 
@@ -171,8 +177,8 @@ class TestReadProposals:
         )
         path.write_text(line, encoding="utf-8")
 
-        first = list(_read_proposals(path, TENANT))
-        second = list(_read_proposals(path, TENANT))
+        first = list(read_proposals(path, TENANT, _TEST_K))
+        second = list(read_proposals(path, TENANT, _TEST_K))
 
         assert first[0].trace_id == second[0].trace_id
 
@@ -183,14 +189,14 @@ class TestReadProposals:
         path.write_text('{"namespace": "patient:1"}\n', encoding="utf-8")
 
         with pytest.raises(ValueError, match="needs an object with `namespace` and `turns`"):
-            list(_read_proposals(path, TENANT))
+            list(read_proposals(path, TENANT, _TEST_K))
 
     def test_a_line_that_is_not_json_names_its_row(self, tmp_path: pathlib.Path) -> None:
         path = tmp_path / "p.jsonl"
         path.write_text("not json\n", encoding="utf-8")
 
         with pytest.raises(ValueError, match=r"p\.jsonl:1"):
-            list(_read_proposals(path, TENANT))
+            list(read_proposals(path, TENANT, _TEST_K))
 
 
 class TestProviderSelection:
