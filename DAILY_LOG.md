@@ -5294,6 +5294,65 @@ checkpoint's 200. Two things first:
 
 ---
 
+## 2026-09-18 - the corpus generates clean, and three failures that were not code
+
+**88 candidates from 20 conversations, 0 rejected, 0 quarantined, 0 failed, all
+20 contributing.** That is `extract_memories@v2` measured at scale: the same
+transcripts under v1 lost everything in 8 of 15 conversations.
+
+**Shipped**
+
+- **The generator survives a provider outage.** `ProviderUnavailable` on one
+  proposal is caught, named and skipped rather than taking the batch down, and
+  the run reports which conversations contributed nothing - the README's own
+  finding was that a single pass under-samples invisibly.
+
+**What broke / what I learned**
+
+- **Three failed runs today, none of them code.** Ollama down with Docker;
+  Ollama auto-updating itself mid-run (`OllamaSetup.exe` holding the port, all
+  20 conversations skipped, exit 1 and correctly nothing written); and my own
+  redirect hiding progress because Python block-buffers to a file. The third was
+  mine - `PYTHONUNBUFFERED=1` is what I should have used first.
+- **The hardening did not save this run, and I said it would.** I wrote that it
+  would salvage what it had collected; the outage began during conversation 1,
+  so there was nothing completed to save. The fix is right and would have kept
+  fifteen conversations in yesterday's failure. It earned nothing here, and
+  claiming a win before reading the output is the same error as believing n=1.
+- **`patient:9013` did not degenerate once in this run.** The 1-in-5 rate came
+  from one sample; the README's caveat stays as written rather than being
+  revised on another single run, because revising it on n=1 is how it got wrong
+  twice yesterday.
+- **The spread of `C` is usable**: 18 distinct values over 0.25-0.84, sd 0.14.
+  The decision mix reads lopsided (78 `hitl_review`) but the bands are narrow,
+  not the score, and AUROC reads the score.
+- **Two of the five confidence terms are constant, structurally.**
+  `corroboration` is 0.0 on every single-sourced candidate - which is all of
+  them - and `consistency` is 1.0 because one fresh subject per conversation
+  means no incumbents and therefore no conflicts. Both were predicted; the
+  per-term diagnostic over `corroboration` is entirely ties and must return
+  0.5.
+- **The heaviest term in `C` is also the coarsest.** `w_H = 0.35` is the largest
+  weight and `K = 3` gives `uncertainty` three distinct values. §1.2's ladder
+  allows 5. Worth deciding before a 200-candidate run rather than after.
+
+**Still open**
+
+- **26 more conversations.** 4.4 candidates each means ~46 for the gate's 200.
+  Corpus work, not code.
+- `K = 3` vs `K = 5` for the real run.
+- The labelling session, which no model may do.
+- The 88-row corpus is deliberately **not committed**: `generate` refuses to
+  overwrite an existing corpus in case somebody has labelled it, so an interim
+  file on disk is a trap rather than progress.
+
+**Tomorrow's first step**
+
+Write the remaining conversations, regenerate to 200+, and hand over one corpus
+to label rather than two.
+
+---
+
 ---
 
 ---

@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any, Final
 import asyncpg
 import httpx
 
+from guardmem_core.errors import ProviderUnavailable
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.entailment import LLMEntailer
 from guardmem_core.llm.providers import build_llm
@@ -145,6 +146,7 @@ async def _generate(
     settings = _provider_settings(provider, get_settings())
     pool = await create_pool(libpq_dsn(str(settings.database_url)), min_size=1, max_size=4)
     rows: list[dict[str, Any]] = []
+    barren: list[str] = []
     try:
         await _ensure_tenant(pool, tenant)
         async with (
@@ -153,8 +155,17 @@ async def _generate(
         ):
             deps = _deps(llm, pool, tenant, settings)
             for index, proposal in enumerate(_read_proposals(proposals, tenant), start=1):
-                result, failures = await run(proposal, deps)
+                try:
+                    result, failures = await run(proposal, deps)
+                except ProviderUnavailable:
+                    # Rows live in memory until the end, so one unreachable call
+                    # used to discard the whole batch. Named, so a re-run targets it.
+                    barren.append(f"{proposal.namespace} (provider unreachable)")
+                    print(f"  [{index}] {proposal.namespace}: SKIPPED, unreachable")
+                    continue
                 rows.extend(_row(item) for item in result.governed)
+                if not result.governed:
+                    barren.append(f"{proposal.namespace} (0 scored)")
                 print(
                     f"  [{index}] {proposal.namespace}: {len(result.governed)} scored, "
                     f"{len(result.rejected)} rejected, {len(result.quarantined)} quarantined, "
@@ -164,6 +175,8 @@ async def _generate(
                     print(f"      {failure.candidate_id}: {failure.error}")
     finally:
         await pool.close()
+    if barren:  # a conversation can contribute nothing; the total hides which
+        print(f"  {len(barren)} contributed nothing: {'; '.join(barren)}")
     return rows
 
 

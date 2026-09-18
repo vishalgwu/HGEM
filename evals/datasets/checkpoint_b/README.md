@@ -74,6 +74,41 @@ Two consequences for anyone building or reading a corpus from here:
 The object-shape half is stable: 0 rejections in 5 of 5 runs, both
 conversations. That was `extract_memories@v1`'s bug and v2 fixes it.
 
+## What a full run actually produces
+
+20 conversations on `extract_memories@v2` and `llama3.1:8b`, one clean pass:
+**88 candidates, 0 rejected, 0 quarantined, 0 failed, and every one of the 20
+contributing.** Under v1 the same transcripts lost everything in 8 of 15
+conversations, so this is the fix measured at scale rather than on three.
+
+4.4 candidates per conversation, so the checkpoint's 200 needs roughly 46
+conversations. A short corpus is a corpus problem, not a code one.
+
+**The spread of `C` is usable, which is the thing to check before labelling.**
+18 distinct values over 0.25-0.84, mean 0.72, sd 0.14. The decision mix looks
+lopsided - 78 `hitl_review` against 6 `auto_write`, 3 `reject`, 1 `escalate` -
+but the bands are narrow, not the score underneath them, and AUROC reads the
+score.
+
+**Two of the five confidence terms are constant, and both for structural
+reasons:**
+
+| term | distinct values | why |
+|---|---|---|
+| `corroboration` | 1 (all 0.0) | every candidate is single-sourced |
+| `consistency` | 1 (all 1.0) | one fresh subject per conversation, so no incumbents and no conflicts |
+| `schema_fit` | 2 | mean 0.993, effectively constant |
+| `uncertainty` | 3 | `K = 3` leaves entropy few possible values |
+| `grounding` | 12 | 0-0.95, sd 0.29 - where the variance lives |
+
+The per-term diagnostic over `corroboration` is therefore entirely ties and must
+return exactly 0.5; `auroc` handles that deliberately.
+
+**`uncertainty` is the coarsest term and the heaviest.** `w_H = 0.35` is the
+largest weight in `C`, and `K = 3` gives it three distinct values.
+`MEMORY_ENGINE.md` §1.2's ladder allows 5 on HIGH, which would resolve it more
+finely at 67% more model calls. Worth deciding before a 200-candidate run.
+
 ## Labelling
 
 `keep` is `null` on every row and `discriminate` refuses a corpus with any row
