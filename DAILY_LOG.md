@@ -5185,6 +5185,95 @@ Unchanged by this: **the corpus**.
 
 ---
 
+## 2026-09-17 - CHECKPOINT B, attempt one: the gate found a bug before it found a number
+
+**The corpus is not built. What the attempt produced instead is a real defect in
+the extraction contract**, which is a better day's work than a weak AUROC.
+
+**Shipped**
+
+- **20 synthetic transcripts** (`evals/datasets/checkpoint_b/proposals.jsonl`),
+  one subject each, 10-12 turns, written to span the cases a labeller has to
+  decide between: clean facts, hedged ones, third-party remarks, mid-call
+  corrections, superseded values, speculation, tool turns that contradict the
+  patient, and noise. They parse through the real `_read_proposals`.
+- **`README.md` beside them recording that they are synthetic**, so no future
+  reader finds an AUROC from this directory without the caveat attached. It also
+  records why the no-hand-authoring rule is still honoured - no *candidate* was
+  written by hand, every one comes from the real extractor - and that a score
+  from Ollama is not comparable with one from Claude.
+- **`extract_memories/v2.md`**, which states the shape of `object`.
+
+**What broke / what I learned**
+
+- **The extractor was returning the ontology's object SPECIFICATION as the
+  value.** `{"type":"coded","system":"RxNorm","value":"Penicillin"}` where
+  `"penicillin"` was wanted, and inconsistently - sometimes `value`, sometimes
+  `code`, sometimes `name`. `schema_gate._fit` wants a bare string for a coded
+  slot, so every one died as `REJECT(SCHEMA)`.
+- **Nothing caught it because `ObjectValue` permits a dict.** The structured
+  output schema accepts it, the model emits it, and it dies one layer later at
+  the gate. The two layers disagree and neither is wrong on its own.
+- **v1's whole output contract was one sentence** naming the four fields, with
+  the ontology's object spec rendered directly above it - so the model was shown
+  the wrong shape and never told the right one. v2 gives a four-row table of
+  declared-type to returned-value and one explicit "never return this".
+- **It cost exactly the predicates that matter.** `allergy`, `medication`,
+  `primary_dx`, `blood_type` - the four `impact: critical` entries in the
+  clinical pack. A corpus generated before this fix would have measured `C`
+  almost entirely on pharmacy and preferred language, which is not what the gate
+  is for.
+- **Bumped the prompt, did not edit v1.** `version_id` is `"<name>@v<N>"` off
+  the filename, recorded on `MemoryCandidate.prompt_version`, and it travels
+  into the audit record - so rewriting v1 would leave existing records naming a
+  prompt whose text had changed under them, and `replay_trace.py` would
+  reproduce a different extraction under the same label.
+- **My own comment broke the 400-line cap** on `extractor.py` (407). The
+  rationale was already in v2's frontmatter, so the fix was to delete the
+  duplication rather than split a module - the cap caught real redundancy.
+- **A transient provider blip discards the whole run.** Generation accumulates
+  rows in memory and writes only after every proposal completes, so Ollama
+  dropping out at conversation 16 threw away fifteen conversations of model
+  time. Worth fixing before a 200-candidate run.
+- **I called the invented predicates a model weakness and was wrong.**
+  `patient:9013` produced `has = "stress"`, `has = "84 kilos"`, `lost =
+  "private cover"` under v1 - eight quarantined, zero admitted - and I recorded
+  that as "not a prompt bug". v2 fixed it too: the same conversation now gives
+  three admitted and zero quarantined. A model shown an unclear output contract
+  degrades in more than one way at once, and attributing the second symptom to
+  the model rather than the prompt would have sent the next person shopping for
+  a bigger model instead of reading the prompt.
+- **Two wrong theories, checked before believing them.** I assumed coded slots
+  were rejecting plain strings, and that `primary_dx`/`blood_type` were failing
+  their `trusted_system` tier. Neither holds: coded accepts any string, and
+  `schema_gate.py:156` says outright that `min_source_tier` is not checked
+  there. The diagnostic that printed the actual values is what settled it.
+
+**Still open**
+
+- The corpus itself, and the labelling session.
+- Whether to generate on Ollama at all, given the invented predicates.
+
+**v2 verified against llama3.1:8b**, after `c40ee1a` landed saying it was not.
+Three conversations, same three that failed:
+
+| namespace | v1 | v2 |
+|---|---|---|
+| `patient:9001` | 0 admitted, 5 rejected | **4 admitted, 0 rejected** |
+| `patient:9008` | 0 admitted, 6 rejected | **6 admitted, 0 rejected** |
+| `patient:9013` | 0 admitted, 8 quarantined | **3 admitted, 0 quarantined** |
+
+`allergy = "penicillin"`, `weight_kg = 84.0` - bare string, bare float. Nineteen
+lost candidates became thirteen admitted ones.
+
+**Tomorrow's first step**
+
+Regenerate the corpus end to end on v2 and report the real yield against the
+checkpoint's 200. Fix the generator's all-or-nothing write first: one transient
+provider blip currently discards the whole run.
+
+---
+
 ---
 
 ---
