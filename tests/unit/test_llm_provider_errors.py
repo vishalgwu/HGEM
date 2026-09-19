@@ -183,6 +183,31 @@ class TestErrorsMapToTheRightDomainType:
             with pytest.raises(ProviderUnavailable, match="ollama serve"):
                 await client.complete(prompt=PROMPT, tier=Tier.FAST)
 
+    async def test_a_timed_out_ollama_is_not_reported_as_unreachable(self) -> None:
+        """A timeout and a refused connection need opposite fixes.
+
+        A timeout means the server accepted the connection and is still
+        generating, so pointing at `ollama serve` sends the reader to a process
+        that is already running. `httpx.ReadTimeout` also stringifies to "",
+        so before this was split out the message read "ollama unreachable ...
+        : . Is `ollama serve` running?" - blank cause, wrong remedy.
+
+        CHECKPOINT B hit exactly this: one 12-turn conversation exceeded the
+        600 s budget while 59 others in the same batch succeeded, and two runs
+        were written off as a provider outage on the strength of that string.
+        """
+
+        def stall(_request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("")
+
+        client, http = ollama_adapter(ollama_transport(handler=stall))
+
+        async with http:
+            with pytest.raises(ProviderUnavailable, match="timed out") as caught:
+                await client.complete(prompt=PROMPT, tier=Tier.FAST)
+
+        assert "ollama serve" not in str(caught.value)
+
     async def test_an_ollama_error_status_is_a_provider_error(self) -> None:
         client, http = ollama_adapter(ollama_transport(status=404))
 

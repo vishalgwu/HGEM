@@ -52,7 +52,7 @@ from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.pipeline.deps import Deps
 from guardmem_core.pipeline.l2_validate import LLMJudge
 from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
-from guardmem_core.pipeline.orchestrator import run
+from guardmem_core.pipeline.orchestrator import Proposal, run
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.ontology import load_ontology
 from guardmem_core.settings import Settings, get_settings
@@ -158,13 +158,22 @@ async def _generate(
             for index, proposal in enumerate(batch, start=1):
                 try:
                     result, failures = await run(proposal, deps)
-                except ProviderUnavailable:
-                    # Rows live in memory until the end, so one unreachable call
-                    # used to discard the whole batch. Named, so a re-run targets it.
-                    barren.append(f"{proposal.namespace} (provider unreachable)")
-                    print(f"  [{index}] {proposal.namespace}: SKIPPED, unreachable")
+                except ProviderUnavailable as exc:
+                    # Rows live in memory until the end, so one failed call used
+                    # to discard the whole batch. Named, so a re-run targets it.
+                    #
+                    # The exception's own message, not a fixed word. This used to
+                    # print "SKIPPED, unreachable" for every `ProviderUnavailable`
+                    # while discarding `exc`, and the class covers a transport
+                    # failure, a non-2xx status, a non-JSON body AND an empty
+                    # completion - which for a local model means the context
+                    # window truncated the prompt, a corpus problem with a fix
+                    # nothing like restarting the server. Asserting the one cause
+                    # the handler never checked sent a reader after the wrong bug.
+                    barren.append(f"{proposal.namespace} ({exc})")
+                    print(f"  [{index}] {proposal.namespace}: SKIPPED - {exc}")
                     continue
-                rows.extend(_row(item) for item in result.governed)
+                rows.extend(_row(item, proposal) for item in result.governed)
                 if not result.governed:
                     barren.append(f"{proposal.namespace} (0 scored)")
                 print(
@@ -181,14 +190,27 @@ async def _generate(
     return rows
 
 
-def _row(item: GovernedCandidate) -> dict[str, Any]:
+def _row(item: GovernedCandidate, proposal: Proposal) -> dict[str, Any]:
     """One corpus row, in `template`'s format.
 
     Args:
         item: One candidate and what the pipeline decided about it.
+        proposal: The conversation it came from, for the row's identity.
 
     Returns:
         The row, with `keep` null and every score oriented higher-is-better.
+
+    **`candidate_id` is qualified by the trace, and has to be.** The pipeline
+    numbers candidates within one proposal, so it restarts at `c_1` for every
+    conversation - across 60 of them a corpus carried 7 distinct ids over 234
+    rows. `_labels` in `checkpoint_b.py` keys a dict on this field, so the
+    self-agreement diagnostic silently compared 7 labels instead of 30 and
+    reported a rate that meant nothing. A row identifier that is not unique in
+    the file it identifies rows in is not an identifier.
+
+    The trace prefix rather than a counter because `tr_ckb_0007_c_2` says which
+    conversation the row came from, which `replay_trace.py` can act on and a
+    labeller judging a third-party fact wants to know.
 
     **The candidate is where every labellable field comes from**, and it took
     a `GovernedCandidate` to have one. `MEMORY_ENGINE.md` §0's `DecisionRecord`
@@ -205,7 +227,7 @@ def _row(item: GovernedCandidate) -> dict[str, Any]:
     candidate, record = item.candidate, item.record
     confidence = record.confidence
     return {
-        "candidate_id": str(candidate.candidate_id),
+        "candidate_id": f"{proposal.trace_id}_{candidate.candidate_id}",
         "keep": None,
         "subject": candidate.subject,
         "predicate": candidate.predicate,

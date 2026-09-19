@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from fixtures.providers import ollama_adapter, ollama_transport
 from guardmem_core.llm.base import Tier
-from guardmem_core.llm.providers.ollama_client import _grammar_safe
+from guardmem_core.llm.providers.grammar import grammar_safe
 
 
 class TestTheGrammarLimitOllamaHasAndTheSchemaLayerDoesNot:
@@ -120,7 +120,7 @@ class TestTheGrammarLimitOllamaHasAndTheSchemaLayerDoesNot:
             verbatim: str = Field(max_length=2000)
 
         before = json.dumps(Capped.model_json_schema())
-        _grammar_safe(Capped.model_json_schema())
+        grammar_safe(Capped.model_json_schema())
 
         assert json.dumps(Capped.model_json_schema()) == before
 
@@ -131,4 +131,4 @@ class TestTheGrammarLimitOllamaHasAndTheSchemaLayerDoesNot:
         class Bounded(BaseModel):
             n: int = Field(le=2000)
 
-        assert _grammar_safe(Bounded.model_json_schema())["properties"]["n"]["maximum"] == 2000
+        assert grammar_safe(Bounded.model_json_schema())["properties"]["n"]["maximum"] == 2000

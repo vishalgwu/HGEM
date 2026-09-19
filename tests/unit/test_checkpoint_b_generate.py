@@ -34,8 +34,12 @@ from fixtures.mcp import settings
 from fixtures.providers import ollama_client, ollama_transport
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import OllamaClient, build_llm
+from guardmem_core.pipeline.orchestrator import Proposal
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
+from guardmem_core.schemas.receipt import SourceTier
+from guardmem_core.schemas.turn import Turn, TurnRole
 from guardmem_core.schemas.verdict import ConfidenceReport, Decision, DecisionRecord
+from guardmem_core.types import Namespace, TraceId, TurnId
 from scripts.checkpoint_b_generate import _provider_settings, _row
 from scripts.checkpoint_b_proposals import read_proposals
 
@@ -77,6 +81,23 @@ def governed(*, entropy: float = 0.25, confidence: float = 0.8) -> GovernedCandi
     )
 
 
+def proposal(trace: str = "tr_ckb_0001") -> Proposal:
+    """The conversation a row is attributed to.
+
+    `_row` qualifies `candidate_id` with the trace, because the pipeline's own
+    ids restart at `c_1` for every proposal and a corpus spans dozens of them.
+    """
+    return Proposal(
+        trace_id=TraceId(trace),
+        tenant_id=TENANT,
+        namespace=Namespace("patient:1"),
+        turns=[Turn(turn_id=TurnId("t1"), role=TurnRole.USER, text="hello", captured_at=WHEN)],
+        source_tier=SourceTier.VERIFIED_USER,
+        k=3,
+        tier=Tier.FAST,
+    )
+
+
 class TestEveryScoreIsOrientedHigherIsBetter:
     """The property that decides whether a diagnostic means anything."""
 
@@ -88,18 +109,46 @@ class TestEveryScoreIsOrientedHigherIsBetter:
         AUROC under 0.5 and read as evidence against itself. The template
         shipped a `semantic_entropy` key and had exactly this bug.
         """
-        row = _row(governed(entropy=0.25))
+        row = _row(governed(entropy=0.25), proposal())
 
         assert row["scores"]["uncertainty"] == pytest.approx(0.75)
 
     def test_no_score_is_the_raw_entropy(self) -> None:
         """Belt and braces: the inverted key must not survive anywhere."""
-        assert "semantic_entropy" not in _row(governed())["scores"]
+        assert "semantic_entropy" not in _row(governed(), proposal())["scores"]
 
     def test_the_composite_is_carried_under_the_name_discriminate_expects(self) -> None:
         """`discriminate` takes `composite="confidence"` and raises if it is not
         among the scores. A corpus that omitted it would be unscoreable."""
-        assert _row(governed(confidence=0.42))["scores"]["confidence"] == pytest.approx(0.42)
+        row = _row(governed(confidence=0.42), proposal())
+
+        assert row["scores"]["confidence"] == pytest.approx(0.42)
+
+
+class TestTheRowIdentifiesOneRow:
+    """A corpus-wide identifier, not a per-proposal one."""
+
+    def test_the_candidate_id_is_qualified_by_its_trace(self) -> None:
+        """The pipeline restarts candidate numbering at `c_1` for every
+        proposal, so an unqualified id repeats once per conversation. A 60
+        conversation corpus carried 7 distinct ids over 234 rows.
+
+        That is not cosmetic: `checkpoint_b._labels` builds `dict[str, bool]`
+        keyed on this field, so the self-agreement diagnostic collapsed to one
+        entry per distinct id and reported a rate over 7 labels while claiming
+        30. Diagnostic 3 is what you run when the gate fails, and it lied.
+        """
+        row = _row(governed(), proposal("tr_ckb_0007"))
+
+        assert row["candidate_id"].startswith("tr_ckb_0007_")
+
+    def test_two_proposals_do_not_collide_on_the_same_candidate_number(self) -> None:
+        """The property the corpus actually needs, stated over two rows the
+        pipeline would both have numbered `c_1`."""
+        first = _row(governed(), proposal("tr_ckb_0001"))
+        second = _row(governed(), proposal("tr_ckb_0002"))
+
+        assert first["candidate_id"] != second["candidate_id"]
 
 
 class TestTheRowIsLabellable:
@@ -107,7 +156,7 @@ class TestTheRowIsLabellable:
         """A `DecisionRecord` carries none of this - `MEMORY_ENGINE.md` §0 gives
         it eight fields and not one says what was decided *about*. Without
         `GovernedCandidate` the corpus would be numbers with nothing to read."""
-        row = _row(governed())
+        row = _row(governed(), proposal())
 
         assert row["subject"] == "Joan Ellery"
         assert row["predicate"] == "allergy"
@@ -117,13 +166,13 @@ class TestTheRowIsLabellable:
     def test_keep_is_null_and_stays_null(self) -> None:
         """The whole validity of the gate. "A human labels each one [...] No
         model grading"."""
-        assert _row(governed())["keep"] is None
+        assert _row(governed(), proposal())["keep"] is None
 
     def test_the_decision_is_carried_for_the_labeller_not_for_the_score(self) -> None:
         """Useful to a human - a row the pipeline would auto-write and they are
         about to mark `false` is the most interesting row in the file - and not
         among `scores`, because AUROC is over `C`."""
-        row = _row(governed())
+        row = _row(governed(), proposal())
 
         assert row["decision"] == "hitl_review"
         assert "decision" not in row["scores"]
