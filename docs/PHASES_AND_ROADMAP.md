@@ -51,11 +51,22 @@ tools.
   against the pipeline. `test_migration_invariants.py::test_an_assertion_without_provenance_cannot_commit`
   is the second half. Ticked 2026-09-16.)
 - [ ] Checkpoint B signed off: AUROC of `C` against 200 human-labelled candidates ≥ 0.80 (0.75–0.80 proceeds as MARGINAL and is recorded)
-  <br>(**The only gate not close, and the critical path.** The harness is complete and runs free
-  on a local model; what is missing is 200 transcripts and a human labelling them. No corpus
-  file exists in this repository. S7.4's retro records why a number produced today would be
-  weakly informative anyway — `HashEmbedder` models no semantics, and Anthropic has no
-  `temperature` parameter to draw §1.2's spread with.)
+  <br>(**The only gate not close, and the critical path.** The corpus is built and
+  the labelling session is all that is left. As of 2026-09-19 it stands at **238
+  candidates over the checkpoint's 200**, drawn from 60 conversations on
+  `llama3.1:8b` under `extract_memories@v2` at **K = 5** - 0 rejected, 0
+  quarantined, 0 failed, 59 of 60 contributing (`patient:9056` fails
+  reproducibly and is under diagnosis; 238 clears 200 without it). `C` spans 40
+  distinct values over 0.250-0.837, sd 0.139, and all 15 clinical predicates
+  appear. Every row carries `keep: null`: **a human sets it and no model may**,
+  which is the rule that makes the number mean anything. S7.4's retro records
+  why the result will still be read with care - `HashEmbedder` models no
+  semantics, so `R` is not meaningfully measured and a diagnostic over it would
+  mean little, though `C` is unaffected and the gate reads `C`; and temporal
+  extraction is unbuilt, so the conflict term does less work than §2.3 assumes.
+  The retro's `temperature` caveat does not apply to this corpus: it was drawn
+  entirely on Ollama, which accepts `options.temperature`, rather than mixed with
+  Claude, which has no such parameter.)
 - [x] `guardmem-core` coverage ≥ 90% (RULES §5 release gate; 85% is the Week-1 interim floor)
   <br>(100.00% at S7.2 — 0 missed statements and 0 partial branches over 2664 statements and
   452 branches. Ticked 2026-09-16.)

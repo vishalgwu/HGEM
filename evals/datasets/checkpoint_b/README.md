@@ -6,13 +6,15 @@
 
 | File | What it is | Who wrote it |
 |---|---|---|
-| `proposals.jsonl` | 20 conversations, one subject each, 229 turns | **Claude, synthetically** |
+| `proposals.jsonl` | 50 conversations, one subject each, 559 turns | **Claude, synthetically** |
 | `corpus.jsonl` | The pipeline's candidates and their scores, `keep: null` on every row | `checkpoint_b generate`, from a real model |
 
 ## The caveat that travels with the number
 
-**The transcripts are synthetic.** They were written by Claude on 2026-09-16 and
-reviewed by the repository owner. That is a deliberate choice, made because the
+**The transcripts are synthetic.** The first 20 (`patient:9001`-`9020`) were
+written by Claude on 2026-09-16; `patient:9021`-`9050` were added the same way on
+2026-09-18 to reach the gate's 200 candidates. Both sets were reviewed by the
+repository owner. That is a deliberate choice, made because the
 alternative was a gate that stayed blocked, but it is a real limitation and it
 belongs in any limitations section that cites a score from here.
 
@@ -76,19 +78,21 @@ conversations. That was `extract_memories@v1`'s bug and v2 fixes it.
 
 ## What a full run actually produces
 
-20 conversations on `extract_memories@v2` and `llama3.1:8b`, one clean pass:
-**88 candidates, 0 rejected, 0 quarantined, 0 failed, and every one of the 20
-contributing.** Under v1 the same transcripts lost everything in 8 of 15
-conversations, so this is the fix measured at scale rather than on three.
+60 conversations on `extract_memories@v2` and `llama3.1:8b` at **K = 5**:
+**238 candidates, 0 rejected, 0 quarantined, 0 failed**, and 59 of the 60
+contributing. `patient:9056` failed and is discussed below.
 
-4.4 candidates per conversation, so the checkpoint's 200 needs roughly 46
-conversations. A short corpus is a corpus problem, not a code one.
+That clears the checkpoint's 200. Yield is not uniform and the difference is the
+transcript rather than the model: the 2026-09-16 conversations average 4.3
+candidates each, `patient:9021`-`9050` average 3.1, and the deliberately
+fact-dense `patient:9051`-`9060` average 6.2. A short corpus is a corpus problem,
+not a code one, and the lever is how many facts a conversation actually states.
 
 **The spread of `C` is usable, which is the thing to check before labelling.**
-18 distinct values over 0.25-0.84, mean 0.72, sd 0.14. The decision mix looks
-lopsided - 78 `hitl_review` against 6 `auto_write`, 3 `reject`, 1 `escalate` -
-but the bands are narrow, not the score underneath them, and AUROC reads the
-score.
+40 distinct values over 0.250-0.837, mean 0.695, sd 0.139. The decision mix still
+reads lopsided - 203 `hitl_review` against 20 `auto_write`, 10 `reject`, 5
+`escalate` - but the bands are narrow, not the score underneath them, and AUROC
+reads the score. All 15 clinical predicates appear.
 
 **Two of the five confidence terms are constant, and both for structural
 reasons:**
@@ -97,17 +101,48 @@ reasons:**
 |---|---|---|
 | `corroboration` | 1 (all 0.0) | every candidate is single-sourced |
 | `consistency` | 1 (all 1.0) | one fresh subject per conversation, so no incumbents and no conflicts |
-| `schema_fit` | 2 | mean 0.993, effectively constant |
-| `uncertainty` | 3 | `K = 3` leaves entropy few possible values |
-| `grounding` | 12 | 0-0.95, sd 0.29 - where the variance lives |
+| `schema_fit` | 2 | mean 0.988, effectively constant |
+| `uncertainty` | 7 | at `K = 5`; it was 3 at `K = 3` |
+| `grounding` | 17 | where the variance lives |
 
 The per-term diagnostic over `corroboration` is therefore entirely ties and must
 return exactly 0.5; `auroc` handles that deliberately.
 
-**`uncertainty` is the coarsest term and the heaviest.** `w_H = 0.35` is the
-largest weight in `C`, and `K = 3` gives it three distinct values.
-`MEMORY_ENGINE.md` §1.2's ladder allows 5 on HIGH, which would resolve it more
-finely at 67% more model calls. Worth deciding before a 200-candidate run.
+**`K = 5`, decided 2026-09-18 and measured.** `w_H = 0.35` is the largest weight
+in `C` and `K = 3` gave `uncertainty` three distinct values, so the heaviest term
+in the score was also the coarsest. `MEMORY_ENGINE.md` §1.2's ladder allows 5 on
+HIGH. Moving to it took `uncertainty` from 3 distinct values to 7 and `C` from 18
+to 40, at 67% more model calls - a cost in time rather than money on a local
+model. K is read from `Settings.default_k`; it was hardcoded in the generator
+until that date, which made `GM_DEFAULT_K` decorative for the one script whose
+output the gate is read from.
+
+## `patient:9056` times out, and two messages said otherwise
+
+It was skipped on two consecutive full runs. **It is a timeout**: that one
+12-turn conversation exceeds the 600 s `GM_OLLAMA_TIMEOUT_S` while the other 59
+in the same batch finish against a server that is plainly up. Neither the
+transcript nor the extractor is at fault, so the conversation stays as written;
+raise the budget to recover it.
+
+Finding that took unwinding two wrong messages, both of the same shape - a
+handler asserting a cause it never checked:
+
+- The generator printed a **fixed** `"SKIPPED, unreachable"` for every
+  `ProviderUnavailable`, discarding the exception. That class also covers a
+  non-2xx status, a non-JSON body and an empty completion, which for a local
+  model means the context window truncated the prompt - a corpus problem whose
+  fix is nothing like restarting a server.
+- With the real message surfaced it read `ollama unreachable ... : . Is
+  'ollama serve' running?` - a **blank** cause, because `httpx.ReadTimeout`
+  stringifies to `""`, and a remedy pointing at a process already running. The
+  client folded timeouts and refused connections into one branch though they
+  need opposite fixes. `httpx.TimeoutException` now has its own.
+
+So: a conversation contributing nothing is not necessarily a degenerate
+extraction - it may never have reached the model at all. Count per-conversation
+yields, and read the reason rather than the word. 238 clears 200 without
+`patient:9056`.
 
 ## Labelling
 

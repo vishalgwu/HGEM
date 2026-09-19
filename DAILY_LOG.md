@@ -5353,6 +5353,75 @@ to label rather than two.
 
 ---
 
+## 2026-09-19 - the corpus clears 200, and two defects the harness was hiding
+
+**238 candidates over the gate's 200**, from 60 conversations on `llama3.1:8b`
+at K = 5. `C` spans 40 distinct values, 0.250-0.837, sd 0.139. Every row is
+`keep: null`. The labelling session is now the only thing between here and
+CHECKPOINT B.
+
+**Shipped**
+
+- **40 more conversations**, `patient:9021`-`9060`, written the same synthetic
+  way as the first 20 and recorded as such in the corpus README. Yield is a
+  property of the transcript, not the model: 4.3 candidates each for the
+  09-16 set, 3.1 for `9021`-`9050`, and **6.2 for `9051`-`9060`** once I wrote
+  them deliberately fact-dense. That is the lever for a short corpus.
+- **K = 5, decided and measured.** `uncertainty` went 3 -> 7 distinct values and
+  `C` went 18 -> 40. `w_H = 0.35` is the largest weight in `C`, so the heaviest
+  term had been the coarsest.
+
+**What broke / what I learned**
+
+- **`GM_DEFAULT_K` was decorative for the one script that needed it.** The
+  generator carried `_K: Final = 3` and never read `Settings.default_k`. Setting
+  5 in `.env` would have produced a K=3 corpus with nothing raising. This is the
+  **second** instance of exactly this defect in this file - the first was
+  `GM_OLLAMA_MODEL` through `os.environ`, and the test left behind for it calls
+  it "the one defect the harness exists to avoid". It was avoided for the model
+  and not for K.
+- **`candidate_id` was not unique in the file it identifies rows in.** The
+  pipeline numbers candidates within a proposal, so it restarts at `c_1` per
+  conversation: **7 distinct ids over 234 rows**. `checkpoint_b._labels` keys a
+  dict on that field, so the self-agreement diagnostic would have compared 7
+  labels while reporting 30. Diagnostic 3 is what you run *when the gate fails*,
+  and it would have lied there. Ids are now qualified by trace
+  (`tr_ckb_0007_c_2`), which also tells a labeller which conversation a row came
+  from. Pre-existing: the 88-row corpus had the same 7.
+- **I believed a label instead of the error under it.** `patient:9056` was
+  skipped on two consecutive runs and the generator printed "SKIPPED,
+  unreachable" - a fixed string, with `exc` discarded. `ProviderUnavailable`
+  also covers an empty completion, which for a local model means the context
+  window truncated the prompt and has nothing to do with the server. I repeated
+  "transient provider blip" to the operator on the strength of that word before
+  checking. The handler now prints the exception.
+- **And the exception was wrong too.** With the real message surfaced,
+  `patient:9056` reads `ollama unreachable ... : . Is 'ollama serve' running?` -
+  with a blank cause, because `httpx.ReadTimeout` stringifies to "". It is a
+  **timeout**: one 12-turn conversation exceeding the 600 s `GM_OLLAMA_TIMEOUT_S`
+  while 59 others in the same batch succeeded on a server that was plainly up.
+  A timeout and a refused connection need opposite fixes, and the client folded
+  both into one branch. `httpx.TimeoutException` now gets its own, naming the
+  budget and suggesting the two things that actually help. Neither the
+  conversation nor the extractor is at fault, so the transcript stays as written.
+- **Regenerating beat patching.** The 234-row corpus was correct except for its
+  ids, and rewriting them in place would have been minutes rather than an hour.
+  It would also have put hand-authored identifiers into a measurement artifact,
+  unverifiable against what the generator actually emits. Re-ran it.
+
+**Still open**
+
+- **The labelling session.** 238 rows, `keep: null` on every one. No model may
+  set it, and none has.
+- `corroboration` (all 0.0) and `consistency` (all 1.0) remain structurally
+  constant. Both predicted, neither fixable by tuning.
+
+**Tomorrow's first step**
+
+Label. 238 rows, `keep: null` on every one.
+
+---
+
 ---
 
 ---
