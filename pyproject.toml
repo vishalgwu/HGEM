@@ -17,6 +17,12 @@ dependencies = [
   # passing on any developer machine that ever ran `uv pip install -e` on it.
   # That is the `types-pyyaml` failure exactly, and it cost six red commits.
   "guardmem-mcp",
+  # S8.1, and listed for the reason above rather than a new one: CI runs
+  # `uv sync --locked --dev` at the workspace root, so a member nothing depends
+  # on is locked and not installed. `tests/unit/test_gateway.py` would then fail
+  # on import in CI while passing on any machine that had ever run
+  # `uv pip install -e services/gateway`.
+  "guardmem-gateway",
   # Migration toolchain, owned by the workspace rather than by the library.
   # `infra/migrations/` is not a package and nothing under `guardmem_core`
   # imports these yet: S3.2's pgvector store is the step that adds sqlalchemy,
@@ -64,6 +70,7 @@ constraint-dependencies = [
 [tool.uv.sources]
 guardmem-core = { workspace = true }
 guardmem-mcp = { workspace = true }
+guardmem-gateway = { workspace = true }
 
 # Dev toolchain (BUILD_NOTEBOOK.md S1.1, extended at S1.2).
 #
@@ -334,7 +341,7 @@ exclude_also = ["^\\s*\\.\\.\\.$"]
 # are meaningful today are declared - the layered contract (apps -> services ->
 # packages -> stores) arrives when services/ and apps/ do.
 [tool.importlinter]
-root_packages = ["guardmem_core", "mcp_server"]
+root_packages = ["guardmem_core", "mcp_server", "gateway"]
 # Required whenever a contract forbids modules outside the root packages.
 include_external_packages = true
 
@@ -396,11 +403,26 @@ forbidden_modules = [
 # configuration. A service is the composition root. Choosing the concrete
 # implementations is its entire job, and a rule that stopped it would leave
 # nobody able to do it.
+# S8.1. Two deployables now exist, and nothing checked that they stayed
+# independent. `PROJECT_TREE.md` makes each service thin and puts shared
+# behaviour in `guardmem-core`, so the tempting violation is a gateway handler
+# importing an `mcp_server` output shaper that already formats the thing it wants
+# to return. That would make the gateway undeployable without the MCP SDK and give
+# the two surfaces one schema with two owners.
+[[tool.importlinter.contracts]]
+name = "the services do not import each other"
+type = "independence"
+modules = ["mcp_server", "gateway"]
+
 [[tool.importlinter.contracts]]
 name = "guardmem-core never imports a service"
 type = "forbidden"
 source_modules = ["guardmem_core"]
-forbidden_modules = ["mcp_server"]
+# Every deployable, not just the first one. S8.1 added `gateway`, and a contract
+# phrased about `mcp_server` alone would have passed while the newer service
+# acquired exactly the dependency this forbids - the quiet failure the store
+# contract above records the same way.
+forbidden_modules = ["mcp_server", "gateway"]
 
 # ---------------------------------------------------------------------------
 # A note on pyproject vs requirements/

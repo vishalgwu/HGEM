@@ -21,8 +21,8 @@ export PYTHONIOENCODING := utf-8
 
 UV        := uv run
 CORE_SRC  := packages/guardmem-core/src
-# Every deployable service's source root. One entry today (S6.1's MCP server);
-# `gateway` and `worker` are added here at S8.1 and S8.4.
+# Every deployable service's source root. Two entries: S6.1's MCP server and
+# S8.1's REST gateway. `worker` is added here at S8.4.
 #
 # Spelled out rather than globbed as `services/*/src`, for the PORTABILITY rule
 # at the top of this file: Make does not expand wildcards in a variable itself,
@@ -32,7 +32,7 @@ CORE_SRC  := packages/guardmem-core/src
 # would expand in Make and be portable, but it silently yields nothing when the
 # directory is missing, which is the same gate-quietly-stops-running failure in
 # a different costume.
-SVC_SRC   := services/mcp_server/src
+SVC_SRC   := services/mcp_server/src services/gateway/src
 # Cleared by `make clean`. `.import_linter_cache` is on this list for a reason:
 # it is keyed on file mtime, so restoring a file with an older mtime (a `git
 # checkout`, a restored backup) leaves it serving a stale verdict - a false
@@ -108,10 +108,23 @@ typecheck:
 # command line makes coverage resolve it after import, which reports
 # "module-not-measured" and silently drops real code from the report. RULES.md 5
 # leans on this number, so it has to be honest.
-# Unit and property: no I/O, no Docker, seconds. This is the inner loop and the
-# one CI's `gates` job runs.
+# Unit, property and contract: no I/O, no Docker, seconds. This is the inner loop
+# and the one CI's `gates` job runs.
+#
+# `tests/contract` joined at S8.1, and until then it ran in NO CI job. `test`
+# listed two directories, `test-integration` runs `tests/integration`, and
+# `test-all` is not called by any workflow - so the MCP schema contracts added at
+# S7.3 had been green-by-assumption for a week. S8.1's DONE WHEN is "the
+# schemathesis contract suite runs green", which nothing enforced.
+#
+# It belongs in this target rather than in `integration` because it needs no
+# container: the MCP half validates schemas, and the gateway half drives the app
+# over an ASGI transport with a lifespan that opens nothing.
+#
+# `tests/security` is still unlisted - the directory is empty until S8.2's
+# `test_tenant_isolation.py`, and that step should add it here.
 test:
-	$(UV) pytest tests/unit tests/property --cov
+	$(UV) pytest tests/unit tests/property tests/contract --cov
 
 # Everything, including the integration suite - which from S3.2 starts its own
 # pgvector container, so this needs a Docker daemon and pulls a 620 MB image the

@@ -46,13 +46,16 @@ from test_dependency_consistency import _normalise, _uv_lock_versions
 
 from conftest import REPO_ROOT
 
-# The four trees `make typecheck` covers, which is the definition of "source
-# CI has to be able to import". Keeping this list identical to the Makefile's
-# is the point: a tree mypy checks and this does not is a tree where an
-# undeclared import is invisible again.
+# The five trees `make typecheck` covers, which is the definition of "source CI
+# has to be able to import". Keeping this list identical to the Makefile's is the
+# point: a tree mypy checks and this does not is a tree where an undeclared
+# import is invisible again. `services/gateway/src` joined at S8.1, and its
+# absence here made `gateway` read as an undeclared third-party import - which is
+# this guard working, one tree late.
 SOURCE_TREES: Final = (
     REPO_ROOT / "packages" / "guardmem-core" / "src",
     REPO_ROOT / "services" / "mcp_server" / "src",
+    REPO_ROOT / "services" / "gateway" / "src",
     REPO_ROOT / "tests",
     REPO_ROOT / "scripts",
 )

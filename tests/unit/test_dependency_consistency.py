@@ -77,8 +77,9 @@ PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
 # It is also the walk's starting frontier, so a member missing from here is one
 # whose dependencies are never visited - the two locks then stop being compared
 # over that subtree and the guard reports agreement it did not check.
-# `guardmem-mcp` joined at S6.1 and brought `mcp` with it.
-LOCAL_PACKAGES: Final = frozenset({"guardmem-core", "guardmem-mcp", "guardmem-workspace"})
+LOCAL_PACKAGES: Final = frozenset(  # mcp joined at S6.1, gateway at S8.1
+    {"guardmem-core", "guardmem-gateway", "guardmem-mcp", "guardmem-workspace"}
+)
 
 # `Foo_Bar` and `foo-bar` are the same distribution to pip; normalise before
 # comparing so a naming style difference is never reported as a drift.

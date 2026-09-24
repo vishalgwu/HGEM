@@ -1,0 +1,47 @@
+[project]
+name = "guardmem-gateway"
+version = "0.1.0"
+description = "GuardMem AI REST gateway - production ingress for the governed memory engine."
+requires-python = ">=3.12"
+# `PROJECT_TREE.md`'s ownership table: a service may import `guardmem-core` and
+# its own framework, and nothing else. `fastapi` and `uvicorn` are that
+# framework; `redis` is here rather than in the core because what uses it is
+# gateway-owned - the S8.3 token bucket and the idempotency cache are properties
+# of the ingress, not of the decision engine, and `guardmem-core` must stay
+# deployable in the worker and the eval harness without a Redis to talk to.
+#
+# Postgres arrives through `guardmem-core`, which already owns `asyncpg` and the
+# pool helper. S8.1's instruction says to `uv add asyncpg` here; that would make
+# the gateway a second declarer of a driver the ownership table assigns to the
+# library, and the pool this service opens is `guardmem_core.memory.vector.pool`'s
+# either way.
+#
+# Pinned exactly, matching `requirements/services.txt` and
+# `requirements/stores.txt`. A floor here lets `uv lock` resolve a version the
+# requirements files do not pin, and then the installed version depends on which
+# command ran last - `tests/unit/test_dependency_consistency.py` is the record of
+# that having happened twice.
+dependencies = [
+  "guardmem-core",
+  "fastapi==0.141.1",
+  "uvicorn[standard]==0.52.4",
+  "redis==5.3.1",
+  "opentelemetry-sdk==1.44.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+guardmem-core = { workspace = true }
+
+# Same mismatch, same reason as `guardmem-mcp`: the distribution is
+# `guardmem-gateway` and the import package is `gateway`, so hatchling's
+# name-based auto-detection cannot find it and fails the build outright.
+# `PROJECT_TREE.md` names the directory `services/gateway/src/gateway/` - the
+# directory says what the thing is inside this repository, and the distribution
+# name says what it is on an index, where `gateway` would be an unhelpfully
+# generic claim to make.
+[tool.hatch.build.targets.wheel]
+packages = ["src/gateway"]

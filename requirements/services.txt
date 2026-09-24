@@ -10,6 +10,13 @@
 
 fastapi==0.141.1              # S8.1 gateway ingress
 uvicorn[standard]==0.52.4     # S8.1 ASGI server
+# Declared explicitly although `uvicorn[standard]` already requires it, because
+# this lock is compiled per-platform and uvloop has no Windows wheel. Compiled
+# on Windows the extra silently resolves without it, while `uv sync` on CI
+# (Linux) installs it - so the two environments differ with nothing failing,
+# which is exactly what test_dependency_consistency.py exists to catch. It
+# caught this at S8.1. The marker is uvicorn's own.
+uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
 arq==0.28.0                   # S8.4 Redis-stream worker: async eval, compaction, outbox relay
                               # 0.28 is the newest release; it constrains redis<6, which is why
                               # requirements/stores.txt pins redis==5.3.1.

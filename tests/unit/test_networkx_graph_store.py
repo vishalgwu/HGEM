@@ -124,7 +124,12 @@ class TestTheDoneWhenIsEnforced:
         """
         config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         contracts = config["tool"]["importlinter"]["contracts"]
-        forbidding = [c for c in contracts if c["source_modules"] == ["guardmem_core.pipeline"]]
+        # `.get`, not `[...]`: not every contract type has `source_modules`.
+        # S8.1 added an `independence` contract over the two services, which
+        # spells its operands `modules`, and this comprehension raised
+        # `KeyError` on it - a test for one contract broken by an unrelated
+        # contract being added beside it.
+        forbidding = [c for c in contracts if c.get("source_modules") == ["guardmem_core.pipeline"]]
 
         assert forbidding, "no contract stops the pipeline importing a concrete store"
         forbidden = set(forbidding[0]["forbidden_modules"])
