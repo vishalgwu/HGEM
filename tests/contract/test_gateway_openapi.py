@@ -138,12 +138,21 @@ class TestTheDocumentItselfIsServable:
         `build_app` passes `redoc_url=None`. Pinned because "we only serve the one
         the step named" is otherwise a claim nothing checks, and an unused
         documentation surface is one more path to keep reachable and reason about
-        under S8.2's auth.
+        under auth.
+
+        **`/redoc` answers 401 rather than 404 since S8.2, and the assertion is
+        `!= 200` for that reason.** `middleware._UNAUTHENTICATED` lists the four
+        paths that may be reached without a credential, and an unknown path is not
+        among them - so an anonymous request is refused before routing decides
+        there is nothing there. That is the better order: a 404 from an
+        unauthenticated caller tells them which paths exist, and path enumeration
+        is reconnaissance. An authenticated caller still gets a 404, which is the
+        answer that is actually useful to them.
         """
         client = _client()
 
         assert client.get("/docs").status_code == 200
-        assert client.get("/redoc").status_code == 404
+        assert client.get("/redoc").status_code != 200
 
 
 class TestEveryRouterS81NamesIsRegistered:

@@ -214,8 +214,16 @@ def test_env_example_declares_exactly_the_settings_fields() -> None:
 
 # Every field that carries a credential, and what would appear in a log if it
 # stopped being protected. The DSNs embed a password in their userinfo; the
-# other three are the credential.
-_SECRET_BEARING = ("database_url", "redis_url", "neo4j_password", "anthropic_api_key")
+# others are the credential. `gateway_api_keys` joined at S8.2 and is the worst of
+# them to leak: one value carries every service key the deployment accepts, and
+# each one resolves to a tenant.
+_SECRET_BEARING = (
+    "database_url",
+    "redis_url",
+    "neo4j_password",
+    "anthropic_api_key",
+    "gateway_api_keys",
+)
 
 
 def test_no_credential_survives_the_repr() -> None:

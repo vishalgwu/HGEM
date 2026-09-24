@@ -222,6 +222,32 @@ class Settings(BaseSettings):
     mcp_tenant_id: str = ""
     mcp_default_namespace: str = ""
 
+    # --- gateway auth (S8.2) ------------------------------------------------
+    # The scoped service API keys `PRD.md` §"AuthN" calls for, as a JSON object:
+    #
+    #     {"<key>": {"tenant": "<uuid>", "scopes": ["memory:read"]}}
+    #
+    # This is what the block above was waiting for. `mcp_tenant_id` exists
+    # "because authentication does not"; for the gateway it now does, and a
+    # request's tenant is resolved from its credential rather than from
+    # configuration. The MCP server still reads its own field - it speaks stdio to
+    # one client and has no request to carry a key.
+    #
+    # **`SecretStr`, and empty by default.** A key is a credential, so it must not
+    # reach a log or a `repr` - `test_settings.py` asserts that for every field
+    # that carries one. Empty is the honest representation of "this process has no
+    # credentials configured", and the gateway still *starts*: `/healthz` and
+    # `/readyz` need no principal, and a process that refused to boot without keys
+    # could not report its own liveness. Every authenticated route answers 401
+    # instead, which `auth.py` explains.
+    #
+    # Not a `dict` field, deliberately. pydantic-settings parses a JSON object
+    # from the environment into one happily, but it would then be a plain dict in
+    # `repr` output with the keys in it, and `SecretStr` is the only spelling that
+    # survives the no-credentials-in-logs rule. `gateway.auth` parses it once at
+    # startup and the parsed form never leaves that module.
+    gateway_api_keys: SecretStr = SecretStr("")
+
     # --- pipeline tuning ----------------------------------------------------
     # K is 1, 3 or 5 by risk hint (MEMORY_ENGINE 1.2); this is the default arm.
     # The upper bound is a sanity rail, not a spec value - K scales cost

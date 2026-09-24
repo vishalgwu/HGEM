@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import FastAPI
 
 from gateway.lifespan import SERVICE, lifespan
+from gateway.middleware import apply
 from gateway.routers import ROUTERS
 
 if TYPE_CHECKING:
@@ -90,6 +91,10 @@ def build_app(*, lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url=None,
     )
+    # Before the routers, though order of these two calls does not matter to
+    # Starlette - it matters to a reader, because the chain is what every route
+    # below sits behind. See `middleware.apply` for why the list is reversed there.
+    apply(app)
     for router in ROUTERS:
         app.include_router(router)
     return app

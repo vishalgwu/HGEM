@@ -39,6 +39,8 @@ from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 
+from gateway.auth import SettingsAuthBackend
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.settings import Settings, get_settings
 
@@ -46,6 +48,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     import asyncpg
+
+    from gateway.auth import AuthBackend
+    from guardmem_core.memory.vector.base import Embedder
 
 __all__ = ["SERVICE", "GatewayState", "lifespan"]
 
@@ -72,8 +77,10 @@ class GatewayState:
         pool: The Postgres pool. Request-scoped stores are built *from* it -
             `PgVectorStore` binds a tenant and the tenant comes from an
             authenticated request - so the pool lives here and the store does
-            not. S8.2's tenancy middleware sets `app.tenant_id` on a connection
-            checked out of this pool, which is what makes RLS apply.
+            not. The tenant reaches a statement through
+            `pool.tenant_transaction`, per transaction, and **not** by the S8.2
+            middleware holding a connection for the request - see
+            `middleware.Tenancy` for why that shape is rejected.
         redis: The Redis client, for what the ingress owns rather than what the
             engine owns: S8.3's token bucket, its idempotency cache, and later
             the review leases. `redis.asyncio.Redis` is itself a connection pool,
@@ -86,6 +93,20 @@ class GatewayState:
         tracer: This process's tracer. Handed over rather than fetched at call
             time so a handler cannot acquire one from a provider that lifespan
             has already shut down.
+        embedder: Read-side query embedding, typed as the `Embedder` protocol.
+            **The `HashEmbedder` bound today models no semantics** - it hashes
+            text, so identical text retrieves identically and nothing else does.
+            It is here for the reason `mcp_server.ServerState.embedder` gives:
+            it is the only `Embedder` in the package, and naming it in the state
+            is better than a handler reaching for one on its own. Nothing measured
+            through it is a retrieval quality number.
+        auth: What resolves a credential to a `Principal`, S8.2. Process-scoped
+            for the same reason the pool is - `SettingsAuthBackend` parses the
+            configured key set once, and a per-request parse would put every
+            credential through a JSON decoder on every call. It lives here rather
+            than being held by the middleware because construction reads
+            `Settings`, and `build_app()` must stay importable without an
+            environment: CI's `gates` job has no `.env`.
     """
 
     settings: Settings
@@ -93,6 +114,8 @@ class GatewayState:
     redis: aioredis.Redis
     http: dict[str, httpx.AsyncClient]
     tracer: trace.Tracer
+    embedder: Embedder
+    auth: AuthBackend
 
 
 @asynccontextmanager
@@ -164,6 +187,12 @@ async def lifespan(_app: object = None) -> AsyncIterator[GatewayState]:
             redis=redis,
             http=http,
             tracer=provider.get_tracer(SERVICE),
+            embedder=HashEmbedder(),
+            # Built last and deliberately not on the exit stack: it owns no
+            # socket, file or thread, so there is nothing to close. A `ValueError`
+            # here is a malformed `GM_GATEWAY_API_KEYS` and takes the process down
+            # at startup, which is where a configuration error belongs.
+            auth=SettingsAuthBackend(settings),
         )
 
 

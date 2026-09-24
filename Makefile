@@ -121,8 +121,11 @@ typecheck:
 # container: the MCP half validates schemas, and the gateway half drives the app
 # over an ASGI transport with a lifespan that opens nothing.
 #
-# `tests/security` is still unlisted - the directory is empty until S8.2's
-# `test_tenant_isolation.py`, and that step should add it here.
+# `tests/security` is NOT here and is in `test-integration` instead. S8.2's
+# `test_tenant_isolation.py` asserts that Postgres RLS hides one tenant's rows
+# from another, and `queries.py` carries no tenant predicate at all - so the thing
+# under test is a database policy and a fake store would only prove that a fake
+# filters. It needs a container, which is what that job has.
 test:
 	$(UV) pytest tests/unit tests/property tests/contract --cov
 
@@ -145,7 +148,7 @@ test-all:
 # suite's invocation lived in two places and only one of them was the documented
 # interface.
 test-integration:
-	$(UV) pytest tests/integration -q
+	$(UV) pytest tests/integration tests/security -q
 
 audit:
 	$(UV) pip-audit
