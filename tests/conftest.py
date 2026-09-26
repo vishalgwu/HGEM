@@ -46,6 +46,9 @@ pytest_plugins = (
     "fixtures.seed",
     "fixtures.neo4j",
     "fixtures.mcp_session",
+    # S8.3. The token bucket is a Lua script, and a script is the one thing a fake
+    # cannot stand in for.
+    "fixtures.redis",
 )
 
 

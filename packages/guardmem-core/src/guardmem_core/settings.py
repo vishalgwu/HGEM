@@ -248,6 +248,17 @@ class Settings(BaseSettings):
     # startup and the parsed form never leaves that module.
     gateway_api_keys: SecretStr = SecretStr("")
 
+    # --- gateway rate limiting and idempotency (S8.3) -----------------------
+    # A bucket has two numbers: the sustained refill and the depth it may burst
+    # to. One requests-per-window number cannot express "steady 60/min but
+    # tolerate 20 at once", which is the shape real clients have - they batch. The
+    # validator below rejects a burst below the rate.
+    rate_limit_per_minute: int = Field(60, ge=1)
+    rate_limit_burst: int = Field(120, ge=1)
+
+    # S8.3's "cached 24h", in the seconds Redis takes.
+    idempotency_ttl_s: int = Field(86_400, ge=1)
+
     # --- pipeline tuning ----------------------------------------------------
     # K is 1, 3 or 5 by risk hint (MEMORY_ENGINE 1.2); this is the default arm.
     # The upper bound is a sanity rail, not a spec value - K scales cost
@@ -323,6 +334,27 @@ class Settings(BaseSettings):
                 f"neo4j_uri scheme {self.neo4j_uri.scheme!r} is not a Neo4j scheme; "
                 f"expected one of {sorted(_NEO4J_SCHEMES)}. The browser on 7474 "
                 "speaks HTTP; the driver wants bolt on 7687."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _the_bucket_must_be_able_to_hold_a_minute(self) -> Settings:
+        """Reject a burst depth smaller than the sustained rate.
+
+        With a burst below the rate the bucket saturates before a minute's tokens
+        have accrued, so the sustained rate is unreachable: a deployment
+        configured for 60/min quietly serves fewer, and the symptom is 429s
+        nobody can explain from the numbers on the page.
+
+        Raises:
+            ValueError: if ``rate_limit_burst < rate_limit_per_minute``.
+        """
+        if self.rate_limit_burst < self.rate_limit_per_minute:
+            raise ValueError(
+                f"rate_limit_burst ({self.rate_limit_burst}) is below "
+                f"rate_limit_per_minute ({self.rate_limit_per_minute}), so the "
+                "bucket cannot hold one minute of refill and the sustained rate "
+                "is unreachable. Burst is a depth, not a second limit."
             )
         return self
 

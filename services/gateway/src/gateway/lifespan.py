@@ -40,6 +40,7 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 
 from gateway.auth import SettingsAuthBackend
+from gateway.limits import IdempotencyStore, TokenBucket
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.settings import Settings, get_settings
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     import asyncpg
 
     from gateway.auth import AuthBackend
+    from gateway.limits import RateLimiter
     from guardmem_core.memory.vector.base import Embedder
 
 __all__ = ["SERVICE", "GatewayState", "lifespan"]
@@ -100,6 +102,12 @@ class GatewayState:
             it is the only `Embedder` in the package, and naming it in the state
             is better than a handler reaching for one on its own. Nothing measured
             through it is a retrieval quality number.
+        limiter: S8.3's token bucket, keyed by `tenant:api_key`. Process-scoped
+            because `register_script` caches the script's SHA per client, so
+            rebuilding it per request would re-send the body on every call.
+        idempotency: Stored responses for replayed writes, S8.3. Held here rather
+            than built per request for the same reason every other Redis-backed
+            thing is: the client is the pool.
         auth: What resolves a credential to a `Principal`, S8.2. Process-scoped
             for the same reason the pool is - `SettingsAuthBackend` parses the
             configured key set once, and a per-request parse would put every
@@ -115,6 +123,8 @@ class GatewayState:
     http: dict[str, httpx.AsyncClient]
     tracer: trace.Tracer
     embedder: Embedder
+    limiter: RateLimiter
+    idempotency: IdempotencyStore
     auth: AuthBackend
 
 
@@ -188,6 +198,12 @@ async def lifespan(_app: object = None) -> AsyncIterator[GatewayState]:
             http=http,
             tracer=provider.get_tracer(SERVICE),
             embedder=HashEmbedder(),
+            limiter=TokenBucket(
+                redis,
+                per_minute=settings.rate_limit_per_minute,
+                burst=settings.rate_limit_burst,
+            ),
+            idempotency=IdempotencyStore(redis, ttl_s=settings.idempotency_ttl_s),
             # Built last and deliberately not on the exit stack: it owns no
             # socket, file or thread, so there is nothing to close. A `ValueError`
             # here is a malformed `GM_GATEWAY_API_KEYS` and takes the process down

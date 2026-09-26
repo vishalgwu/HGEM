@@ -26,15 +26,19 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fastapi import FastAPI, Request
 from gateway.auth import InvalidCredentialError, Principal, SettingsAuthBackend, credential_from
+from gateway.limits import Decision
 from gateway.main import build_app
 from gateway.middleware import REQUEST_ID_HEADER
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
+from fixtures.mcp import settings as build_settings
 from guardmem_core.types import TenantId
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from guardmem_core.settings import Settings
 
 TENANT_A = TenantId("11111111-1111-4111-8111-111111111111")
 KEY_A = "key-a-0000000000"
@@ -87,6 +91,28 @@ class _Unreachable:
         raise OSError("no redis in a unit test")
 
 
+class _AlwaysAllows:
+    """A limiter that never refuses.
+
+    S8.3 filled `RateLimit.dispatch`, which reads
+    `request.app.state.gateway.limiter` for every authenticated request - so this
+    file's fake state needs one. Always-allows rather than a real bucket because
+    these tests are about the chain's *order* and its 401, and a bucket would make
+    them depend on Redis.
+    """
+
+    async def check(self, principal: Principal) -> Decision:
+        """Allow every request.
+
+        Args:
+            principal: Ignored.
+
+        Returns:
+            An allowing `Decision`.
+        """
+        return Decision(allowed=True, remaining=1_000, retry_after_s=0.0)
+
+
 @dataclass(frozen=True)
 class _State:
     """Just the fields the chain and the health router read."""
@@ -94,6 +120,8 @@ class _State:
     auth: _Backend
     pool: _Unreachable
     redis: _Unreachable
+    limiter: _AlwaysAllows
+    settings: Settings
 
 
 def _app() -> FastAPI:
@@ -110,7 +138,9 @@ def _app() -> FastAPI:
 
     @asynccontextmanager
     async def _no_resources(app: FastAPI) -> AsyncIterator[None]:
-        app.state.gateway = _State(_Backend(), _Unreachable(), _Unreachable())
+        app.state.gateway = _State(
+            _Backend(), _Unreachable(), _Unreachable(), _AlwaysAllows(), build_settings()
+        )
         yield
 
     return build_app(lifespan=_no_resources)

@@ -47,6 +47,7 @@ import pytest
 from fastapi import FastAPI
 from gateway.auth import SettingsAuthBackend
 from gateway.lifespan import GatewayState
+from gateway.limits import Decision
 from gateway.main import build_app
 from pydantic import SecretStr
 from starlette.testclient import TestClient
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     import asyncpg
+    from gateway.auth import Principal
 
     from guardmem_core.memory.vector.pgvector_store import PgVectorStore
     from guardmem_core.settings import Settings
@@ -72,6 +74,26 @@ NAMESPACE: Final = str(NS)
 
 KEY_A: Final = "key-for-tenant-a-0001"
 KEY_B: Final = "key-for-tenant-b-0002"
+
+
+class _AlwaysAllows:
+    """A limiter that never refuses.
+
+    Satisfies `RateLimiter` structurally. S8.3's bucket needs Redis, and this
+    file's subject is a Postgres RLS policy - so an unavailable Redis must not be
+    able to turn a tenant-isolation result into a 429.
+    """
+
+    async def check(self, principal: Principal) -> Decision:
+        """Allow every request.
+
+        Args:
+            principal: Ignored.
+
+        Returns:
+            An allowing `Decision` with a nominal budget.
+        """
+        return Decision(allowed=True, remaining=1_000, retry_after_s=0.0)
 
 
 def _settings_with_keys(tenant_a: str, tenant_b: str) -> Settings:
@@ -128,6 +150,13 @@ async def gateway(pool: asyncpg.Pool, tenancy: dict[str, str]) -> AsyncIterator[
             http={},
             tracer=None,  # type: ignore[arg-type]
             embedder=HashEmbedder(),
+            # S8.3 put a limiter and an idempotency store on the state. Both are
+            # Redis-backed and neither is what this file tests, so the limiter is
+            # one that always allows and the store is never reached: a bucket here
+            # would make a tenant-isolation test fail on a 429, which is a wrong
+            # answer to the question being asked.
+            limiter=_AlwaysAllows(),
+            idempotency=None,  # type: ignore[arg-type]
             auth=SettingsAuthBackend(settings),
         )
         yield
