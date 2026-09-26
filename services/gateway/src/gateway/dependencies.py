@@ -23,14 +23,17 @@ from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 
 if TYPE_CHECKING:
     from gateway.auth import Principal
+    from gateway.deadline import Deadline
     from gateway.lifespan import GatewayState
     from guardmem_core.memory.vector.base import Embedder
 
 __all__ = [
+    "DeadlineDep",
     "EmbedderDep",
     "GatewayDep",
     "PrincipalDep",
     "StoreDep",
+    "deadline",
     "embedder",
     "gateway_state",
     "principal",
@@ -120,8 +123,41 @@ def vector_store(request: Request) -> PgVectorStore:
         state.pool,
         state.embedder,
         tenant_id=principal(request).tenant_id,
-        timeout_s=state.settings.store_timeout_s,
+        # **The deadline decremented, not `store_timeout_s` raw.** This is the
+        # thread ADR-0012 asks for: the store's own ceiling still applies, and so
+        # does what is left of the request's budget, whichever is smaller. Without
+        # it the setting would be a ceiling on each of an unbounded number of
+        # calls, which is the thing that cannot be reasoned about against a p95.
+        #
+        # Raises `DeadlineExceeded` here if the budget is already spent, which is
+        # earlier than the store would have - and names the budget rather than the
+        # store, so an operator is not sent to Postgres for a latency problem.
+        timeout_s=deadline(request).for_call(state.settings.store_timeout_s),
     )
+
+
+def deadline(request: Request) -> Deadline:
+    """This request's time budget.
+
+    Args:
+        request: The live request.
+
+    Returns:
+        The `Deadline` the outermost middleware attached.
+
+    Raises:
+        RuntimeError: the chain is not installed. A programming error, not a 504:
+            answering 504 would report a budget that was never started as a budget
+            that ran out, and those have different fixes.
+    """
+    found = getattr(request.state, "deadline", None)
+    if found is None:
+        raise RuntimeError(
+            "no deadline on the request: `middleware.RequestDeadline` is the "
+            "outermost layer and must have run before any handler."
+        )
+    resolved: Deadline = found
+    return resolved
 
 
 def embedder(request: Request) -> Embedder:
@@ -142,6 +178,7 @@ def embedder(request: Request) -> Embedder:
 
 
 # The annotations routes use, for the reason `GatewayDep` is named.
+DeadlineDep = Annotated["Deadline", Depends(deadline)]
 PrincipalDep = Annotated["Principal", Depends(principal)]
 EmbedderDep = Annotated["Embedder", Depends(embedder)]
 StoreDep = Annotated["PgVectorStore", Depends(vector_store)]

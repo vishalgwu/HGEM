@@ -116,11 +116,23 @@ class TestTheBucketRefills:
         Without the `math.min` in the script, a key idle for an hour would arrive
         with an hour of tokens and could spend them all at once - which is the
         thundering-herd shape a limiter is supposed to prevent.
+
+        **The refill rate is chosen so the test's own round trips cannot earn a
+        token.** The first version used `per_minute=6000` - 100 tokens a second -
+        and the five sequential checks below take milliseconds each, so the bucket
+        refilled *during the assertion* and a fourth call was allowed. It failed
+        as `True != False` at index 1, which reads like a broken cap rather than a
+        flaky measurement.
+
+        At 10 tokens a second the one-second sleep offers 10 against a depth of 3,
+        so an uncapped bucket would allow far more than 3 - and the five checks
+        span a few milliseconds, which is 0.05 of a token. The margin is two orders
+        of magnitude either side.
         """
-        bucket = _bucket(flushed, per_minute=6000, burst=3)
+        bucket = _bucket(flushed, per_minute=600, burst=3)
         await bucket.check(PRINCIPAL)
 
-        await asyncio.sleep(0.2)  # far more than 3 tokens' worth of refill
+        await asyncio.sleep(1.0)  # 10 tokens offered against a depth of 3
 
         allowed = [(await bucket.check(PRINCIPAL)).allowed for _ in range(5)]
 

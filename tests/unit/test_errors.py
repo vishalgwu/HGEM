@@ -25,6 +25,7 @@ import pytest
 from guardmem_core.errors import (
     BudgetExceeded,
     ConcurrencyConflict,
+    DeadlineExceeded,
     GuardMemError,
     InjectionDetected,
     PolicyDenied,
@@ -50,7 +51,7 @@ def _hierarchy() -> list[type[GuardMemError]]:
 
 
 def test_the_hierarchy_is_the_one_rules_specifies() -> None:
-    """RULES.md 2.3 lists seven errors plus the base. Guard against drift.
+    """RULES.md 2.3 lists eight errors plus the base. Guard against drift.
 
     A new error class is a change to a published contract, not an
     implementation detail - it should arrive with a RULES update, and this
@@ -65,6 +66,7 @@ def test_the_hierarchy_is_the_one_rules_specifies() -> None:
         ProviderUnavailable,
         StoreUnavailable,
         ConcurrencyConflict,
+        DeadlineExceeded,
     }
 
 
@@ -156,9 +158,15 @@ def test_only_transient_failures_are_retryable() -> None:
 
     A retryable permanent failure is an infinite loop; a non-retryable
     transient one is an outage that never recovers. Both are worth pinning.
+
+    `GM_DEADLINE` joined at ADR-0012's request budget and is retryable, which is
+    worth a sentence because it is the least obvious of the four. The request did
+    not fit its budget; a shorter one, or the same one under less contention,
+    may. What would make it non-retryable is a budget a caller cannot influence,
+    and `mode=strict` versus `mode=async` is exactly that influence.
     """
     retryable = {cls.code for cls in _hierarchy() if cls.retryable}
-    assert retryable == {"GM_PROVIDER", "GM_STORE", "GM_CONFLICT"}
+    assert retryable == {"GM_PROVIDER", "GM_STORE", "GM_CONFLICT", "GM_DEADLINE"}
 
 
 def test_error_carries_the_identifiers_rules_requires() -> None:

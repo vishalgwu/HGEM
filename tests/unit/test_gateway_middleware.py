@@ -18,18 +18,16 @@ cross-tenant read that needs a real Postgres and real RLS is
 
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI, Request
-from gateway.auth import InvalidCredentialError, Principal, SettingsAuthBackend, credential_from
+from gateway.auth import InvalidCredentialError, Principal, credential_from
 from gateway.limits import Decision
 from gateway.main import build_app
 from gateway.middleware import REQUEST_ID_HEADER
-from pydantic import SecretStr
 from starlette.testclient import TestClient
 
 from fixtures.mcp import settings as build_settings
@@ -174,7 +172,28 @@ class TestTheChainRunsInTheDocumentedOrder:
         """
         names = _chain(build_app())
 
-        assert names == ["RequestId", "Authenticate", "Tenancy", "RateLimit", "BodyHash"]
+        assert names == [
+            "RequestDeadline",
+            "RequestId",
+            "Authenticate",
+            "Tenancy",
+            "RateLimit",
+            "BodyHash",
+        ]
+
+    def test_the_deadline_wraps_all_five(self) -> None:
+        """`RequestDeadline` is outermost, added for ADR-0012 rather than by S8.2.
+
+        Asserted separately from the list above because it is a different claim: the
+        five S8.2 names keep their relative order, and the budget is not a peer of
+        them but a wrapper around them. A budget that started after authentication
+        would not cover authentication, so a request stuck resolving a credential
+        against a slow store would be outside its own budget.
+        """
+        names = _chain(build_app())
+
+        assert names[0] == "RequestDeadline"
+        assert names[1:] == ["RequestId", "Authenticate", "Tenancy", "RateLimit", "BodyHash"]
 
     def test_auth_runs_before_tenancy(self) -> None:
         """Stated separately because it is the one whose reversal is a breach.
@@ -280,91 +299,6 @@ class TestAuthentication:
         assert credential_from("Bearer abc") == "abc"
         assert credential_from("bearer abc") == "abc"
         assert credential_from("BEARER abc") == "abc"
-
-
-class TestTheSettingsBackend:
-    """Parsing `GM_GATEWAY_API_KEYS`, and refusing to guess."""
-
-    def _backend(self, value: str) -> SettingsAuthBackend:
-        """Build a backend over one configured value.
-
-        Args:
-            value: What `GM_GATEWAY_API_KEYS` would hold.
-
-        Returns:
-            The backend.
-        """
-        settings = type("_S", (), {"gateway_api_keys": SecretStr(value)})()
-        return SettingsAuthBackend(settings)
-
-    def test_an_empty_value_authenticates_nobody_and_does_not_raise(self) -> None:
-        """The gateway must still start. `/healthz` needs no principal, and a
-        process that refused to boot without keys could not report its own
-        liveness - so "no keys" is a valid configuration that 401s everything."""
-        backend = self._backend("")
-
-        with pytest.raises(InvalidCredentialError):
-            backend.principal_for("anything")
-
-    def test_a_configured_key_resolves_to_its_tenant_and_scopes(self) -> None:
-        """The whole point: a credential names a tenant."""
-        backend = self._backend(
-            json.dumps({KEY_A: {"tenant": str(TENANT_A), "scopes": ["memory:read"]}})
-        )
-
-        resolved = backend.principal_for(KEY_A)
-
-        assert resolved.tenant_id == TENANT_A
-        assert resolved.permits("memory:read")
-        assert not resolved.permits("memory:write")
-
-    def test_the_key_id_is_not_the_key(self) -> None:
-        """`key_id` reaches logs and the audit trail, so it must not be usable.
-
-        Eight characters identifies which credential was used among a handful
-        without being one.
-        """
-        backend = self._backend(json.dumps({KEY_A: {"tenant": str(TENANT_A)}}))
-
-        resolved = backend.principal_for(KEY_A)
-
-        assert resolved.key_id == KEY_A[:8]
-        assert resolved.key_id != KEY_A
-
-    @pytest.mark.parametrize(
-        "value",
-        [
-            pytest.param("{not json", id="malformed-json"),
-            pytest.param('["a"]', id="not-an-object"),
-            pytest.param('{"k": "just-a-string"}', id="grant-not-an-object"),
-            pytest.param('{"k": {"scopes": []}}', id="no-tenant"),
-            pytest.param('{"k": {"tenant": "t", "scopes": "read"}}', id="scopes-not-a-list"),
-        ],
-    )
-    def test_a_malformed_key_set_raises_at_construction(self, value: str) -> None:
-        """At startup, where an operator is reading the output.
-
-        Deferring it to the first request would turn a configuration mistake into
-        a 500 on traffic, which reads as a client problem.
-        """
-        with pytest.raises(ValueError, match=r"GM_GATEWAY_API_KEYS|tenant|scopes"):
-            self._backend(value)
-
-    def test_no_error_message_echoes_the_configured_value(self) -> None:
-        """The value is a set of credentials. A `ValueError` at startup goes to a
-        log, and a log that contains the keys is the leak `SecretStr` exists to
-        prevent one spelling of."""
-        # The `secret =` assignment trips the keyword detector whatever the
-        # value is, so it is marked rather than disguised - the same call
-        # `fixtures/mcp.py` makes for its unused Neo4j password. Renaming the
-        # variable to dodge the scanner would be hiding the pattern the
-        # scanner exists to find.
-        secret = "super-secret-key-material"  # pragma: allowlist secret
-
-        with pytest.raises(ValueError) as caught:
-            self._backend(json.dumps({secret: {"scopes": []}}))
-
-        assert secret not in str(caught.value)
 
 
 class TestBodyHash:

@@ -271,6 +271,8 @@ class Settings(BaseSettings):
     # defaults those calls take, so neither may be zero or negative.
     llm_timeout_s: float = Field(20.0, gt=0)
     store_timeout_s: float = Field(5.0, gt=0)
+    # ADR-0012: the two above bound one call each, this bounds the whole request.
+    request_deadline_s: float = Field(30.0, gt=0)
 
     def thresholds(self) -> Thresholds:
         """The five cut points as the value object `decide()` takes.

@@ -31,6 +31,7 @@ from typing import ClassVar
 __all__ = [
     "BudgetExceeded",
     "ConcurrencyConflict",
+    "DeadlineExceeded",
     "GuardMemError",
     "InjectionDetected",
     "PolicyDenied",
@@ -152,6 +153,29 @@ class ProviderUnavailable(GuardMemError):
 
     code = "GM_PROVIDER"
     http_status = 503
+    mcp_code = _JSONRPC_INTERNAL_ERROR
+    retryable = True
+
+
+class DeadlineExceeded(GuardMemError):
+    """The request ran out of its end-to-end time budget.
+
+    ADR-0012's closing note names this mechanism and defers it: "a true end-to-end
+    request budget is a different mechanism (one deadline, threaded through and
+    decremented)". `gateway.deadline` is that mechanism; this is its error, and it
+    lives here rather than there because §2.3 is one table and a handler that
+    invented its own status code is exactly what the rule forbids.
+
+    **504, not 503.** `StoreUnavailable` is 503 and means come back - the service
+    could not be reached. This means the service was reached, accepted the request,
+    and could not finish inside the budget. A client acts on those differently, and
+    only this one is a hint to send a smaller request.
+
+    Retryable: a shorter request, or the same one under less contention, may fit.
+    """
+
+    code = "GM_DEADLINE"
+    http_status = 504
     mcp_code = _JSONRPC_INTERNAL_ERROR
     retryable = True
 

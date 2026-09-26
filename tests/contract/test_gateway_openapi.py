@@ -34,6 +34,7 @@ container, which is S8.2's integration work rather than this suite's.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -43,17 +44,20 @@ from gateway.lifespan import SERVICE
 from gateway.main import build_app
 from starlette.testclient import TestClient
 
+from fixtures.mcp import settings as build_settings
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from guardmem_core.settings import Settings
+
 
 @asynccontextmanager
-async def _no_resources(_app: FastAPI) -> AsyncIterator[None]:
+async def _no_resources(app: FastAPI) -> AsyncIterator[None]:
     """A lifespan that owns nothing.
 
     Args:
-        _app: Ignored. Nothing is put on `app.state`, because no route reached
-            from this module reads it.
+        app: Given `settings` on its state, and nothing else - see `_Config`.
 
     Yields:
         None.
@@ -63,7 +67,24 @@ async def _no_resources(_app: FastAPI) -> AsyncIterator[None]:
     An ASGI transport enters the app's lifespan on every call, so without this the
     generated cases open a Postgres pool to check a JSON document.
     """
+    app.state.gateway = _Config(build_settings())
     yield
+
+
+@dataclass(frozen=True)
+class _Config:
+    """Configuration without resources.
+
+    `RequestDeadline` reads `settings.request_deadline_s` off process state, so an
+    app with no state at all 500s on any path outside `_UNBUDGETED` - which
+    includes `/redoc`, asserted below to be absent.
+
+    Carrying `Settings` is not a retreat from "this suite opens nothing":
+    configuration is not a datastore. `fixtures.mcp.settings` builds one with
+    `_env_file=None`, so this still needs no `.env` and still starts no container.
+    """
+
+    settings: Settings
 
 
 # Built once, with no resources. `build_app()` allocates nothing either way -

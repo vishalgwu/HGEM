@@ -87,7 +87,15 @@ class BudgetExceeded(GuardMemError):       code="GM_BUDGET";      http_status=42
 class ProviderUnavailable(GuardMemError):  code="GM_PROVIDER";    http_status=503; retryable=True
 class StoreUnavailable(GuardMemError):     code="GM_STORE";       http_status=503; retryable=True
 class ConcurrencyConflict(GuardMemError):  code="GM_CONFLICT";    http_status=409; retryable=True
+class DeadlineExceeded(GuardMemError):     code="GM_DEADLINE";    http_status=504; retryable=True
 ```
+
+`DeadlineExceeded` was added 2026-09-26, for ADR-0012's end-to-end request budget.
+504 rather than 503: the service was available and accepted the request, and what
+failed was finishing inside the budget. A caller distinguishes those - 503 says
+come back, 504 says that took too long, and only the second is a hint to send a
+smaller request. Retryable, because a shorter or less contended request may well
+fit.
 
 Rules: catch narrowly and re-raise as a domain error with context; never catch `Exception` outside
 the outermost boundary; every raise inside the pipeline attaches `trace_id` and `candidate_id`.
