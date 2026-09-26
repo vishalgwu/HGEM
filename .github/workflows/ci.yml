@@ -151,12 +151,18 @@ jobs:
         # explicitly rather than reading the environment.
         run: cp .env.example .env
 
-      - name: Pre-pull the database image
+      - name: Pre-pull the container images
         # Outside the test timeout, and separately visible in the log. A 620 MB
         # pull that fails inside a fixture reads as a mysterious timeout;
         # failing here says "the registry was unreachable", which is what
         # happened.
-        run: docker pull pgvector/pgvector:0.8.6-pg16
+        #
+        # Redis joined at S8.3, whose token bucket is a Lua script and so cannot be
+        # tested against a fake. It is a small image and the reason for pulling it
+        # here is the same one: a registry failure should name itself.
+        run: |
+          docker pull pgvector/pgvector:0.8.6-pg16
+          docker pull redis:7-alpine
 
       - name: Test
         # Through the Makefile, like every other gate in this file - see the

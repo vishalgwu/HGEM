@@ -26,6 +26,15 @@ issues SQL that would happily return every tenant's rows. What stops it is the
 Postgres against `app.tenant_id`. A test with a fake store would assert that a
 fake filters, which is a statement about the fake.
 
+**Requests go through `httpx.ASGITransport`, not `TestClient`, and that is not a
+style choice.** `TestClient` is synchronous: it runs the app in an event loop of
+its own, on another thread. The `pool` fixture is created on pytest-asyncio's loop,
+and an asyncpg connection is bound to the loop that made it - so a handler reached
+through `TestClient` gets `RuntimeError: got Future attached to a different loop`
+the moment it touches Postgres. Every test in this class failed that way on the
+first run against a real database. `ASGITransport` drives the app in *this*
+coroutine's loop, which is the one the pool belongs to.
+
 **And `FORCE ROW LEVEL SECURITY` is why the fixtures use two roles.** The
 migration applies `FORCE`, so even the table owner is subject to its own
 policies. `owner` seeds and reveals; everything under test runs as
@@ -43,6 +52,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Final
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from gateway.auth import SettingsAuthBackend
@@ -50,7 +60,6 @@ from gateway.lifespan import GatewayState
 from gateway.limits import Decision
 from gateway.main import build_app
 from pydantic import SecretStr
-from starlette.testclient import TestClient
 
 from fixtures.assertions import NS
 from fixtures.mcp import settings as build_settings
@@ -74,6 +83,25 @@ NAMESPACE: Final = str(NS)
 
 KEY_A: Final = "key-for-tenant-a-0001"
 KEY_B: Final = "key-for-tenant-b-0002"
+
+
+@asynccontextmanager
+async def _client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    """An HTTP client that drives `app` on this coroutine's event loop.
+
+    Args:
+        app: The application under test.
+
+    Yields:
+        A client whose requests reach the app in-process.
+
+    `ASGITransport` rather than `TestClient`, for the reason the module docstring
+    gives: `TestClient` would run the app on a loop of its own and every handler
+    that touched the pool would raise about a Future attached to a different loop.
+    """
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as client:
+        yield client
 
 
 class _AlwaysAllows:
@@ -132,36 +160,35 @@ async def gateway(pool: asyncpg.Pool, tenancy: dict[str, str]) -> AsyncIterator[
     Yields:
         The application, with `app.state.gateway` populated from these fixtures.
 
-    **A hand-built `GatewayState` rather than the real lifespan.** The real one
-    opens its own pool, and the test needs the app to share the *fixture's* pool -
-    that is what keeps the seeded row and the read in one database with one
-    lifetime. Everything the request path actually touches is real: the pool, the
-    RLS policies, the store, the embedder, and the auth backend parsing a real
-    key set.
+    **A hand-built `GatewayState`, assigned directly rather than through a
+    lifespan.** Two reasons. The real lifespan opens its own pool, and this test
+    needs the app to share the *fixture's* pool - that is what keeps the seeded row
+    and the read in one database on one loop. And `ASGITransport` does not run an
+    app's lifespan at all, so a lifespan here would never execute and
+    `app.state.gateway` would be unset.
+
+    Everything the request path actually touches is real: the pool, the RLS
+    policies, the store, the embedder, and the auth backend parsing a real key set.
     """
     settings = _settings_with_keys(tenancy["tenant"], tenancy["other"])
-
-    @asynccontextmanager
-    async def _state(app: FastAPI) -> AsyncIterator[None]:
-        app.state.gateway = GatewayState(
-            settings=settings,
-            pool=pool,
-            redis=None,  # type: ignore[arg-type]
-            http={},
-            tracer=None,  # type: ignore[arg-type]
-            embedder=HashEmbedder(),
-            # S8.3 put a limiter and an idempotency store on the state. Both are
-            # Redis-backed and neither is what this file tests, so the limiter is
-            # one that always allows and the store is never reached: a bucket here
-            # would make a tenant-isolation test fail on a 429, which is a wrong
-            # answer to the question being asked.
-            limiter=_AlwaysAllows(),
-            idempotency=None,  # type: ignore[arg-type]
-            auth=SettingsAuthBackend(settings),
-        )
-        yield
-
-    yield build_app(lifespan=_state)
+    app = build_app()
+    app.state.gateway = GatewayState(
+        settings=settings,
+        pool=pool,
+        redis=None,  # type: ignore[arg-type]
+        http={},
+        tracer=None,  # type: ignore[arg-type]
+        embedder=HashEmbedder(),
+        # S8.3 put a limiter and an idempotency store on the state. Both are
+        # Redis-backed and neither is what this file tests, so the limiter is
+        # one that always allows and the store is never reached: a bucket here
+        # would make a tenant-isolation test fail on a 429, which is a wrong
+        # answer to the question being asked.
+        limiter=_AlwaysAllows(),
+        idempotency=None,  # type: ignore[arg-type]
+        auth=SettingsAuthBackend(settings),
+    )
+    yield app
 
 
 @pytest.fixture
@@ -195,8 +222,8 @@ class TestTheRestSurface:
         a wrong namespace, or an embedder that matched nothing - so the suite has
         to show the row is reachable at all.
         """
-        with TestClient(gateway) as client:
-            response = client.get(
+        async with _client(gateway) as client:
+            response = await client.get(
                 "/memory/search",
                 params={"q": seeded, "namespace": NAMESPACE},
                 headers={"Authorization": f"Bearer {KEY_A}"},
@@ -218,8 +245,8 @@ class TestTheRestSurface:
         would confirm that something existed to be refused, which is itself a
         cross-tenant disclosure.
         """
-        with TestClient(gateway) as client:
-            response = client.get(
+        async with _client(gateway) as client:
+            response = await client.get(
                 "/memory/search",
                 params={"q": seeded, "namespace": NAMESPACE},
                 headers={"Authorization": f"Bearer {KEY_B}"},
@@ -235,8 +262,10 @@ class TestTheRestSurface:
         absence of a credential is a 401 rather than an empty result from some
         configured default.
         """
-        with TestClient(gateway) as client:
-            response = client.get("/memory/search", params={"q": seeded, "namespace": NAMESPACE})
+        async with _client(gateway) as client:
+            response = await client.get(
+                "/memory/search", params={"q": seeded, "namespace": NAMESPACE}
+            )
 
         assert response.status_code == 401
 
@@ -250,8 +279,8 @@ class TestTheRestSurface:
         parameter" is a property that a later commit could remove by accident
         while every other test here still passed.
         """
-        with TestClient(gateway) as client:
-            response = client.get(
+        async with _client(gateway) as client:
+            response = await client.get(
                 "/memory/search",
                 params={
                     "q": seeded,

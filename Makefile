@@ -117,9 +117,18 @@ typecheck:
 # S7.3 had been green-by-assumption for a week. S8.1's DONE WHEN is "the
 # schemathesis contract suite runs green", which nothing enforced.
 #
-# It belongs in this target rather than in `integration` because it needs no
-# container: the MCP half validates schemas, and the gateway half drives the app
-# over an ASGI transport with a lifespan that opens nothing.
+# It belongs in this target because what remains there needs no container: the MCP
+# half validates schemas against `jsonschema` with unit fixtures, and the gateway
+# half drives the app over an ASGI transport whose lifespan opens nothing.
+#
+# "Needs no container" was asserted here at S8.1 and was FALSE.
+# `test_tool_result_validation.py` started a Postgres through `demo_server_env`,
+# and the claim was checked on a machine that had Docker running. In `gates` the
+# fixture's skip does not fire either - GitHub runners have Docker - so it started
+# a container, `alembic upgrade head` built `Settings`, and `gates` has no `.env`:
+# five errors on eight missing required fields, and CI red from S8.1 to S8.3. That
+# module now lives in `tests/integration/`, where the container it needs is what
+# the job is for.
 #
 # `tests/security` is NOT here and is in `test-integration` instead. S8.2's
 # `test_tenant_isolation.py` asserts that Postgres RLS hides one tenant's rows

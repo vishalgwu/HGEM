@@ -319,7 +319,12 @@ branch = true
 # entirely would be where untested code accumulates - the ownership table calls
 # services "thin", which is an argument for covering them easily, not for not
 # covering them.
-source_pkgs = ["guardmem_core", "mcp_server"]
+# `gateway` joined at S8.1 and was missing from this list until 2026-09-26, so
+# roughly 900 lines of a deployable service were invisible to the 85% floor -
+# coverage reported 91% while measuring none of it. A package absent here is not
+# reported as uncovered, it is not reported at all, which is the failure mode this
+# line has to be read for whenever a service is added.
+source_pkgs = ["guardmem_core", "mcp_server", "gateway"]
 
 [tool.coverage.report]
 fail_under = 85

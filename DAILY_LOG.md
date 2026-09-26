@@ -5422,6 +5422,75 @@ Label. 238 rows, `keep: null` on every one.
 
 ---
 
+## 2026-09-26 - CI was red for three steps, and I put it there
+
+**S8.1 through S8.3 shipped with CI failing and I did not check.** The gateway
+skeleton turned `gates` red on 2026-09-24 and I pushed S8.2 and S8.3 on top of it.
+`de70a51` was the last green run. Both jobs are green again now, and the two
+suites that had never executed have been run.
+
+**Shipped**
+
+- **The cause of the `gates` failure was a claim I made without checking.** S8.1
+  added `tests/contract` to `make test`, on the stated grounds that it "needs no
+  container". `test_tool_result_validation.py` starts a Postgres through
+  `demo_server_env`, and I verified the claim on a machine that had Docker
+  running. In `gates` the fixture's skip does not fire either - GitHub runners
+  *have* Docker - so it started a container, `alembic upgrade head` built
+  `Settings`, and `gates` has no `.env`: five errors on eight missing required
+  fields. That module now lives in `tests/integration/`, and the Makefile comment
+  that asserted otherwise says what happened.
+- **`gateway` was not in coverage's `source_pkgs`.** Roughly 900 lines of a
+  deployable service were invisible to the 85% floor since S8.1 - not reported as
+  uncovered, not reported at all. Coverage read 91% while measuring none of it.
+  Added; the real number is 91.11%.
+- **Both unverified suites now pass against real infrastructure.** The dev stack's
+  containers were still running from 09-18 on 5433 and 6380 even though Docker
+  Desktop's API pipe was gone, so `GM_TEST_DATABASE_URL` and `GM_TEST_REDIS_URL` -
+  the escape hatches the fixtures already had - reached a real migrated Postgres
+  and a real Redis. I had said twice that this needed Docker. It needed a port.
+
+**What broke / what I learned**
+
+- **`TestClient` runs the app on its own event loop.** Every REST test in
+  `test_tenant_isolation.py` failed with `RuntimeError: got Future attached to a
+  different loop`: an asyncpg connection belongs to the loop that created it, the
+  pool comes from a pytest-asyncio fixture, and `TestClient` is synchronous and
+  spins up its own. `httpx.ASGITransport` drives the app in the calling
+  coroutine's loop, which is the one the pool is on. It also runs no lifespan, so
+  the fixture assigns `app.state.gateway` directly.
+- **My Redis outage test asserted an outage it never created.** It called
+  `aclose()` on the live client and expected the next call to raise.
+  `redis.asyncio` reconnects on demand and `aclose()` only returns connections to
+  the pool, so nothing was ever unreachable - the test passed locally for no
+  reason and said DID NOT RAISE the first time it met a server. It now points at a
+  closed port.
+- **Two failures were the local database, not the code, and I nearly had a third
+  reason to distrust the suite.** `test_seed_demo_tenant` expects 28 assertions
+  and four impact floors; this database has 29 and five. The extra row is
+  `preferred_pharmacy = "CVS #4021"`, risk 0.28, trace `tr_8c07267b4cd2`, written
+  2026-09-16 by the S6.3 Claude Desktop round-trip - every seed row carries
+  `tr_seed`. CI seeds a fresh container and was green on these at `6d0aac8`, so
+  the assertions are right and were left alone. A long-lived local database is not
+  the same environment as CI, and a failure in it is not evidence about CI.
+- **The pattern across all three defects is the same one.** Each was a claim
+  checked against a machine that happened to be configured for it: "the contract
+  suite needs no container", "the limiter raises when Redis is gone", "this needs
+  Docker". The repository already has a rule for this and I wrote it down myself -
+  run the code against the real thing before believing it.
+
+**Still open**
+
+- The labelling session. 238 rows, `keep: null` on every one.
+- S8.3's DONE WHEN still needs a write endpoint, which is S8.4's.
+- ADR-0012's end-to-end request deadline, assigned to S8.2 and not built.
+
+**Tomorrow's first step**
+
+Confirm both CI jobs green on the pushed commit before starting S8.4.
+
+---
+
 ---
 
 ---

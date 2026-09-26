@@ -19,10 +19,24 @@ raises "has an output schema but did not return structured content", which is
 why `memory.commit` must not declare one while it declines - a refusal carries
 `isError` and is exempt, but a *successful* empty result is not.
 
-These need Postgres, so they skip without Docker like the integration suite.
-They live in `tests/contract/` rather than `tests/integration/` because what
-they check is the published contract rather than the behaviour behind it: the
-same distinction S7.3 draws in naming this directory.
+**Moved here from `tests/contract/` on 2026-09-26, and the original placement was
+reasoned rather than careless.** S7.3 put it there because what it checks is the
+published contract rather than the behaviour behind it, and noted that it would
+"skip without Docker like the integration suite".
+
+That held while `tests/contract/` ran in no CI job at all. S8.1 added the
+directory to `make test` - the `gates` job - on the stated grounds that it "needs
+no container", which was false of this module and was verified on a machine where
+Docker happened to be running. In `gates` the skip does not fire either, because
+GitHub runners *do* have Docker: the fixture starts a Postgres, `alembic upgrade
+head` builds `Settings`, and `gates` has no `.env`, so five tests error on eight
+missing required fields.
+
+The directory a test lives in is how this repository says what infrastructure it
+needs - `make test` is the Docker-free suite and `make test-integration` is not -
+so a module that starts a container belongs here whatever it is asserting about.
+`test_tool_schemas.py` stays in `tests/contract/`: it validates schemas against
+`jsonschema` with unit fixtures and needs nothing.
 """
 
 from __future__ import annotations

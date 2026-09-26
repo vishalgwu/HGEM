@@ -26,6 +26,8 @@ import asyncio
 from typing import TYPE_CHECKING, Final
 
 import pytest
+import redis.asyncio as aioredis_impl
+import redis.exceptions
 from gateway.auth import Principal
 from gateway.limits import TokenBucket
 
@@ -188,7 +190,7 @@ class TestTheBucketDoesNotLeak:
 class TestTheBucketRejectsAnUnreachableServer:
     """Fail-open is the middleware's decision, not the bucket's."""
 
-    async def test_the_bucket_raises_rather_than_guessing(self, flushed: aioredis.Redis) -> None:
+    async def test_the_bucket_raises_rather_than_guessing(self) -> None:
         """`TokenBucket.check` propagates a `RedisError`, deliberately.
 
         Whether an unavailable limiter means allow or refuse is a policy question,
@@ -196,9 +198,23 @@ class TestTheBucketRejectsAnUnreachableServer:
         because it knows what the route does. A bucket that returned
         `allowed=True` on an outage would make that choice for every caller and
         hide it.
-        """
-        await flushed.aclose()
-        bucket = _bucket(flushed, per_minute=60, burst=10)
 
-        with pytest.raises(Exception, match=r"(?i)closed|connection"):
-            await bucket.check(PRINCIPAL)
+        **A client pointed at a closed port, not a client that was closed.** The
+        first version called `aclose()` on the live client and expected the next
+        call to fail. It did not: `redis.asyncio` reconnects on demand, and
+        `aclose()` only returns the current connections to the pool. So the test
+        asserted an outage it had not created, and said DID NOT RAISE the first
+        time it met a real server. An address with nothing listening is
+        unreachable the way an outage is.
+        """
+        # Port 1 is privileged, so nothing binds it and a connect fails at once.
+        unreachable = aioredis_impl.Redis.from_url(
+            "redis://127.0.0.1:1/0", socket_connect_timeout=1, socket_timeout=1
+        )
+        bucket = _bucket(unreachable, per_minute=60, burst=10)
+
+        try:
+            with pytest.raises(redis.exceptions.RedisError):
+                await bucket.check(PRINCIPAL)
+        finally:
+            await unreachable.aclose()
