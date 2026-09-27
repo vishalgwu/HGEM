@@ -51,11 +51,14 @@ from uuid import NAMESPACE_URL, uuid5
 
 from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.observability.audit_store import append, append_decision
+from guardmem_core.pipeline.per_candidate import CandidateFailure
 from guardmem_core.schemas.entity import StoredAssertion
 from guardmem_core.schemas.verdict import Decision
 from guardmem_core.types import AssertionId
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import asyncpg
 
     from guardmem_core.memory.vector.pgvector_store import PgVectorStore
@@ -63,7 +66,7 @@ if TYPE_CHECKING:
     from guardmem_core.pipeline.per_candidate import GovernedCandidate
     from guardmem_core.types import TenantId, TraceId
 
-__all__ = ["Applied", "apply"]
+__all__ = ["Applied", "apply", "apply_all"]
 
 # §3.4's four decisions, and the one that changes state. `ESCALATE` re-runs
 # Layer 3 on a bigger model and `HITL_REVIEW` waits for a person; neither is a
@@ -183,6 +186,59 @@ async def apply(
                 timeout_s=timeout_s,
             )
     return Applied(str(governed.candidate.candidate_id), assertion.assertion_id, None)
+
+
+async def apply_all(
+    governed: Sequence[GovernedCandidate],
+    *,
+    store: PgVectorStore,
+    pool: asyncpg.Pool,
+    tenant_id: TenantId,
+    trace_id: TraceId,
+    timeout_s: float,
+) -> tuple[dict[str, Applied], list[CandidateFailure]]:
+    """Apply every decision in a proposal, one transaction each.
+
+    Args:
+        governed: What the pipeline decided, candidate by candidate.
+        store: The tenant's store, as `apply`.
+        pool: The process pool.
+        tenant_id: Whose state and whose audit chain.
+        trace_id: The proposal.
+        timeout_s: Per-statement ceiling.
+
+    Returns:
+        What became of each candidate, by candidate id, and one
+        `CandidateFailure` per apply that raised.
+
+    **A failed apply is attributed, not propagated.** `run()` already returns
+    per-candidate failures rather than losing a batch, and the argument is
+    stronger here: a supersession that lost its race rolls back its own
+    transaction and must not discard the writes that committed beside it.
+
+    Sequential rather than concurrent, deliberately. Each apply holds a pooled
+    connection for the length of a transaction, and forty candidates fanned out
+    would take forty connections from a pool sized for a process.
+    `Deps.max_concurrent_scores` bounds the *scoring* fan-out because that is
+    model-bound; this is database-bound, and the pool is the bound.
+    """
+    applied: dict[str, Applied] = {}
+    failures: list[CandidateFailure] = []
+    for item in governed:
+        try:
+            outcome = await apply(
+                item,
+                store=store,
+                pool=pool,
+                tenant_id=tenant_id,
+                trace_id=trace_id,
+                timeout_s=timeout_s,
+            )
+        except Exception as exc:
+            failures.append(CandidateFailure(candidate_id=item.candidate.candidate_id, error=exc))
+        else:
+            applied[outcome.candidate_id] = outcome
+    return applied, failures
 
 
 def _refusal(governed: GovernedCandidate) -> str | None:

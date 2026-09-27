@@ -29,14 +29,14 @@ from fixtures.conflict import candidate
 from fixtures.decisions import confidence, conflict, risk
 from fixtures.pgvector import TIMEOUT_S
 from guardmem_core.errors import ConcurrencyConflict
-from guardmem_core.memory.applier import apply
+from guardmem_core.memory.applier import apply, apply_all
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.memory.vector.pool import tenant_transaction
 from guardmem_core.observability.audit_store import read_chain
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.verdict import Decision, DecisionRecord
-from guardmem_core.types import AssertionId, EntityId, TenantId, TraceId
+from guardmem_core.types import AssertionId, CandidateId, EntityId, TenantId, TraceId
 
 TRACE = TraceId("tr_applier")
 
@@ -271,6 +271,45 @@ class TestSupersession:
             )
         assert rows == 0, "the successor must not survive a failed supersession"
         assert await chain(pool, tenant) == [], "and neither may the decision event"
+
+
+class TestABatchIsAppliedOneCandidateAtATime:
+    async def test_a_failure_is_attributed_and_the_rest_still_commit(
+        self, store: PgVectorStore, pool: asyncpg.Pool, tenancy: dict[str, str]
+    ) -> None:
+        """`apply_all` is one transaction *per candidate*: a supersession that
+        lost its race rolls back its own apply and nothing else. It is listed
+        first on purpose - a loop that stopped at the first failure would lose
+        the write behind it, which is the batch-wide failure this shape exists
+        to rule out.
+        """
+        tenant = TenantId(tenancy["tenant"])
+        loses = governed(
+            hint="supersede",
+            incumbent_id=AssertionId("00000000-0000-4000-8000-00000000dead"),
+            entity=tenancy["entity"],
+            predicate="home_address",
+        )
+        loses = loses.model_copy(
+            update={
+                "candidate": loses.candidate.model_copy(update={"candidate_id": CandidateId("c_2")})
+            }
+        )
+
+        applied, failures = await apply_all(
+            [loses, governed(entity=tenancy["entity"])],
+            store=store,
+            pool=pool,
+            tenant_id=tenant,
+            trace_id=TRACE,
+            timeout_s=TIMEOUT_S,
+        )
+
+        assert list(applied) == ["c_1"]
+        assert applied["c_1"].assertion_id is not None
+        assert [failure.candidate_id for failure in failures] == ["c_2"]
+        assert isinstance(failures[0].error, ConcurrencyConflict)
+        assert await chain(pool, tenant) == ["DECISION", "WRITE"]
 
 
 class TestReplay:

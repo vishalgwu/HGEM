@@ -456,7 +456,9 @@ modules = ["mcp_server", "gateway", "worker"]
 # good reason - the pipeline must talk to protocols so a backend swap stays
 # configuration. A service is the composition root. Choosing the concrete
 # implementations is its entire job, and a rule that stopped it would leave
-# nobody able to do it.
+# nobody able to do it. What every service composes identically from those
+# choices is `guardmem_core.governance.build_deps`, which lives outside
+# `pipeline` for exactly this contract's reason.
 [[tool.importlinter.contracts]]
 name = "guardmem-core never imports a service"
 type = "forbidden"

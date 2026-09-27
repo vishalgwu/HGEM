@@ -41,17 +41,12 @@ from typing import TYPE_CHECKING, Any, Final
 import asyncpg
 import httpx
 
+from guardmem_core import governance
 from guardmem_core.errors import ProviderUnavailable
-from guardmem_core.llm.entailment import LLMEntailer
 from guardmem_core.llm.providers import build_llm
-from guardmem_core.memory.entities import NamespaceEntityResolver
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
-from guardmem_core.memory.vector.pgvector_store import PgVectorStore
-from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
-from guardmem_core.pipeline.deps import Deps
-from guardmem_core.pipeline.l2_validate import LLMJudge
-from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
+from guardmem_core.memory.vector.pool import create_pool, libpq_dsn, tenant_transaction
 from guardmem_core.pipeline.orchestrator import Proposal, run
 from guardmem_core.pipeline.per_candidate import GovernedCandidate
 from guardmem_core.schemas.ontology import load_ontology
@@ -61,6 +56,7 @@ from scripts.checkpoint_b_proposals import read_proposals
 
 if TYPE_CHECKING:
     from guardmem_core.llm.base import LLMClient
+    from guardmem_core.pipeline.deps import Deps
 
 __all__ = ["generate"]
 
@@ -148,7 +144,7 @@ async def _generate(
     rows: list[dict[str, Any]] = []
     barren: list[str] = []
     try:
-        await _ensure_tenant(pool, tenant)
+        await _ensure_tenant(pool, tenant, timeout_s=settings.store_timeout_s)
         async with (
             httpx.AsyncClient(base_url=settings.ollama_url) as http,
             build_llm(settings, http) as llm,
@@ -314,35 +310,33 @@ def _deps(llm: LLMClient, pool: asyncpg.Pool, tenant: TenantId, settings: Settin
     whose inputs move underneath it is measuring the wrong thing. Naming the
     class here is the deliberate opt-out.
     """
-    embedder = HashEmbedder()
-    return Deps(
+    return governance.build_deps(
+        settings=settings,
+        pool=pool,
+        tenant_id=tenant,
         llm=llm,
-        vector=PgVectorStore(pool, embedder, tenant_id=tenant, timeout_s=settings.store_timeout_s),
         graph=NetworkXGraphStore(),
-        embedder=embedder,
-        nli=LLMJudge(llm),
-        entail=LLMEntailer(llm).lookup,
-        resolver=NamespaceEntityResolver(pool, timeout_s=settings.store_timeout_s),
+        embedder=HashEmbedder(),
         ontology=load_ontology("clinical"),
-        thresholds=settings.thresholds(),
-        weights=V1_WEIGHTS,
-        betas=V1_BETAS,
         policy_version="checkpoint-b",
-        max_concurrent_scores=settings.max_concurrent_scores,
     )
 
 
-async def _ensure_tenant(pool: asyncpg.Pool, tenant: TenantId) -> None:
+async def _ensure_tenant(pool: asyncpg.Pool, tenant: TenantId, *, timeout_s: float) -> None:
     """Create the tenant row the entity foreign key needs.
 
     The resolver writes an `entity`, `entity.tenant_id` references `tenant`, and
     a corpus run is usually the first thing to touch a scratch tenant. Idempotent
     so a second run over the same tenant is a no-op.
+
+    Through `pool.tenant_transaction` rather than a hand-written `set_config`: that
+    helper is the one copy of the tenant scoping, and it bounds the wait for a
+    connection that a bare `pool.acquire()` would not (ADR-0012).
     """
-    async with pool.acquire() as conn, conn.transaction():
-        await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant))
+    async with tenant_transaction(pool, tenant, timeout_s=timeout_s) as conn:
         await conn.execute(
             "INSERT INTO tenant (id, slug) VALUES ($1::uuid, $2) ON CONFLICT (id) DO NOTHING",
             str(tenant),
             f"checkpoint-b-{str(tenant)[:8]}",
+            timeout=timeout_s,
         )

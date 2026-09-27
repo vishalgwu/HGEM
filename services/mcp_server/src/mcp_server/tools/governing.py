@@ -28,18 +28,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
-from guardmem_core.llm.entailment import LLMEntailer
-from guardmem_core.memory.applier import Applied, apply
-from guardmem_core.memory.entities import NamespaceEntityResolver
+from guardmem_core import governance
+from guardmem_core.memory import applier
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
-from guardmem_core.pipeline.deps import Deps
-from guardmem_core.pipeline.l2_validate import LLMJudge
-from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
-from guardmem_core.pipeline.per_candidate import CandidateFailure
 from mcp_server.tools.context import ToolRefusedError
 
 if TYPE_CHECKING:
+    from guardmem_core.memory.applier import Applied
+    from guardmem_core.pipeline.deps import Deps
     from guardmem_core.pipeline.orchestrator import PipelineResult
+    from guardmem_core.pipeline.per_candidate import CandidateFailure
     from guardmem_core.schemas.candidate import MemoryCandidate
     from guardmem_core.schemas.verdict import DecisionRecord
     from mcp_server.tools.context import ToolContext
@@ -77,13 +75,7 @@ def deps_for(context: ToolContext) -> Deps:
     caching a `Deps` on the process is how a server ends up governing every
     tenant's facts against the first tenant's memory. Everything expensive
     inside it - the pool, the graph, the model client - is process-scoped and
-    merely referenced here, so the per-call cost is a few object headers.
-
-    `LLMJudge` and `LLMEntailer` are both built on the one model client. That is
-    deliberate and it is a cost fact worth knowing: §2.2(a)'s adjudication and
-    §3.1's clustering both run on whatever tier the client serves, so on a
-    single-provider process (`build_llm` has no router until S9.2) a BALANCED
-    judge call and a FAST extraction hit the same model.
+    merely referenced here; `governance.build_deps` does the composing.
     """
     state = context.state
     if state.llm is None:
@@ -93,20 +85,16 @@ def deps_for(context: ToolContext) -> Deps:
             "is not set - set it, or use GM_LLM_PROVIDER=ollama, which needs none. "
             "memory.search and memory.get_entity read governed memory and work."
         )
-    return Deps(
+    return governance.build_deps(
+        settings=state.settings,
+        pool=state.pool,
+        tenant_id=context.tenant_id,
         llm=state.llm,
-        vector=context.store,
         graph=state.graph,
         embedder=state.embedder,
-        nli=LLMJudge(state.llm),
-        entail=LLMEntailer(state.llm).lookup,
-        resolver=NamespaceEntityResolver(state.pool, timeout_s=state.settings.store_timeout_s),
         ontology=state.ontology,
-        thresholds=state.settings.thresholds(),
-        weights=V1_WEIGHTS,
-        betas=V1_BETAS,
         policy_version=_NO_POLICY_PACK,
-        max_concurrent_scores=state.settings.max_concurrent_scores,
+        vector=context.store,
     )
 
 
@@ -120,20 +108,8 @@ async def apply_all(
         result: What the pipeline decided.
 
     Returns:
-        What became of each candidate, by candidate id, and one
+        `applier.apply_all`'s answer: what became of each candidate, and one
         `CandidateFailure` per apply that raised.
-
-    **A failed apply is attributed, not propagated.** `run()` already returns
-    per-candidate failures rather than losing a batch, and the same argument is
-    stronger here: a supersession that lost its race rolls back its own
-    transaction and must not discard nineteen writes that committed. The caller
-    reports it beside the rest.
-
-    Sequential rather than concurrent, deliberately. Each apply holds a pooled
-    connection for the length of a transaction, and a proposal with forty
-    candidates fanned out would take forty connections from a pool sized for a
-    process. `Deps.max_concurrent_scores` bounds the *scoring* fan-out because
-    that is model-bound; this is database-bound and the pool is the bound.
 
     The store is built here rather than taken from `context.store`, which is
     typed as the `VectorStore` Protocol so unit tests can drive the handlers
@@ -148,25 +124,14 @@ async def apply_all(
         tenant_id=context.tenant_id,
         timeout_s=state.settings.store_timeout_s,
     )
-    applied: dict[str, Applied] = {}
-    failures: list[CandidateFailure] = []
-    for governed in result.governed:
-        try:
-            outcome = await apply(
-                governed,
-                store=store,
-                pool=state.pool,
-                tenant_id=context.tenant_id,
-                trace_id=result.trace_id,
-                timeout_s=state.settings.store_timeout_s,
-            )
-        except Exception as exc:
-            failures.append(
-                CandidateFailure(candidate_id=governed.candidate.candidate_id, error=exc)
-            )
-        else:
-            applied[outcome.candidate_id] = outcome
-    return applied, failures
+    return await applier.apply_all(
+        result.governed,
+        store=store,
+        pool=state.pool,
+        tenant_id=context.tenant_id,
+        trace_id=result.trace_id,
+        timeout_s=state.settings.store_timeout_s,
+    )
 
 
 def result_of(
