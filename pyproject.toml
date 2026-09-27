@@ -196,6 +196,10 @@ ignore = ["S101"]          # assert is fine in tests
 # to a file instead would be useless to the developer reading its output.
 # S (flake8-bandit) stays ON here - these run in CI and touch the repo.
 "scripts/*" = ["T20"]
+# `bench/*` for the reason `scripts/*` is: a load test's output IS stdout. A
+# locust run prints its verdict for a human and for a CI log, and routing that
+# through `logging` would put a benchmark result behind a log level.
+"bench/*" = ["T20"]
 # N818 wants every exception class to end in `Error`. These seven do not, and
 # that is not an oversight: RULES.md 2.3 names them, the notebook says to copy
 # that hierarchy verbatim, and `code`/`http_status`/`mcp_code` are a published
@@ -252,6 +256,7 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
 ignore_missing_imports = true
+
 
 # `asyncpg` ships no `py.typed`, so it is typed from `asyncpg-stubs` in the dev
 # group. There is deliberately NO `ignore_missing_imports` override for it: that

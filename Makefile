@@ -40,7 +40,7 @@ SVC_SRC   := services/mcp_server/src services/gateway/src services/worker/src
 CACHES    := .ruff_cache .mypy_cache .pytest_cache .import_linter_cache \
              .hypothesis htmlcov .coverage coverage.xml
 
-.PHONY: help hooks fmt lint imports typecheck test test-all test-integration \
+.PHONY: help hooks fmt lint imports typecheck test test-all test-integration \n        bench-write \
         audit clean \
         dev down migrate seed eval
 
@@ -54,6 +54,7 @@ help:
 	@echo   test - unit and property suites with coverage
 	@echo   test-all - every suite with coverage
 	@echo   test-integration - the integration suite only, needs Docker
+	@echo   bench-write - locust over the async propose path, needs a running gateway
 	@echo   audit - pip-audit over the installed dependency set
 	@echo   clean - delete tool caches and coverage output
 	@echo   dev - start the local datastore stack, from step S1.3
@@ -95,13 +96,17 @@ imports:
 # first run: the seed built its turn lookup as an inferred dict[TurnId, Turn]
 # and passed it to a function declared dict[str, Turn], which dict's invariant
 # key type makes an error and NewType's runtime erasure makes invisible.
+# `bench` joined at S8.4. It imports nothing from `guardmem_core` - it is an HTTP
+# client against a URL - so the usual argument does not apply. What does apply is that
+# its `@events.quitting` listener decides whether CI's load gate passes or fails, and
+# a gate nobody type-checks is a gate that can pass because of a typo.
 # `services/*/src` joined at S6.1, the step that gave this repo its first
 # deployable. It has to be here rather than left to CI: `mypy --strict` is the
 # only thing checking that the MCP handlers satisfy the SDK's callback
 # signatures, which are structural - a handler with the wrong parameter order
 # registers fine, type-checks nowhere else, and fails at the first request.
 typecheck:
-	$(UV) mypy $(CORE_SRC) $(SVC_SRC) tests scripts
+	$(UV) mypy $(CORE_SRC) $(SVC_SRC) tests scripts bench
 
 # Bare `--cov`, not `--cov=guardmem_core`. The package to measure is already
 # declared once as `source_pkgs` in pyproject.toml, and naming it again on the
@@ -158,6 +163,22 @@ test-all:
 # interface.
 test-integration:
 	$(UV) pytest tests/integration tests/security -q
+
+# S8.4's DONE WHEN, as a target because CI must go through one - see the header of
+# ci.yml. Needs a gateway already serving at $(BENCH_HOST) and a Postgres and Redis
+# behind it; `make dev` owns those and starting a gateway is a deployment concern, so
+# this target deliberately does not start anything it cannot also stop.
+#
+# The p95 it gates on is `p95_ci_ms` from bench/profiles/p95_targets.yaml, NOT PRD 6.1's
+# 80ms. That file carries the argument; the short version is that a shared runner cannot
+# validate a production SLA, and a gate that fails for the runner's reasons gets
+# switched off.
+BENCH_HOST ?= http://127.0.0.1:8000
+BENCH_USERS ?= 50
+BENCH_TIME ?= 40s
+
+bench-write:
+	$(UV) locust -f bench/locust/write_path.py --headless 	  -u $(BENCH_USERS) -r 25 -t $(BENCH_TIME) --host $(BENCH_HOST) --only-summary
 
 audit:
 	$(UV) pip-audit

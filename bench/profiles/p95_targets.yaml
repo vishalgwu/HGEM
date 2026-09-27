@@ -17,6 +17,35 @@ targets:
     p50_ms: 25
     p95_ms: 80
     p99_ms: 150
+    # What CI gates on, which is deliberately NOT `p95_ms`.
+    #
+    # `p95_ms` is a production SLA measured on real hardware. A GitHub runner is two
+    # shared vCPUs with a neighbour, and Redis is a container on the same box - so a
+    # gate at 80 ms there would fail for the runner's reasons and be switched off
+    # within a week, which is worse than no gate.
+    #
+    # This number exists to catch an order-of-magnitude regression. It has one: the
+    # six stacked `BaseHTTPMiddleware` layers S8.4 removed measured p95 440 ms on a
+    # machine faster than a runner, and 400 catches that with room to spare.
+    #
+    # **Provisional until the first runs are read.** Chosen from a Windows measurement
+    # and a guess at how a Linux runner differs. Tighten it once several green runs
+    # show the real distribution - a gate four times looser than reality only catches
+    # disasters.
+    p95_ci_ms: 500
+
+    # **The gate that actually discriminates, and the reason there are two.** Three
+    # consecutive local runs gave p95 260, 290 and 340 ms - about 30% spread, against a
+    # broken-state p95 of 440. A p95 gate tight enough to catch 440 would sit inside
+    # that spread and flake, and a flaky gate gets switched off.
+    #
+    # The median is far steadier: 120, 130, 140 ms across the same three runs, against
+    # 330 ms with the six `BaseHTTPMiddleware` layers in place. That is a 2.5x gap with
+    # low variance, which is what a regression gate needs. 250 catches the regression
+    # with margin and leaves the current median about 45% of headroom.
+    #
+    # So `p95_ci_ms` is the outer rail and this is the detector. Both are enforced.
+    p50_ci_ms: 250
 
   # mode=strict, K=1 on the fast tier. Not part of S8.4's DONE WHEN and recorded
   # because the number exists: a single fast-tier extraction, so it is dominated by

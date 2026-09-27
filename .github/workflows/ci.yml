@@ -12,6 +12,10 @@
 #            `gates` because it pulls a container image and takes minutes rather
 #            than seconds, and because a lint failure should not wait on Docker
 #            to be reported. Added at S3.2.
+#   load   - does the async accept still meet a latency budget under sustained
+#            load? Its own job, added at S8.4, because a latency flake must not be
+#            able to fail the correctness signal - and because it is the only job
+#            that needs a long-running stack rather than per-test containers.
 #   hooks  - does the pre-commit config itself work, and is the tree free of
 #            secrets? RULES.md 4 requires gitleaks AND detect-secrets in
 #            pre-commit *and* CI, and this is where the CI half is satisfied.
@@ -170,6 +174,107 @@ jobs:
         # fixture is what this job exists to exercise, and the unit and property
         # suites already ran in `gates`.
         run: make test-integration
+
+  load:
+    name: load (async propose p95)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # S8.4's DONE WHEN: "locust run at 50 rps shows p95 < 80 ms on the async propose
+    # endpoint". That 80ms is `PRD.md` 6.1's production SLA and this job does NOT gate
+    # on it - see `bench/profiles/p95_targets.yaml`. A runner is two shared vCPUs with
+    # Redis in a container beside it; a gate at the SLA would fail for the runner's
+    # reasons and be switched off within a week, which is worse than no gate. What this
+    # gates on is an order-of-magnitude regression, and it has a real one to catch: the
+    # six stacked `BaseHTTPMiddleware` layers S8.4 removed measured p95 440ms.
+    #
+    # Separate from `integration` on purpose. That job answers whether the invariants
+    # hold; this one answers how fast, and a slow runner must not be able to make the
+    # first question look like it failed.
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.8"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: load
+
+      - name: Install Python 3.12
+        run: uv python install
+
+      - name: Install the workspace
+        run: uv sync --locked --dev
+
+      - name: Create .env from the example
+        # The gateway reads `Settings`, which has nine required fields. The template's
+        # DSNs point at localhost:5432 and localhost:6379, which is exactly what the
+        # dev stack below publishes - so this is also a check that the two agree.
+        run: cp .env.example .env
+
+      - name: Start Postgres and Redis
+        # The repository's own compose file, not a `services:` block. `ci.yml` already
+        # rejects that for the integration job - "a service container would be a
+        # second, hand-written copy of the dev stack, and the point is to exercise the
+        # one that ships" - and the same applies here.
+        #
+        # Two services by name rather than the whole file: Neo4j and Phoenix are large
+        # images and the async accept touches neither.
+        run: docker compose -f infra/docker/docker-compose.dev.yml up -d --wait postgres redis
+
+      - name: Apply the schema
+        # `make migrate`, so this exercises the same path a developer runs. The async
+        # accept does not read Postgres - it validates and enqueues - but the gateway's
+        # lifespan opens a pool and `/readyz` probes it, so an unmigrated database would
+        # start and then fail the readiness check below for a confusing reason.
+        run: make migrate
+
+      - name: Start the gateway
+        # Backgrounded rather than a step of its own, because a server is not a step: it
+        # has to outlive one. The log goes to a file that the failure path uploads, since
+        # a gateway that refused to start leaves nothing in this step's own output.
+        #
+        # The rate limit is raised for the run. At 50 rps the default 60/min would refuse
+        # almost everything, and a 429 is cheaper than the work being measured - so the
+        # p95 would look excellent and mean nothing. `write_path.py` fails the run on any
+        # failed sample for the same reason.
+        env:
+          GM_GATEWAY_API_KEYS: '{"ci-load-key":{"tenant":"11111111-1111-4111-8111-111111111111","scopes":["memory:read","memory:write"]}}'
+          GM_RATE_LIMIT_PER_MINUTE: "100000"
+          GM_RATE_LIMIT_BURST: "100000"
+        run: |
+          uv run uvicorn gateway.main:app --port 8000 --log-level warning > gateway.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS -m 2 http://127.0.0.1:8000/readyz; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "gateway did not become ready"; cat gateway.log; exit 1
+
+      - name: Load test the async propose path
+        # Through the Makefile, like every other gate in this file. The threshold lives
+        # in `bench/profiles/p95_targets.yaml` and is enforced by the script's own
+        # `quitting` listener, so the verdict is in one place rather than in a shell
+        # comparison here.
+        env:
+          # The `*_API_KEY` name trips the keyword detector whatever the value is, so
+          # this is marked rather than renamed to dodge the scanner - the same call
+          # `fixtures/mcp.py` makes for its unused Neo4j password. It is not a
+          # credential: it is the literal string the step above configures the gateway
+          # to accept, valid only inside this job, on a container destroyed with it.
+          GM_BENCH_API_KEY: ci-load-key  # pragma: allowlist secret
+        run: make bench-write
+
+      - name: Upload the gateway log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-log
+          path: gateway.log
+          if-no-files-found: ignore
 
   hooks:
     name: pre-commit

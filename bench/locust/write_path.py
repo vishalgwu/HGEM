@@ -1,3 +1,13 @@
+# mypy: disable-error-code="untyped-decorator"
+#
+# `locust` ships no annotations, so `@events.*.add_listener` is untyped and
+# `strict` calls anything it wraps untyped too. Disabled for this file rather than
+# configured for a `bench.*` module path, because `bench/` has no `__init__.py` and
+# mypy therefore names the module `write_path` - an override keyed on a filename is
+# an override that stops applying the day the file moves.
+#
+# Narrow on purpose: every other strict check still runs here. The listener bodies
+# decide whether CI's load gate passes, so they are exactly the code to keep checked.
 """The write path under load.  BUILD_NOTEBOOK.md S8.4
 
 S8.4's DONE WHEN: "locust run at 50 rps shows p95 < 80 ms on the async propose
@@ -32,6 +42,7 @@ to fail it.
 from __future__ import annotations
 
 import os
+import pathlib
 import uuid
 from typing import TYPE_CHECKING, Any, Final
 
@@ -49,6 +60,12 @@ _API_KEY: Final = os.environ.get("GM_BENCH_API_KEY", "")
 # contends - and contention on one namespace is the honest shape, because a real tenant
 # writes to a handful of subjects rather than to thousands.
 _NAMESPACE: Final = "bench:write-path"
+
+# How far below the target rps a run may land and still count. Not 1.0: `constant_throughput`
+# paces per user, so the achieved rate always lands a little under the nominal one, and a
+# gate at exactly the target would fail on arithmetic. 0.9 is loose enough for that and
+# tight enough that a server which has lost half its throughput fails.
+_RPS_TOLERANCE: Final = 0.9
 
 _TURNS: Final = [
     {
@@ -139,3 +156,121 @@ class ProposeAsync(HttpUser):
                 response.failure("rate limited - raise GM_RATE_LIMIT_PER_MINUTE for the run")
             else:
                 response.failure(f"expected 202, got {response.status_code}")
+
+
+@events.quitting.add_listener
+def _enforce_budget(environment: Environment, **_kwargs: Any) -> None:
+    """Fail the run when the p95 is over budget, or any request failed.
+
+    Args:
+        environment: locust's run environment. `process_exit_code` is what turns a
+            report into a non-zero exit, which is the only thing CI reads.
+        _kwargs: locust passes more than this needs.
+
+    **Two conditions, and the failure one matters as much as the latency.** A run where
+    the rate limiter refused everything would post an excellent p95 - a 429 is cheaper
+    than the work - so a single failed sample fails the run. `catch_response` in the
+    task is what marks them.
+
+    **The budget is `p95_ci_ms`, not `p95_ms`.** The second is a production SLA on real
+    hardware; this runs on two shared vCPUs with Redis in a container beside it. See
+    `bench/profiles/p95_targets.yaml` on why a gate at the SLA would be switched off
+    within a week, and what this one is actually for.
+
+    **Two budgets, and the median is the one that discriminates.** The p95's run-to-run
+    spread on one machine was 260-340 ms against a broken-state 440, so a p95 gate tight
+    enough to catch the regression would sit inside its own noise. The median moved
+    130 -> 330 ms for the same regression with far less spread. The p95 stays as an outer
+    rail; the p50 is the detector. The profile carries the numbers and the argument.
+
+    `GM_BENCH_P95_MS` and `GM_BENCH_P50_MS` override them, for measuring on a machine
+    worth measuring on.
+    """
+    stats = environment.stats.total
+    budget_ms = float(os.environ.get("GM_BENCH_P95_MS", _ci_budget_ms()))
+    p95 = stats.get_response_time_percentile(0.95) or 0.0
+    p50 = stats.get_response_time_percentile(0.50) or 0.0
+    print(
+        f"\n[bench] {stats.num_requests} requests, {stats.num_failures} failed, "
+        f"{stats.total_rps:.1f} rps | p50={p50:.0f}ms p95={p95:.0f}ms "
+        f"| budgets p50<{_profile()['p50_ci_ms']:.0f}ms p95<{budget_ms:.0f}ms"
+    )
+    # **A run that measured nothing must not pass, and the first version of this did.**
+    # With no credential the `test_start` guard stops the run before any request is
+    # made; `num_requests` was then 0, `p95` was 0, and 0 is under every budget - so it
+    # exited 0 and reported success. That is the exact shape this file warns about
+    # elsewhere: a benchmark that can produce a good number for the wrong reason.
+    if not stats.num_requests:
+        print("[bench] FAIL: no requests were made, so nothing was measured")
+        environment.process_exit_code = 1
+        return
+    # And a run that could not sustain the offered load has not measured the target
+    # either. `constant_throughput` paces the users, so a shortfall means the server
+    # could not keep up - which is a latency regression showing up as throughput.
+    floor = _target_rps() * _RPS_TOLERANCE
+    if stats.total_rps < floor:
+        print(
+            f"[bench] FAIL: sustained {stats.total_rps:.1f} rps against a "
+            f"{_target_rps():.0f} rps target (floor {floor:.1f})"
+        )
+        environment.process_exit_code = 1
+        return
+    if stats.num_failures:
+        print(f"[bench] FAIL: {stats.num_failures} requests failed")
+        environment.process_exit_code = 1
+        return
+    # The median first, because it is the one that discriminates - see the profile on
+    # why a p95 gate tight enough to catch the regression would sit inside the p95's own
+    # run-to-run spread.
+    p50_budget_ms = float(os.environ.get("GM_BENCH_P50_MS", _profile()["p50_ci_ms"]))
+    if p50 > p50_budget_ms:
+        print(f"[bench] FAIL: p50 {p50:.0f}ms exceeds the {p50_budget_ms:.0f}ms budget")
+        environment.process_exit_code = 1
+        return
+    if p95 > budget_ms:
+        print(f"[bench] FAIL: p95 {p95:.0f}ms exceeds the {budget_ms:.0f}ms budget")
+        environment.process_exit_code = 1
+        return
+    environment.process_exit_code = 0
+
+
+def _target_rps() -> float:
+    """The offered load this run is supposed to sustain.
+
+    Returns:
+        `targets.propose_async.rps` from the profile.
+    """
+    return float(_profile()["rps"])
+
+
+def _ci_budget_ms() -> float:
+    """The p95 ceiling this run is gated on.
+
+    Returns:
+        `targets.propose_async.p95_ci_ms` from the profile.
+
+    Read from the profile rather than duplicated here, because `PRD.md` 6.1 owns the
+    real target and this file owning a copy of *any* of these numbers is how the two
+    drift. A missing profile is an error rather than a default: a run that silently
+    invented its own budget would report a pass nobody set.
+    """
+    return float(_profile()["p95_ci_ms"])
+
+
+def _profile() -> dict[str, float]:
+    """The `propose_async` targets, from the profile on disk.
+
+    Returns:
+        That mapping.
+
+    Raises:
+        KeyError: the profile lacks the section. An error rather than a default,
+            because a run that silently invented its own budget would report a pass
+            nobody set.
+    """
+    import yaml
+
+    path = pathlib.Path(__file__).resolve().parents[1] / "profiles" / "p95_targets.yaml"
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    section: dict[str, float] = loaded["targets"]["propose_async"]
+    return section
