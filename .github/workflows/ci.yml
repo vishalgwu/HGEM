@@ -312,7 +312,12 @@ jobs:
         run: uv python install
 
       - name: Install the workspace
-        run: uv sync --locked --dev
+        # `--group bench` for the reason `gates` has it: the mypy hook runs `make
+        # typecheck`'s command over the same trees, `bench` is one of them, and
+        # `bench` imports `locust`. When the hook was widened to match the Makefile
+        # this line was not, and the hook failed here on a missing `locust` while
+        # `gates` passed on the same commit.
+        run: uv sync --locked --dev --group bench
 
       - name: Cache pre-commit environments
         uses: actions/cache@v6
