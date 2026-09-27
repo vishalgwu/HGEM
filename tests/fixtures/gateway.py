@@ -28,11 +28,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
+
+from fixtures.mcp import settings as build_settings
 from gateway.auth import InvalidCredentialError, Principal
 from gateway.limits import Decision
 from gateway.main import build_app
-
-from fixtures.mcp import settings as build_settings
 from guardmem_core.types import TenantId
 
 if TYPE_CHECKING:

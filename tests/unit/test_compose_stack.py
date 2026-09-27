@@ -39,6 +39,7 @@ from typing import Any
 import yaml
 
 from conftest import REPO_ROOT
+from fixtures.containers import IMAGES
 
 COMPOSE_DIR = REPO_ROOT / "infra" / "docker"
 
@@ -89,6 +90,36 @@ def test_every_image_is_pinned_to_an_exact_version() -> None:
         + "\n".join(f"  {entry}" for entry in offenders)
         + "\nA tag without MAJOR.MINOR moves. Pin it, and bump it in a commit "
         "that says why."
+    )
+
+
+def test_the_integration_suite_starts_only_images_the_dev_stack_pins() -> None:
+    """The pin rule above, extended to the two other places an image is named.
+
+    It applied to compose files only, so the Redis testcontainer shipped
+    `redis:7-alpine` - the exact bare-major tag this module rejects - beside a
+    comment claiming it was pinned, and CI pre-pulled the same floating tag. On a
+    machine that could not pull it, all eight bucket tests errored at setup. Every
+    image `fixtures.containers` starts must be one the dev stack pins, so a test
+    runs against the server a developer runs; and CI must pre-pull exactly those,
+    because a pull that fails inside a fixture reads as a timeout while one that
+    fails in its own step names the registry.
+    """
+    pinned = {
+        spec["image"]
+        for path in _compose_files()
+        for spec in _services(path).values()
+        if "image" in spec
+    }
+    ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    pulled = set(re.findall(r"^\s*docker pull (\S+)\s*$", ci, re.MULTILINE))
+
+    assert set(IMAGES) <= pinned, (
+        f"testcontainer images {sorted(set(IMAGES) - pinned)} are not pinned by the "
+        "dev stack; use the compose file's exact image and tag"
+    )
+    assert pulled == set(IMAGES), (
+        f"ci.yml pre-pulls {sorted(pulled)} but the suite starts {sorted(IMAGES)}"
     )
 
 

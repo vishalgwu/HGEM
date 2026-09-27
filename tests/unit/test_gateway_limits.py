@@ -30,12 +30,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import redis.exceptions
 from fastapi import FastAPI
-from gateway.auth import InvalidCredentialError, Principal
-from gateway.limits import Decision, bucket_key
-from gateway.main import build_app
 from starlette.testclient import TestClient
 
 from fixtures.mcp import settings as build_settings
+from gateway.auth import InvalidCredentialError, Principal
+from gateway.limits import Decision, bucket_key
+from gateway.main import build_app
 from guardmem_core.types import TenantId
 
 if TYPE_CHECKING:

@@ -6,7 +6,7 @@
 # failed here. `make lint && make typecheck && make test` is also the literal
 # S1.2 acceptance check.
 #
-# Three jobs, because they answer different questions:
+# Four jobs, because they answer different questions:
 #   gates  - does the code pass lint, types and the fast tests?
 #   integration - do the invariants hold against a real Postgres? Split from
 #            `gates` because it pulls a container image and takes minutes rather
@@ -111,8 +111,8 @@ jobs:
         run: make typecheck
 
       - name: Test
-        # Unit and property only. The integration suite is its own job below -
-        # see `make test` vs `make test-all` in the Makefile.
+        # Unit, property and contract - no containers. The integration suite is
+        # its own job below; see `make test` vs `make test-all` in the Makefile.
         run: make test
 
   integration:
@@ -167,11 +167,14 @@ jobs:
         # happened.
         #
         # Redis joined at S8.3, whose token bucket is a Lua script and so cannot be
-        # tested against a fake. It is a small image and the reason for pulling it
-        # here is the same one: a registry failure should name itself.
+        # tested against a fake, and Neo4j at S7.1 - it was never listed here, so
+        # its pull ran inside a fixture. Every image is `tests/fixtures/containers.py`'s
+        # exact pin, and `test_compose_stack.py` asserts this list matches it: the
+        # first version pulled `redis:7-alpine`, a tag that floats.
         run: |
           docker pull pgvector/pgvector:0.8.6-pg16
-          docker pull redis:7-alpine
+          docker pull neo4j:5.26.30-community
+          docker pull redis:7.4-alpine
 
       - name: Test
         # Through the Makefile, like every other gate in this file - see the

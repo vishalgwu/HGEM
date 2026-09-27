@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING, Final
 import pytest
 import redis.asyncio as aioredis_impl
 import redis.exceptions
+
 from gateway.auth import Principal
 from gateway.limits import TokenBucket
-
 from guardmem_core.types import TenantId
 
 if TYPE_CHECKING:

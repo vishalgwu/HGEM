@@ -21,11 +21,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from gateway.propose import JOB, QUEUE
 from starlette.testclient import TestClient
-from worker.main import QUEUE as WORKER_QUEUE
 
 from fixtures.gateway import READ_KEY, TENANT, WRITE_KEY, app_with, fake_state
+from gateway.propose import JOB, QUEUE
+from worker.main import QUEUE as WORKER_QUEUE
 
 TURNS = [
     {

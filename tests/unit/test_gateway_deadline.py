@@ -21,6 +21,7 @@ import asyncio
 import time
 
 import pytest
+
 from gateway.deadline import Deadline, DeadlineExceeded
 
 

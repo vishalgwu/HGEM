@@ -40,11 +40,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import schemathesis
 from fastapi import FastAPI
-from gateway.lifespan import SERVICE
-from gateway.main import build_app
 from starlette.testclient import TestClient
 
 from fixtures.mcp import settings as build_settings
+from gateway.lifespan import SERVICE
+from gateway.main import build_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

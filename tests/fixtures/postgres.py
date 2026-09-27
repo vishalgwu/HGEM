@@ -43,6 +43,7 @@ import asyncpg
 import pytest
 
 from conftest import REPO_ROOT
+from fixtures.containers import POSTGRES_IMAGE, docker_available
 from guardmem_core.memory.vector.pool import libpq_dsn, sqlalchemy_dsn
 
 __all__ = ["app_role_dsn", "postgres_dsn"]
@@ -51,29 +52,10 @@ __all__ = ["app_role_dsn", "postgres_dsn"]
 # why the index is the part worth avoiding.
 INITDB_DIR: Final = REPO_ROOT / "infra" / "docker" / "initdb"
 
-# The same image and the same tag as `infra/docker/docker-compose.dev.yml`.
-# Pinned for the reason `RULES.md` §3 pins model ids: a floating tag makes a
-# green run unreproducible, and here it would also silently change the pgvector
-# version that `assertion_hnsw` is built by.
-_IMAGE: Final = "pgvector/pgvector:0.8.6-pg16"
 _DB: Final = "guardmem"
 _OWNER: Final = "guardmem"
 _OWNER_PASSWORD: Final = "guardmem"
 _STARTUP_TIMEOUT_S: Final = 90.0
-
-
-def _docker_available() -> bool:
-    """Can we talk to a Docker daemon at all?"""
-    try:
-        result = subprocess.run(
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True,
-            timeout=20,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 def _wait_until_accepting(dsn: str) -> None:
@@ -164,13 +146,13 @@ def postgres_dsn() -> Iterator[str]:
     if external:
         yield libpq_dsn(external)
         return
-    if not _docker_available():
+    if not docker_available():
         pytest.skip("no Docker daemon; set GM_TEST_DATABASE_URL to use an existing database")
 
     from testcontainers.core.container import DockerContainer
 
     container = (
-        DockerContainer(_IMAGE)
+        DockerContainer(POSTGRES_IMAGE)
         .with_env("POSTGRES_USER", _OWNER)
         .with_env("POSTGRES_PASSWORD", _OWNER_PASSWORD)
         .with_env("POSTGRES_DB", _DB)

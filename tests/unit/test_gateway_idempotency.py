@@ -21,7 +21,6 @@ import json
 
 from gateway.auth import Principal
 from gateway.limits import IdempotencyStore
-
 from guardmem_core.types import TenantId
 
 TENANT_A = TenantId("11111111-1111-4111-8111-111111111111")

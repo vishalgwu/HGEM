@@ -217,8 +217,8 @@ ignore = ["S101"]          # assert is fine in tests
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "T20"]
-# scripts/ holds command-line tools - the pre-commit baseline normaliser today,
-# and seed_demo_tenant / replay_trace / threshold_tuner as their steps arrive.
+# scripts/ holds command-line tools - the pre-commit baseline normaliser, the
+# seed, replay and the CHECKPOINT B harness; threshold_tuner arrives at S20.2.
 # T20 bans `print` because RULES.md 6 requires structured logging in the
 # application; for a CLI, stdout IS the interface, and a hook that logged JSON
 # to a file instead would be useless to the developer reading its output.
@@ -251,7 +251,7 @@ ignore = ["S101"]          # assert is fine in tests
 # Without them here isort groups them with yaml/pytest, which reads as though
 # they came from PyPI - and `fixtures` in particular is a plausible package name
 # on the index, so the misfiling is easy to miss.
-known-first-party = ["guardmem_core", "mcp_server", "conftest", "fixtures"]
+known-first-party = ["guardmem_core", "mcp_server", "gateway", "worker", "conftest", "fixtures"]
 
 # RULES.md 2.4 caps cyclomatic complexity at 10. Ruff's default happens to be
 # 10, but relying on a tool default for a documented engineering gate is how
@@ -380,8 +380,9 @@ exclude_also = ["^\\s*\\.\\.\\.$"]
 # ---------------------------------------------------------------------------
 # PROJECT_TREE.md "Ownership & Dependency Rules" and RULES.md 2.4 both require
 # these contracts; S1.1 never actually specified them. Only the contracts that
-# are meaningful today are declared - the layered contract (apps -> services ->
-# packages -> stores) arrives when services/ and apps/ do.
+# are meaningful today are declared: the services layer is covered by the two
+# service contracts below, and the layered contract (apps -> services ->
+# packages -> stores) arrives when apps/ does.
 [tool.importlinter]
 root_packages = ["guardmem_core", "mcp_server", "gateway", "worker"]
 # Required whenever a contract forbids modules outside the root packages.
@@ -426,7 +427,18 @@ forbidden_modules = [
   "asyncpg",
 ]
 
-# S6.1, and the direction rule the contract above is the other half of.
+# S8.1. Two deployables now exist, and nothing checked that they stayed
+# independent. `PROJECT_TREE.md` makes each service thin and puts shared
+# behaviour in `guardmem-core`, so the tempting violation is a gateway handler
+# importing an `mcp_server` output shaper that already formats the thing it wants
+# to return. That would make the gateway undeployable without the MCP SDK and give
+# the two surfaces one schema with two owners.
+[[tool.importlinter.contracts]]
+name = "the services do not import each other"
+type = "independence"
+modules = ["mcp_server", "gateway", "worker"]
+
+# S6.1, and the direction rule the store contract above is the other half of.
 # PROJECT_TREE.md: "deployable units are thin; all intelligence lives in
 # packages/guardmem-core", and dependency flows one way - a service imports the
 # core, the core never imports a service.
@@ -440,22 +452,11 @@ forbidden_modules = [
 #
 # Note what is deliberately NOT forbidden here: `mcp_server` importing
 # `networkx_store`, `HashEmbedder` or any other concrete implementation. The
-# contract above forbids exactly that for `guardmem_core.pipeline`, and for a
+# store contract above forbids exactly that for `guardmem_core.pipeline`, and for a
 # good reason - the pipeline must talk to protocols so a backend swap stays
 # configuration. A service is the composition root. Choosing the concrete
 # implementations is its entire job, and a rule that stopped it would leave
 # nobody able to do it.
-# S8.1. Two deployables now exist, and nothing checked that they stayed
-# independent. `PROJECT_TREE.md` makes each service thin and puts shared
-# behaviour in `guardmem-core`, so the tempting violation is a gateway handler
-# importing an `mcp_server` output shaper that already formats the thing it wants
-# to return. That would make the gateway undeployable without the MCP SDK and give
-# the two surfaces one schema with two owners.
-[[tool.importlinter.contracts]]
-name = "the services do not import each other"
-type = "independence"
-modules = ["mcp_server", "gateway", "worker"]
-
 [[tool.importlinter.contracts]]
 name = "guardmem-core never imports a service"
 type = "forbidden"

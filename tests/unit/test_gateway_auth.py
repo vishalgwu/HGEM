@@ -20,9 +20,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from gateway.auth import InvalidCredentialError, SettingsAuthBackend
 from pydantic import SecretStr
 
+from gateway.auth import InvalidCredentialError, SettingsAuthBackend
 from guardmem_core.types import TenantId
 
 TENANT_A = TenantId("11111111-1111-4111-8111-111111111111")

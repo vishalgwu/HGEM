@@ -40,9 +40,9 @@ SVC_SRC   := services/mcp_server/src services/gateway/src services/worker/src
 CACHES    := .ruff_cache .mypy_cache .pytest_cache .import_linter_cache \
              .hypothesis htmlcov .coverage coverage.xml
 
-.PHONY: help hooks fmt lint imports typecheck test test-all test-integration \n        bench-write \
-        audit clean \
-        dev down migrate seed eval
+.PHONY: help hooks fmt lint imports typecheck test test-all test-integration \
+        bench-write audit clean \
+        dev down dev-reset dev-ps dev-logs migrate seed eval
 
 help:
 	@echo GuardMem AI - make targets
@@ -178,7 +178,7 @@ BENCH_USERS ?= 50
 BENCH_TIME ?= 40s
 
 bench-write:
-	$(UV) locust -f bench/locust/write_path.py --headless 	  -u $(BENCH_USERS) -r 25 -t $(BENCH_TIME) --host $(BENCH_HOST) --only-summary
+	$(UV) locust -f bench/locust/write_path.py --headless -u $(BENCH_USERS) -r 25 -t $(BENCH_TIME) --host $(BENCH_HOST) --only-summary
 
 audit:
 	$(UV) pip-audit

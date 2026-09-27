@@ -40,11 +40,15 @@ import ast
 import re
 import sys
 from importlib.metadata import packages_distributions
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
+import yaml
 from test_dependency_consistency import _normalise, _uv_lock_versions
 
 from conftest import REPO_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # The seven trees `make typecheck` covers, which is the definition of "source CI
 # has to be able to import". Keeping this list identical to the Makefile's is the
@@ -198,6 +202,33 @@ def test_every_imported_third_party_module_is_in_uv_lock() -> None:
     )
 
 
+def _trees_named(command: str) -> set[Path]:
+    """The source trees one `mypy` command line names, resolved.
+
+    A bare directory name has no "/" to recognise it by, so those are listed.
+    `bench` joined at S8.4 and its absence here let a parity check pass while the
+    two sides genuinely disagreed - the one failure mode such a check must not have.
+    """
+    return {
+        (REPO_ROOT / token).resolve()
+        for token in command.split()
+        if (not token.startswith("$") and "/" in token) or token in {"tests", "scripts", "bench"}
+    }
+
+
+def _typecheck_trees() -> set[Path]:
+    """What the Makefile's `typecheck` recipe hands to mypy, variables expanded."""
+    recipe = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    line = next(raw for raw in recipe.splitlines() if "mypy" in raw and "$(CORE_SRC)" in raw)
+    variables = {
+        name: value.strip()
+        for name, value in re.findall(r"^([A-Z_]+)\s*[:?]?=\s*(.+)$", recipe, re.MULTILINE)
+    }
+    for variable, value in variables.items():
+        line = line.replace(f"$({variable})", value)
+    return _trees_named(line)
+
+
 def test_the_scan_reaches_every_tree_make_typecheck_covers() -> None:
     """Pin the scan's own scope.
 
@@ -205,29 +236,31 @@ def test_the_scan_reaches_every_tree_make_typecheck_covers() -> None:
     reads the Makefile's `typecheck` recipe and asserts the trees agree, so
     widening one and not the other fails rather than shrinking the check.
     """
-    recipe = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    line = next(raw for raw in recipe.splitlines() if "mypy" in raw and "$(CORE_SRC)" in raw)
-    variables = {
-        name: value.strip()
-        for name, value in re.findall(r"^([A-Z_]+)\s*[:?]?=\s*(.+)$", recipe, re.M)
-    }
-    for variable, value in variables.items():
-        line = line.replace(f"$({variable})", value)
-
-    checked = {
-        (REPO_ROOT / token).resolve()
-        for token in line.split()
-        # A bare directory name has no "/" to recognise it by, so those are listed.
-        # `bench` joined at S8.4 and its absence here let this guard pass while
-        # `SOURCE_TREES` and the Makefile genuinely disagreed - the one failure mode a
-        # parity check must not have.
-        if (not token.startswith("$") and "/" in token) or token in {"tests", "scripts", "bench"}
-    }
-
-    assert {tree.resolve() for tree in SOURCE_TREES} <= checked, (
+    assert {tree.resolve() for tree in SOURCE_TREES} <= _typecheck_trees(), (
         "SOURCE_TREES has drifted from the Makefile's typecheck target; a tree "
         "mypy checks and this guard does not is one where an undeclared import "
         "is invisible."
+    )
+
+
+def test_the_pre_commit_mypy_hook_checks_what_make_typecheck_checks() -> None:
+    """The hook and the Makefile target must name the same trees.
+
+    `.pre-commit-config.yaml` says so in a comment, and the comment was not
+    enough: from S8.1 to 2026-09-27 the hook stopped at `services/mcp_server/src`
+    while `make typecheck` had grown the gateway, the worker and `bench`. A
+    commit touching only those passed the local hook and could fail CI - the
+    drift the comment exists to prevent, and the second time it happened.
+    """
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    entries = [
+        hook["entry"] for repo in config["repos"] for hook in repo["hooks"] if hook["id"] == "mypy"
+    ]
+
+    assert len(entries) == 1, "expected exactly one mypy hook"
+    assert _trees_named(entries[0]) == _typecheck_trees(), (
+        "the pre-commit mypy hook and `make typecheck` check different trees; "
+        "a commit can pass one and fail the other"
     )
 
 

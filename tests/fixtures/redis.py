@@ -24,10 +24,11 @@ Registered from `tests/conftest.py` as a plugin rather than as a second
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING, Final
 
 import pytest
+
+from fixtures.containers import REDIS_IMAGE, docker_available
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -36,37 +37,8 @@ if TYPE_CHECKING:
 
 __all__ = ["flushed", "redis_url"]
 
-# Pinned for the reason `fixtures.postgres` pins its image: a floating tag makes a
-# green run unreproducible. 7-alpine because the bucket uses only `HMGET`, `HSET`,
-# `EXPIRE` and `EVALSHA`, all of which predate 7 by years - the pin is about
-# reproducibility rather than about needing a recent server.
-_IMAGE: Final = "redis:7-alpine"
 _PORT: Final = 6379
-_STARTUP_TIMEOUT_S: Final = 60.0
-
-
-def _docker_available() -> bool:
-    """Can we talk to a Docker daemon at all?
-
-    Returns:
-        True when `docker info` answers.
-
-    Duplicated from `fixtures.postgres` rather than shared, and that is a real
-    trade. Importing it would couple the Redis fixture to the Postgres one, so a
-    test needing only Redis would start pulling in a 620 MB image's module - and
-    the function is six lines whose behaviour is a subprocess call. The shared
-    version arrives when a third fixture wants it.
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True,
-            timeout=20,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+_STARTUP_TIMEOUT_S: Final = 60
 
 
 @pytest.fixture(scope="session")
@@ -84,16 +56,22 @@ def redis_url() -> Iterator[str]:
     if external:
         yield external
         return
-    if not _docker_available():
+    if not docker_available():
         pytest.skip("no Docker daemon; set GM_TEST_REDIS_URL to use an existing Redis")
 
     from testcontainers.core.container import DockerContainer
-    from testcontainers.core.waiting_utils import wait_for_logs
+    from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
-    container = DockerContainer(_IMAGE).with_exposed_ports(_PORT)
+    container = DockerContainer(REDIS_IMAGE).with_exposed_ports(_PORT)
     container.start()
     try:
-        wait_for_logs(container, "Ready to accept connections", timeout=_STARTUP_TIMEOUT_S)
+        # Waited on here rather than attached with `waiting_for`, which would run
+        # inside `start()` - before this `try` - and leak the container on a
+        # startup timeout. `wait_for_logs` with a string is deprecated in
+        # testcontainers 4.13.
+        LogMessageWaitStrategy("Ready to accept connections").with_startup_timeout(
+            _STARTUP_TIMEOUT_S
+        ).wait_until_ready(container)
         host = container.get_container_host_ip()
         port = container.get_exposed_port(_PORT)
         yield f"redis://{host}:{port}/0"

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import time
 from typing import TYPE_CHECKING, Final
 
@@ -32,6 +31,7 @@ import pytest
 from neo4j import AsyncGraphDatabase
 from neo4j import exceptions as neo4j_errors
 
+from fixtures.containers import NEO4J_IMAGE, docker_available
 from guardmem_core.memory.graph.selection import ensure_schema
 
 if TYPE_CHECKING:
@@ -41,28 +41,10 @@ if TYPE_CHECKING:
 
 __all__ = ["neo4j_store", "neo4j_uri"]
 
-# The same image and tag as the dev stack. Pinned for the reason `RULES.md` §3
-# pins model ids: a floating tag makes a green run unreproducible, and a Neo4j
-# major carries Cypher changes - `cypher.py`'s statements are written against 5.
-_IMAGE: Final = "neo4j:5.26.30-community"
 _USER: Final = "neo4j"
 _PASSWORD: Final = "guardmem123"  # pragma: allowlist secret
 _BOLT_PORT: Final = 7687
 _STARTUP_TIMEOUT_S: Final = 120.0
-
-
-def _docker_available() -> bool:
-    """Can we talk to a Docker daemon at all?"""
-    try:
-        result = subprocess.run(
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True,
-            timeout=20,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
 
 
 def _wait_until_accepting(uri: str) -> None:
@@ -110,13 +92,13 @@ def neo4j_uri() -> Iterator[str]:
     if external:
         yield external
         return
-    if not _docker_available():
+    if not docker_available():
         pytest.skip("no Docker daemon; set GM_TEST_NEO4J_URI to use an existing Neo4j")
 
     from testcontainers.core.container import DockerContainer
 
     container = (
-        DockerContainer(_IMAGE)
+        DockerContainer(NEO4J_IMAGE)
         .with_env("NEO4J_AUTH", f"{_USER}/{_PASSWORD}")
         # No APOC. The dev stack installs it because later steps will want it;
         # nothing in `cypher.py` does, and the plugin download is most of a cold

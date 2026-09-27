@@ -24,13 +24,13 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI, Request
+from starlette.testclient import TestClient
+
+from fixtures.mcp import settings as build_settings
 from gateway.auth import InvalidCredentialError, Principal, credential_from
 from gateway.limits import Decision
 from gateway.main import build_app
 from gateway.middleware import REQUEST_ID_HEADER
-from starlette.testclient import TestClient
-
-from fixtures.mcp import settings as build_settings
 from guardmem_core.types import TenantId
 
 if TYPE_CHECKING:

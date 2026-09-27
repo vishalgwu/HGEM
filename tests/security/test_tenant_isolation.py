@@ -55,15 +55,15 @@ from typing import TYPE_CHECKING, Final
 import httpx
 import pytest
 from fastapi import FastAPI
-from gateway.auth import SettingsAuthBackend
-from gateway.lifespan import GatewayState
-from gateway.limits import Decision
-from gateway.main import build_app
 from pydantic import SecretStr
 
 from fixtures.assertions import NS
 from fixtures.mcp import settings as build_settings
 from fixtures.pgvector import TIMEOUT_S, assertion, write_and_reveal
+from gateway.auth import SettingsAuthBackend
+from gateway.lifespan import GatewayState
+from gateway.limits import Decision
+from gateway.main import build_app
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.schemas.ontology import load_ontology
@@ -72,8 +72,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     import asyncpg
-    from gateway.auth import Principal
 
+    from gateway.auth import Principal
     from guardmem_core.memory.vector.pgvector_store import PgVectorStore
     from guardmem_core.settings import Settings
 
