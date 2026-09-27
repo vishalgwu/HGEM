@@ -92,6 +92,34 @@ guardmem-worker = { workspace = true }
 # carries the per-entry citation of the step or RULES clause that requires each
 # package, which a machine-generated export would throw away.
 [dependency-groups]
+# S8.4's load gate. A group of its own rather than an entry in `dev`, for two reasons.
+# `test_dev_group_mirrors_requirements_dev` asserts `dev` equals `requirements/dev.txt`
+# exactly, and `locust` belongs to `requirements/evals.txt` by the layering this repo
+# already chose - moving it would make the inventory lie about which layer needs it. And
+# `locust` pulls `gevent` and `flask`, which no other job has any use for.
+#
+# **It had to be here at all because `uv.lock` is what CI installs from.** `locust` was
+# pinned only in `requirements/evals.txt`, which feeds `requirements.lock.txt` - the path
+# a developer's machine installs from. So it was present locally and absent in every CI
+# job, `make typecheck` failed on `bench`, and `make bench-write` had no command to run.
+# `test_dependency_imports` exists to catch exactly that and did not, because `bench` was
+# missing from its `SOURCE_TREES`; it is there now.
+bench = [
+  "locust==2.46.5",
+  # Two of locust's own transitive dependencies, pinned because the two lockfiles must
+  # agree on them and a fresh resolve does not. `requirements.lock.txt` already carried
+  # 26.8.0 and 5.16.4 - compiled when `locust` entered `requirements/evals.txt` - and
+  # those are the versions actually installed and audited. Adding the group made `uv
+  # lock` resolve 26.9.0 and 5.17.0 instead, which
+  # `test_uv_lock_agrees_with_requirements_lock` correctly refused.
+  #
+  # Pinned down to the tested pair rather than the pip lock being moved up to the newer
+  # one: nothing has run against 26.9.0 here, and a lock claiming a version nobody has
+  # exercised is the drift these guards exist to prevent, in the other direction.
+  "gevent==26.8.0",
+  "python-socketio==5.16.4",
+]
+
 dev = [
   # test
   "pytest==9.1.1",

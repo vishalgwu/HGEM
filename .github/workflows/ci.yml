@@ -97,7 +97,12 @@ jobs:
         # `--locked` is the gate: it fails if uv.lock is out of date with
         # pyproject.toml, so a dependency edit that was never re-locked cannot
         # merge.
-        run: uv sync --locked --dev
+        #
+        # `--group bench` because `make typecheck` covers `bench/`, which imports
+        # `locust`. Without it mypy fails on a missing import here while passing on
+        # any machine that installed from requirements.lock.txt - which is what
+        # happened on the first run of the `load` job.
+        run: uv sync --locked --dev --group bench
 
       - name: Lint
         run: make lint
@@ -208,7 +213,10 @@ jobs:
         run: uv python install
 
       - name: Install the workspace
-        run: uv sync --locked --dev
+        # `--group bench` is what puts `locust` in the environment. It is pinned in
+        # `requirements/evals.txt` for the inventory's sake, and that file does not
+        # reach `uv.lock` - so the group is how CI gets it.
+        run: uv sync --locked --dev --group bench
 
       - name: Create .env from the example
         # The gateway reads `Settings`, which has nine required fields. The template's

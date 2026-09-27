@@ -46,12 +46,18 @@ from test_dependency_consistency import _normalise, _uv_lock_versions
 
 from conftest import REPO_ROOT
 
-# The six trees `make typecheck` covers, which is the definition of "source CI
+# The seven trees `make typecheck` covers, which is the definition of "source CI
 # has to be able to import". Keeping this list identical to the Makefile's is the
 # point: a tree mypy checks and this does not is a tree where an undeclared
 # import is invisible again. `services/gateway/src` joined at S8.1, and its
 # absence here made `gateway` read as an undeclared third-party import - which is
 # this guard working, one tree late.
+#
+# `bench` joined at S8.4 and its absence cost a red CI run: `make typecheck` was
+# widened to cover it, `bench` imports `locust`, and `locust` was pinned only in
+# `requirements/evals.txt` - so it reached a developer machine and never reached
+# `uv.lock`, which is what CI installs from. That is this guard's exact purpose, and it
+# was silent because the list it walks had drifted from the Makefile's.
 SOURCE_TREES: Final = (
     REPO_ROOT / "packages" / "guardmem-core" / "src",
     REPO_ROOT / "services" / "mcp_server" / "src",
@@ -59,6 +65,7 @@ SOURCE_TREES: Final = (
     REPO_ROOT / "services" / "worker" / "src",
     REPO_ROOT / "tests",
     REPO_ROOT / "scripts",
+    REPO_ROOT / "bench",
 )
 
 
@@ -210,7 +217,11 @@ def test_the_scan_reaches_every_tree_make_typecheck_covers() -> None:
     checked = {
         (REPO_ROOT / token).resolve()
         for token in line.split()
-        if (not token.startswith("$") and "/" in token) or token in {"tests", "scripts"}
+        # A bare directory name has no "/" to recognise it by, so those are listed.
+        # `bench` joined at S8.4 and its absence here let this guard pass while
+        # `SOURCE_TREES` and the Makefile genuinely disagreed - the one failure mode a
+        # parity check must not have.
+        if (not token.startswith("$") and "/" in token) or token in {"tests", "scripts", "bench"}
     }
 
     assert {tree.resolve() for tree in SOURCE_TREES} <= checked, (
