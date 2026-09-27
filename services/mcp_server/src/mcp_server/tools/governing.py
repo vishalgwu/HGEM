@@ -2,26 +2,19 @@
 
 Split from `pipeline.py` at `RULES.md` §2.4's cap, along the seam the two halves
 already have: that module is the **published API** - §2.2's and §2.3's argument
-schemas, read and refused exactly as written - and this one is *composition and
-mapping*, which is where a concrete store, a concrete resolver and a result
-shape live.
+schemas, read and refused exactly as written - and this one binds a call to the
+pipeline and maps what came back onto §2.2's result shape.
 
-**This is the composition root for a request.** `guardmem_core.pipeline` may not
-import a concrete store - an import-linter contract enforces it - so somebody has
-to name `PgVectorStore`, `NamespaceEntityResolver`, `LLMJudge` and `LLMEntailer`,
-and a service is where `PROJECT_TREE.md` puts that job. `lifespan` owns what is
-process-scoped (the pool, the graph, the model client); this owns what is bound
-to one call's tenant.
+**The tenant-bound half of the composition is built per call.** `lifespan` owns
+what is process-scoped (the pool, the graph, the model client);
+`guardmem_core.governance.build_deps` composes the rest around the call's tenant,
+and `governance.govern` runs the pipeline and applies what it decided.
 
-**Nothing here writes an assertion, and the result says so.** `run()` reaches a
-decision and applies none: `RULES.md` non-negotiable #4 binds the audit event to
-the state change, `VectorStore.upsert` owns the only transaction, and composing
-the two is a Postgres-specific applier - ADR-0010, decided and unbuilt. So §2.2's
-`assertion_id` - which its example shows on an `auto_write` - **cannot be
-produced**, and `applied: false` is carried instead of leaving a caller to infer
-from a missing field that their fact was stored. A decision of `auto_write` here
-means "this would be written", which is a different claim from "this was
-written" and has to read as one.
+**The result says what was written, not only what was decided.** §2.2's example
+carries `assertion_id` on an `auto_write`, and a caller reading
+`"decision": "auto_write"` with no further signal would conclude the fact is in
+memory. `applied` and the per-candidate `assertion_id` / `not_applied` report
+what the applier actually did - see `result_of`.
 """
 
 from __future__ import annotations
@@ -29,8 +22,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 from guardmem_core import governance
-from guardmem_core.memory import applier
-from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from mcp_server.tools.context import ToolRefusedError
 
 if TYPE_CHECKING:
@@ -42,7 +33,7 @@ if TYPE_CHECKING:
     from guardmem_core.schemas.verdict import DecisionRecord
     from mcp_server.tools.context import ToolContext
 
-__all__ = ["apply_all", "deps_for", "result_of"]
+__all__ = ["deps_for", "result_of"]
 
 # What `DecisionRecord.policy_version` records while no policy pack exists.
 # S12.2 builds the engine; `override_signals` already takes the string and
@@ -95,42 +86,6 @@ def deps_for(context: ToolContext) -> Deps:
         ontology=state.ontology,
         policy_version=_NO_POLICY_PACK,
         vector=context.store,
-    )
-
-
-async def apply_all(
-    context: ToolContext, result: PipelineResult
-) -> tuple[dict[str, Applied], list[CandidateFailure]]:
-    """Apply every decision, one transaction each.  ADR-0010
-
-    Args:
-        context: The call's tenant and namespace.
-        result: What the pipeline decided.
-
-    Returns:
-        `applier.apply_all`'s answer: what became of each candidate, and one
-        `CandidateFailure` per apply that raised.
-
-    The store is built here rather than taken from `context.store`, which is
-    typed as the `VectorStore` Protocol so unit tests can drive the handlers
-    against a fake. The applier needs the concrete class - ADR-0010 puts
-    `write_in` and `supersede_in` there on purpose - and a composition root is
-    where naming one is allowed.
-    """
-    state = context.state
-    store = PgVectorStore(
-        state.pool,
-        state.embedder,
-        tenant_id=context.tenant_id,
-        timeout_s=state.settings.store_timeout_s,
-    )
-    return await applier.apply_all(
-        result.governed,
-        store=store,
-        pool=state.pool,
-        tenant_id=context.tenant_id,
-        trace_id=result.trace_id,
-        timeout_s=state.settings.store_timeout_s,
     )
 
 

@@ -1,8 +1,8 @@
 """Everything the pipeline needs, for one queued job.  S8.4
 
 `guardmem_core.governance.build_deps` composes the `Deps`; what this module owns
-is what is the worker's own - the model client it opens per job, the backends it
-binds, and the policy string it stamps.
+is what is the worker's own - the backends it binds and the policy string it
+stamps. The model client is the worker's too, and `main.startup` opens it once.
 
 **`NetworkXGraphStore` and `HashEmbedder` are what bind today**, and both matter for
 reading any number this produces. The graph is built per job, so every job starts
@@ -19,19 +19,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-import httpx
-
 from guardmem_core import governance
-from guardmem_core.llm.providers import build_llm
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
 from guardmem_core.schemas.ontology import load_ontology
 
 if TYPE_CHECKING:
-    from contextlib import AsyncExitStack
-
     import asyncpg
 
+    from guardmem_core.llm.base import LLMClient
     from guardmem_core.pipeline.deps import Deps
     from guardmem_core.settings import Settings
     from guardmem_core.types import TenantId
@@ -51,37 +47,23 @@ ONTOLOGY: Final = "clinical"
 POLICY_VERSION: Final = "worker-v1"
 
 
-async def build_deps(
-    stack: AsyncExitStack, pool: asyncpg.Pool, tenant: TenantId, settings: Settings
-) -> Deps:
+def build_deps(pool: asyncpg.Pool, llm: LLMClient, tenant: TenantId, settings: Settings) -> Deps:
     """Compose a real pipeline for one tenant.
 
     Args:
-        stack: The caller's exit stack. Every resource opened here is registered on
-            it the moment it exists, so a later failure cannot leak an earlier
-            success - the argument `mcp_server.lifespan` makes at length about a
-            hand-written `try/finally`.
         pool: The process-wide Postgres pool. Shared; the store built from it is not.
+        llm: The process's model client, opened once by `main.startup`.
         tenant: Whose data this pipeline may see - the isolation boundary.
-        settings: Read for the provider, timeouts and thresholds.
+        settings: Read for timeouts and thresholds.
 
     Returns:
         A `Deps` ready for `pipeline.run`.
 
-    Raises:
-        ValueError: no model provider is configured. **Raised rather than degraded.**
-            The gateway may serve reads without a model - `mcp_server` explains why
-            its own `llm` is optional - but a worker exists only to run the pipeline,
-            and a pipeline with no model cannot extract anything. A worker that
-            started anyway would drain the queue by failing every job, which looks
-            like throughput.
-
     **Per tenant, not per process.** The store binds one tenant and a worker serves
     every tenant's jobs, so this is called once per job rather than held on the
-    worker's context. Only the pool is shared across jobs.
+    worker's context. The pool and the model client are what is shared, and they
+    are the expensive parts.
     """
-    http = await stack.enter_async_context(httpx.AsyncClient(base_url=settings.ollama_url))
-    llm = await stack.enter_async_context(build_llm(settings, http))
     return governance.build_deps(
         settings=settings,
         pool=pool,

@@ -21,10 +21,13 @@ failure this system can have.
 from __future__ import annotations
 
 import logging
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Final
 
+import httpx
 from arq.connections import RedisSettings
 
+from guardmem_core.llm.providers import build_llm
 from guardmem_core.memory.vector.pool import create_pool, libpq_dsn
 from guardmem_core.settings import get_settings
 from worker.tasks.evaluate import evaluate
@@ -45,21 +48,40 @@ async def startup(ctx: dict[str, Any]) -> None:
     """Open what every job on this worker shares.
 
     Args:
-        ctx: arq's context, which this populates. `pool` and `settings` are read by
-            `tasks.evaluate`.
+        ctx: arq's context, which this populates: `settings`, `pool` and `llm` are
+            read by `tasks.evaluate`, and `resources` is what `shutdown` closes.
 
     Raises:
         pydantic.ValidationError: the environment does not satisfy `Settings`.
-        StoreUnavailable: Postgres is unreachable at the configured DSN. Raised at
-            startup so a misconfigured worker refuses to run rather than draining the
-            queue by failing every job - which looks like throughput on a dashboard.
+        StoreUnavailable: Postgres is unreachable at the configured DSN.
+        ValueError: no model provider is configured - `build_llm` refuses a blank
+            credential. Every one of these is raised at startup, so a misconfigured
+            worker refuses to run rather than draining the queue by failing every
+            job, which looks like throughput on a dashboard.
 
+    **The model client is opened here, once, and not per job.** `RULES.md` §2.2:
+    one client per provider, created in lifespan, never per request. Until
+    2026-09-27 each job built its own HTTP and SDK client and discarded the
+    connection pool with it, while the composition's docstring said the client was
+    shared.
+
+    Everything is registered on one `AsyncExitStack` the moment it exists, so a
+    model client that fails to open closes the pool behind it rather than leaking
+    it - the argument `mcp_server.lifespan` makes about a hand-written `try/finally`.
     `libpq_dsn` because `GM_DATABASE_URL` carries SQLAlchemy's `postgresql+asyncpg://`
     marker for Alembic and asyncpg rejects it; `pool.py` owns that conversion.
     """
     settings = get_settings()
-    ctx["settings"] = settings
-    ctx["pool"] = await create_pool(libpq_dsn(str(settings.database_url)))
+    stack = AsyncExitStack()
+    try:
+        pool = await create_pool(libpq_dsn(str(settings.database_url)))
+        stack.push_async_callback(pool.close)
+        http = await stack.enter_async_context(httpx.AsyncClient(base_url=settings.ollama_url))
+        llm = await stack.enter_async_context(build_llm(settings, http))
+    except BaseException:
+        await stack.aclose()
+        raise
+    ctx.update(settings=settings, pool=pool, llm=llm, resources=stack)
     _LOGGER.info(
         "guardmem-worker started",
         extra={"env": settings.env, "queue": QUEUE, "llm_provider": settings.llm_provider},
@@ -67,7 +89,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
-    """Close what `startup` opened.
+    """Close what `startup` opened, in reverse.
 
     Args:
         ctx: arq's context.
@@ -76,9 +98,9 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     reap on a timeout. One orphan per restart is invisible; a supervisor restarting a
     crash loop reaches `max_connections` and takes the rest of the deployment with it.
     """
-    pool = ctx.get("pool")
-    if pool is not None:
-        await pool.close()
+    resources = ctx.get("resources")
+    if resources is not None:
+        await resources.aclose()
     _LOGGER.info("guardmem-worker stopped")
 
 

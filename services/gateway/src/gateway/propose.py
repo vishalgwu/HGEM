@@ -170,8 +170,15 @@ class Decided(BaseModel):
         trace_id: As above.
         status: Always `decided`.
         scored: How many candidates were governed.
+        written: How many of those became an assertion row. Rows land invisible
+            and the outbox relay reveals them, so a read straight after a write
+            may not see one yet.
         rejected: How many the schema gate refused.
         quarantined: How many went to the quarantine namespace.
+        failed: How many candidates raised, while scored or while applied.
+            Reported rather than dropped: a fact the caller submitted that simply
+            vanished from the counts would be silent, in the direction that
+            matters.
 
     Counts rather than the candidates themselves. A write response that carried the
     stored facts would be a read the caller did not ask for and did not pay a scope
@@ -182,8 +189,10 @@ class Decided(BaseModel):
     trace_id: str
     status: Literal["decided"] = "decided"
     scored: int = 0
+    written: int = 0
     rejected: int = 0
     quarantined: int = 0
+    failed: int = 0
 
 
 def trace_for(namespace: str) -> TraceId:

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Final
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from gateway.composition import build_deps
@@ -42,8 +42,9 @@ from gateway.propose import (
     require_write,
     trace_for,
 )
+from guardmem_core.governance import govern
 from guardmem_core.llm.base import Tier
-from guardmem_core.pipeline.orchestrator import Proposal, run
+from guardmem_core.pipeline.orchestrator import Proposal
 from guardmem_core.types import Namespace
 
 if TYPE_CHECKING:
@@ -229,6 +230,7 @@ def _hit(item: ScoredAssertion) -> Hit:
 )
 async def propose(
     request: Request,
+    response: Response,
     state: GatewayDep,
     caller: PrincipalDep,
     body: ProposeRequest,
@@ -238,6 +240,7 @@ async def propose(
 
     Args:
         request: For the body hash the `BodyHash` layer computed.
+        response: For the status code, which depends on the mode - see below.
         state: Process resources - the queue, and the pipeline's shared parts.
         caller: The authenticated principal. **The only source of the tenant.**
         body: The validated proposal.
@@ -253,6 +256,12 @@ async def propose(
             rather than a crash.
         DeadlineExceeded: the request budget is spent. 504 via the domain hierarchy.
 
+    **200 for a decision, 202 for an acceptance, and a replay answers as the first
+    attempt did.** The route's default is 202, and until 2026-09-27 a strict call
+    returned its decision under it - telling the caller "accepted, decided later"
+    beside a body that said `decided`, against the 200 this route's own OpenAPI
+    entry publishes for `mode=strict`.
+
     **The idempotency check is before the work and the store is after it.** A replay
     returns the first response; a first attempt does the work and then records what it
     answered. Recording before would make a crash mid-pipeline look like a completed
@@ -263,7 +272,9 @@ async def propose(
     if idempotency_key is not None and body_hash is not None:
         stored = await state.idempotency.get(caller, idempotency_key, body_hash)
         if stored is not None:
-            return _replayed(stored)
+            replayed = _replayed(stored)
+            response.status_code = _status_of(replayed)
+            return replayed
     trace = trace_for(body.namespace)
     answer: Accepted | Decided
     if body.mode == "strict":
@@ -273,7 +284,13 @@ async def propose(
         answer = Accepted(trace_id=str(trace), body_hash=body_hash)
     if idempotency_key is not None and body_hash is not None:
         await state.idempotency.put(caller, idempotency_key, body_hash, answer.model_dump())
+    response.status_code = _status_of(answer)
     return answer
+
+
+def _status_of(answer: Accepted | Decided) -> int:
+    """200 for a decision, 202 for a proposal accepted for later."""
+    return status.HTTP_200_OK if isinstance(answer, Decided) else status.HTTP_202_ACCEPTED
 
 
 def _replayed(stored: dict[str, object]) -> Accepted | Decided:
@@ -298,7 +315,7 @@ def _replayed(stored: dict[str, object]) -> Accepted | Decided:
 async def _strict(
     state: GatewayState, caller: Principal, trace: TraceId, body: ProposeRequest
 ) -> Decided:
-    """Govern one proposal inline, at K=1 on the fast tier.
+    """Govern one proposal inline, at K=1 on the fast tier, and apply the result.
 
     Args:
         state: For the pipeline's shared parts.
@@ -307,7 +324,8 @@ async def _strict(
         body: The validated request.
 
     Returns:
-        `Decided`, with counts.
+        `Decided`, with counts - including how many rows were written, because
+        until 2026-09-27 this ran the pipeline and dropped what it decided.
 
     Raises:
         HTTPException: 503 when no model provider is configured.
@@ -333,10 +351,14 @@ async def _strict(
         k=1,
         tier=Tier.FAST,
     )
-    result, _failures = await run(proposal, deps)
+    governed = await govern(
+        proposal, deps, pool=state.pool, timeout_s=state.settings.store_timeout_s
+    )
     return Decided(
         trace_id=str(trace),
-        scored=len(result.governed),
-        rejected=len(result.rejected),
-        quarantined=len(result.quarantined),
+        scored=len(governed.result.governed),
+        written=governed.written,
+        rejected=len(governed.result.rejected),
+        quarantined=len(governed.result.quarantined),
+        failed=len(governed.failures),
     )

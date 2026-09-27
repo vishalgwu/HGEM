@@ -1,4 +1,4 @@
-"""The Postgres-backed pipeline, composed once.  S8.4
+"""The Postgres-backed pipeline: composed once, run, and applied.  S8.4
 
 `pipeline.Deps` has thirteen fields, and until this module four composition
 roots built all thirteen by hand - `mcp_server`'s tools, the gateway's strict
@@ -20,30 +20,68 @@ way: the tenant-bound store, the judge, the entailer, the resolver, and the four
 values read off settings. The copies' own docstrings named the cost of four
 homes - "forgetting one is a service that starts and then fails at the first
 request" - and this is the one home.
+
+**`govern` is run-then-apply, and two of the three services were missing the
+second half.** `pipeline.run()` decides and writes nothing, by design - ADR-0010
+puts the write in `memory.applier`, one transaction per candidate with its audit
+events. The MCP server called both. The gateway's `mode=strict` and the worker
+called `run()` alone and returned counts, so every decision either reached was
+computed and dropped: no assertion, and no `DECISION` event on the audit chain,
+although the worker's own docstring said "the facts are in the store behind RLS".
+One function that does both is what stops a caller stopping halfway.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from guardmem_core.llm.entailment import LLMEntailer
+from guardmem_core.memory.applier import apply_all
 from guardmem_core.memory.entities import NamespaceEntityResolver
 from guardmem_core.memory.vector.pgvector_store import PgVectorStore
 from guardmem_core.pipeline.deps import Deps
 from guardmem_core.pipeline.l2_validate import LLMJudge
 from guardmem_core.pipeline.l3_score import V1_BETAS, V1_WEIGHTS
+from guardmem_core.pipeline.orchestrator import run
 
 if TYPE_CHECKING:
     import asyncpg
 
     from guardmem_core.llm.base import LLMClient
+    from guardmem_core.memory.applier import Applied
     from guardmem_core.memory.graph.base import GraphStore
     from guardmem_core.memory.vector.base import Embedder, VectorStore
+    from guardmem_core.pipeline.orchestrator import PipelineResult, Proposal
+    from guardmem_core.pipeline.per_candidate import CandidateFailure
     from guardmem_core.schemas.ontology import Ontology
     from guardmem_core.settings import Settings
     from guardmem_core.types import TenantId
 
-__all__ = ["build_deps"]
+__all__ = ["Governed", "build_deps", "govern"]
+
+
+@dataclass(frozen=True, slots=True)
+class Governed:
+    """What governing one proposal decided, and what became of each decision.
+
+    Attributes:
+        result: The pipeline's decisions, candidate by candidate.
+        applied: What the applier did with each, by candidate id - a row
+            written, or the stable reason none was.
+        failures: Every candidate that raised, whether while it was scored or
+            while its decision was applied. One list, because to a caller both
+            mean the same thing: this fact was neither decided nor dropped.
+    """
+
+    result: PipelineResult
+    applied: dict[str, Applied]
+    failures: list[CandidateFailure]
+
+    @property
+    def written(self) -> int:
+        """How many candidates became an assertion row."""
+        return sum(1 for outcome in self.applied.values() if outcome.assertion_id is not None)
 
 
 def build_deps(
@@ -109,3 +147,50 @@ def build_deps(
         policy_version=policy_version,
         max_concurrent_scores=settings.max_concurrent_scores,
     )
+
+
+async def govern(
+    proposal: Proposal, deps: Deps, *, pool: asyncpg.Pool, timeout_s: float
+) -> Governed:
+    """Run the pipeline on one proposal and apply every decision it reached.
+
+    Args:
+        proposal: What to govern.
+        deps: From `build_deps`. Its `embedder` is also the applier's, so a
+            written row carries a vector from the model retrieval compares with.
+        pool: The process pool the applier opens its transactions on.
+        timeout_s: Per-statement ceiling, from `settings.store_timeout_s`.
+
+    Returns:
+        The decisions, what the applier did with each, and every per-candidate
+        failure from either half.
+
+    Raises:
+        InjectionDetected: extraction itself was compromised - `pipeline.run`'s
+            proposal-wide failure, raised before anything is applied.
+        ProviderUnavailable: the noise filter or the extractor could not run.
+            Retryable, and nothing was written, so a retry is clean.
+        ValueError: no surviving turn carries a capture time.
+
+    **The applier's store is bound to `proposal.tenant_id`**, the same field the
+    extractor stamped on every candidate, so the tenant of a written row and the
+    tenant of its audit chain come from one value rather than two that happen to
+    agree. Built here rather than taken from `deps.vector`, which is typed as the
+    `VectorStore` Protocol; the applier needs the concrete class, which is where
+    ADR-0010 put `write_in` and `supersede_in` on purpose.
+
+    A written row is **invisible** until the outbox relay lands its graph side -
+    ADR-0010 leaves `visible` to the relay - so a search straight after this
+    finds nothing, by design.
+    """
+    result, failures = await run(proposal, deps)
+    store = PgVectorStore(pool, deps.embedder, tenant_id=proposal.tenant_id, timeout_s=timeout_s)
+    applied, apply_failures = await apply_all(
+        result.governed,
+        store=store,
+        pool=pool,
+        tenant_id=proposal.tenant_id,
+        trace_id=result.trace_id,
+        timeout_s=timeout_s,
+    )
+    return Governed(result=result, applied=applied, failures=[*failures, *apply_failures])

@@ -12,8 +12,9 @@ the worst failure this system has - silent, total, and indistinguishable from wo
 until somebody asks where a fact went.
 
 No Redis and no Postgres here. The queue is a fake that records what it was asked to
-enqueue, which is the whole contract the async path has: `mode=strict` runs the
-pipeline and belongs in the integration suite.
+enqueue, which is the whole contract the async path has. `mode=strict` is tested here
+only over a model that extracts nothing; its write is
+`tests/integration/test_rest_write_paths.py`'s.
 """
 
 from __future__ import annotations
@@ -23,8 +24,12 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from fixtures.gateway import READ_KEY, TENANT, WRITE_KEY, app_with, fake_state
+from fixtures.extraction import CONTENT, response
+from fixtures.fakes import FakeGraphStore, FakeLLM
+from fixtures.gateway import READ_KEY, TENANT, WRITE_KEY, FakeState, app_with, fake_state
 from gateway.propose import JOB, QUEUE
+from guardmem_core.memory.vector.hash_embedder import HashEmbedder
+from guardmem_core.schemas import load_ontology
 from worker.main import QUEUE as WORKER_QUEUE
 
 TURNS = [
@@ -216,6 +221,53 @@ class TestStrictRefusesWithoutAModel:
 
         assert response.status_code == 503
         assert not state.queue.jobs, "strict must not fall back to the queue"
+
+
+def _strict_state() -> FakeState:
+    """A state whose model extracts nothing, so `mode=strict` decides without a database.
+
+    `CONTENT` is settled by the noise rules alone, so the one scripted reply is the
+    canonical extraction draw - and an empty one leaves nothing to resolve, retrieve
+    or apply. The write itself is `tests/integration/test_rest_write_paths.py`'s.
+    """
+    return fake_state(
+        llm=FakeLLM(responses=[response('{"facts": []}')]),
+        graph=FakeGraphStore(),
+        ontology=load_ontology("clinical"),
+        embedder=HashEmbedder(),
+    )
+
+
+STRICT_TURNS = [{**TURNS[0], "text": CONTENT}]
+
+
+class TestStrictAnswersWithADecision:
+    """`mode=strict` governs inline, so its answer is a decision: 200, not 202."""
+
+    def test_a_decided_answer_is_200(self) -> None:
+        """The route's default is 202, and a strict decision was returned under it
+        until 2026-09-27 - "accepted, decided later" beside a body saying `decided`."""
+        with TestClient(app_with(_strict_state())) as client:
+            response = _post(
+                client, {"namespace": "patient:1", "turns": STRICT_TURNS, "mode": "strict"}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "decided"
+        assert {"written", "failed"} <= set(response.json())
+
+    def test_a_replayed_decision_is_200_as_well(self) -> None:
+        """A replay answers exactly as the first attempt did, status included."""
+        state = _strict_state()
+        body = {"namespace": "patient:1", "turns": STRICT_TURNS, "mode": "strict"}
+
+        with TestClient(app_with(state)) as client:
+            first = _post(client, body, **{"Idempotency-Key": "k1"})
+            second = _post(client, body, **{"Idempotency-Key": "k1"})
+
+        assert first.status_code == second.status_code == 200
+        assert first.json() == second.json()
+        assert len(state.llm.calls) == 1, "the replay must not govern a second time"
 
 
 class TestIdempotency:
