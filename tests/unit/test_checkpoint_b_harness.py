@@ -24,8 +24,10 @@ def corpus(path: pathlib.Path, rows: list[dict[str, object]]) -> pathlib.Path:
     return path
 
 
-def row(name: str, keep: bool | None, confidence: float) -> dict[str, object]:
-    return {
+def row(
+    name: str, keep: bool | None, confidence: float, keep_by: str | None = None
+) -> dict[str, object]:
+    labelled: dict[str, object] = {
         "candidate_id": name,
         "keep": keep,
         "subject": "patient:8812",
@@ -34,6 +36,17 @@ def row(name: str, keep: bool | None, confidence: float) -> dict[str, object]:
         "verbatim": "v",
         "scores": {"confidence": confidence},
     }
+    if keep_by is not None:
+        labelled["keep_by"] = keep_by
+    return labelled
+
+
+SEPARATING: tuple[tuple[str, bool, float], ...] = (
+    ("a", True, 0.9),
+    ("b", True, 0.8),
+    ("c", False, 0.2),
+    ("d", False, 0.1),
+)
 
 
 class TestTemplate:
@@ -120,6 +133,61 @@ class TestScore:
         )
 
         assert score(path) == 0
+
+
+class TestTheScoreSaysWhoLabelled:
+    """The sign-off asks for "(n=200, human-labelled)", and `score` used to print
+    those words for any corpus - including a provisional one labelled by a model."""
+
+    def test_it_never_calls_the_labels_human_on_its_own(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = corpus(tmp_path / "c.jsonl", [row(*spec) for spec in SEPARATING])
+
+        score(path)
+
+        printed = capsys.readouterr().out
+        assert "human-labelled" not in printed
+        assert "4 with no labeller recorded" in printed
+
+    def test_a_verdict_over_model_labels_is_provisional(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Marked, not refused: the exit code is the same, so a provisional
+        number still composes - it just cannot be mistaken for the gate."""
+        rows = [row(*spec, keep_by="ai-surrogate (Muse)") for spec in SEPARATING]
+        path = corpus(tmp_path / "c.jsonl", rows)
+
+        assert score(path) == 0
+        printed = capsys.readouterr().out
+        assert "PROVISIONAL: 4 of 4 labels were set by a model" in printed
+        assert "4 by ai-surrogate (Muse)" in printed
+
+    def test_each_labeller_is_credited_and_only_the_model_s_rows_counted(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A human pass that corrects a few model labels is still partly a
+        model's labels, and the count says how much."""
+        rows = [row(*spec, keep_by="a.labeller") for spec in SEPARATING[:3]]
+        path = corpus(tmp_path / "c.jsonl", [*rows, row(*SEPARATING[3], keep_by="ai-x")])
+
+        score(path)
+
+        printed = capsys.readouterr().out
+        assert "3 by a.labeller, 1 by ai-x" in printed
+        assert "PROVISIONAL: 1 of 4 labels were set by a model" in printed
+
+    def test_a_human_labelled_corpus_is_not_marked(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rows = [row(*spec, keep_by="a.labeller") for spec in SEPARATING]
+        path = corpus(tmp_path / "c.jsonl", rows)
+
+        score(path)
+
+        printed = capsys.readouterr().out
+        assert "PROVISIONAL" not in printed
+        assert "4 by a.labeller" in printed
 
 
 class TestAgreement:

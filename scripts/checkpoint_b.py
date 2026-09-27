@@ -49,6 +49,7 @@ import json
 import pathlib
 import subprocess
 import sys
+from collections import Counter
 from typing import TYPE_CHECKING, Final
 
 from guardmem_core.eval import Labelled, agreement_rate, discriminate
@@ -65,6 +66,11 @@ REPO_ROOT: Final = pathlib.Path(__file__).resolve().parent.parent
 # new set behind on every attempt - on a gate that is expected to be re-run
 # against several providers, that is a slow leak into the demo database.
 _SCRATCH_TENANT: Final = "00000000-0000-5000-a000-0000c4ec4b00"
+
+# How a corpus records that a model set `keep`: `keep_by` starts with this. The
+# checkpoint's step 2 is "a human labels each one [...] No model grading", so a
+# verdict over any such label is provisional however good the number looks.
+_MODEL_LABELLER_PREFIX: Final = "ai-"
 
 # CHECKPOINT B's manual verification table, each row bound to the test that
 # actually establishes it. Running them beats reading them: the table says
@@ -188,6 +194,14 @@ def score(path: pathlib.Path) -> int:
         0 on PASS, 1 on MARGINAL, 2 on FAIL - so this composes into a check and
         MARGINAL is distinguishable from both, which is the point of having
         three bands rather than two.
+
+    **It says who labelled, and never assumes a human.** The AUROC line ended
+    "human-labelled" for every corpus until 2026-09-27, when a provisional one
+    labelled by a model arrived (`corpus.ai_labelled.jsonl`) and would have been
+    announced in exactly the words the sign-off asks for. The labellers now come
+    from each row's `keep_by`, and a verdict over any `ai-` label is printed
+    PROVISIONAL. The exit code is unchanged, so the provisional number still
+    composes into whatever is reading it.
     """
     rows = _read(path)
     unlabelled = [row["candidate_id"] for row in rows if row.get("keep") is None]
@@ -206,7 +220,13 @@ def score(path: pathlib.Path) -> int:
     )
 
     print("CHECKPOINT B: " + report.verdict.value.upper())
-    print(f"AUROC:              {report.auroc:.3f}  (n={report.labelled}, human-labelled)")
+    by_model = sum(str(row.get("keep_by", "")).startswith(_MODEL_LABELLER_PREFIX) for row in rows)
+    if by_model:
+        print(
+            f"PROVISIONAL: {by_model} of {len(rows)} labels were set by a model. "
+            "The gate needs human labels."
+        )
+    print(f"AUROC:              {report.auroc:.3f}  (n={report.labelled}; {_labelled_by(rows)})")
     for name, value in sorted(report.by_score.items(), key=lambda pair: -pair[1]):
         print(f"  {name:20} {value:.3f}")
     print(f"kept / rejected:    {report.kept} / {report.labelled - report.kept}")
@@ -275,6 +295,19 @@ def _read(path: pathlib.Path) -> list[dict[str, object]]:
         except json.JSONDecodeError as exc:
             raise ValueError(f"{path}:{number}: {exc}") from exc
     return rows
+
+
+def _labelled_by(rows: list[dict[str, object]]) -> str:
+    """Who set the labels, as the corpus records them - most frequent first.
+
+    `keep_by` is optional: `generate` and `template` do not write it, so a
+    corpus labelled without it says so rather than being credited to anyone.
+    """
+    counts = Counter(str(row.get("keep_by") or "") for row in rows)
+    return ", ".join(
+        f"{count} by {name}" if name else f"{count} with no labeller recorded"
+        for name, count in counts.most_common()
+    )
 
 
 def _labels(path: pathlib.Path) -> dict[str, bool]:

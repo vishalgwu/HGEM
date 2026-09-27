@@ -8,6 +8,7 @@
 |---|---|---|
 | `proposals.jsonl` | 50 conversations, one subject each, 559 turns | **Claude, synthetically** |
 | `corpus.jsonl` | The pipeline's candidates and their scores, `keep: null` on every row | `checkpoint_b generate`, from a real model |
+| `corpus.ai_labelled.jsonl` | The same rows with `keep` set - **provisional labels written by a model, not a human** | An AI labeller, 2026-09-27; see [Labelling](#labelling) |
 
 ## The caveat that travels with the number
 
@@ -146,9 +147,10 @@ yields, and read the reason rather than the word. 238 clears 200 without
 
 ## Labelling
 
-`keep` is `null` on every row and `discriminate` refuses a corpus with any row
-unlabelled, so this is not scoreable until a human has read it. **No model may
-set `keep`** — that is the rule that makes the number mean anything.
+`keep` is `null` on every row of `corpus.jsonl` and `discriminate` refuses a
+corpus with any row unlabelled, so the gate is not scoreable until a human has
+read it. **No model may set `keep` in `corpus.jsonl`** — that is the rule that
+makes the gate's number mean anything.
 
 ```bash
 # score, once every row carries a keep
@@ -156,6 +158,48 @@ uv run python -m scripts.checkpoint_b score evals/datasets/checkpoint_b/corpus.j
 ```
 
 The gate is AUROC of `C` ≥ 0.80. 0.75–0.80 proceeds as MARGINAL and is recorded.
+
+### Provisional labels: `corpus.ai_labelled.jsonl`
+
+Added 2026-09-27 to keep work moving until the human pass, which is still
+planned. It is `corpus.jsonl` row for row - same ids, same order, every pipeline
+field unchanged - with `keep` set by a model, and three fields on every row
+saying so: `keep_by` (`ai-surrogate (Muse)`), `keep_at` and `keep_note`. 191
+kept, 47 not.
+
+`score` reads `keep_by` and prints any verdict over an `ai-` label as
+PROVISIONAL, so a number from this file cannot be mistaken for the gate's:
+
+```bash
+uv run python -m scripts.checkpoint_b score evals/datasets/checkpoint_b/corpus.ai_labelled.jsonl
+```
+
+**Label `corpus.jsonl` without opening this file.** A labeller who has seen a
+model's answer is partly measuring it. After the human pass, `agreement` between
+the two files says how far the provisional number could be trusted.
+
+**Four questions the human pass has to settle first.** Claude reviewed all 238
+provisional labels against the transcripts and the ontology on 2026-09-27. Most
+hold up - hedges, third-party facts, stopped medications, retractions and
+hallucinated candidates are dropped consistently. These are policy rather than
+judgement, the provisional labels answer each one way, and each moves the AUROC:
+
+1. **The fact, or the citation?** 14 kept candidates cite only an assistant
+   turn - usually the question the patient then answered - and 9 have grounding
+   0.0. The provisional labels judge whether the fact is true; `RULES.md`'s first
+   non-negotiable is that a stored fact cites a span that supports it. This one
+   decides how much `grounding` is able to separate.
+2. **Scoped consent.** `consent_flag` is one boolean (cardinality `one`, impact
+   `critical`), and every consent in these transcripts is scoped - "cardiology
+   only", "not with occupational health". 10 are kept, and `tr_ckb_0055` keeps
+   both `true` and `false`.
+3. **Absence as a value.** 8 kept candidates store an absence: six
+   `allergy = None`, one `advance_directive = None` and one
+   `dietary_restriction = "Nothing special"`. `allergy` is RxNorm-coded, and
+   "None" is not a substance.
+4. **Two smaller inconsistencies.** "NHS only" is kept as an insurance plan in
+   `tr_ckb_0013` and dropped in `tr_ckb_0057`; approximate weights are dropped in
+   `tr_ckb_0008` and `tr_ckb_0032` and kept in `tr_ckb_0058`.
 
 ## Regenerating
 
