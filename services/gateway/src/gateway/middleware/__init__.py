@@ -24,6 +24,11 @@ body_hash`." It does, and each boundary is one of these reasons:
 is the execution order, and the list is written once because a chain assembled by
 six separate calls is a chain whose order is whatever the calls happen to be in.
 
+**Pure ASGI, not `BaseHTTPMiddleware`, since S8.4.** That class cost a measured factor
+of nine hundred under concurrency and made S8.4's p95 target unreachable; `_asgi.py`
+carries the numbers. `apply` is unchanged in shape - `add_middleware` accepts any ASGI
+class - so the order below still reads as the order it runs in.
+
 **A package rather than one module since 2026-09-26.** It passed `RULES.md` 2.4's
 400-line cap at six layers, and the seam is the one the order already implies:
 framing that cannot refuse a request, access control that can, and throttling.

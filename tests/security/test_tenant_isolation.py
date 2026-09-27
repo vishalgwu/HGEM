@@ -64,7 +64,9 @@ from pydantic import SecretStr
 from fixtures.assertions import NS
 from fixtures.mcp import settings as build_settings
 from fixtures.pgvector import TIMEOUT_S, assertion, write_and_reveal
+from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
+from guardmem_core.schemas.ontology import load_ontology
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -179,6 +181,14 @@ async def gateway(pool: asyncpg.Pool, tenancy: dict[str, str]) -> AsyncIterator[
         http={},
         tracer=None,  # type: ignore[arg-type]
         embedder=HashEmbedder(),
+        # S8.4 put a queue and the inline pipeline's shared parts here. None or inert
+        # for all four: this file's subject is a Postgres RLS policy reached through
+        # `GET /memory/search`, which touches none of them, and a real queue would make
+        # a tenant-isolation result depend on Redis being up.
+        queue=None,  # type: ignore[arg-type]
+        llm=None,
+        graph=NetworkXGraphStore(),
+        ontology=load_ontology("clinical"),
         # S8.3 put a limiter and an idempotency store on the state. Both are
         # Redis-backed and neither is what this file tests, so the limiter is
         # one that always allows and the store is never reached: a bucket here

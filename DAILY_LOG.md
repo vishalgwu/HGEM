@@ -5491,6 +5491,81 @@ Confirm both CI jobs green on the pushed commit before starting S8.4.
 
 ---
 
+## 2026-09-27 - S8.4, and the 900x the framework was costing
+
+**S8.4's DONE WHEN is not met, and the reason is measured rather than guessed.**
+"locust run at 50 rps shows p95 < 80 ms on the async propose endpoint" reads
+**p50 120 ms, p95 260 ms** at 50.43 rps. It was p50 330 / p95 440 before today's
+fix, and the remaining gap is Redis round-trip cost on this Windows host, not code.
+
+**Shipped**
+
+- **ADR-0012's request budget**, which S8.2 deferred. One monotonic instant; every
+  call takes `min(own ceiling, remaining)`. `DeadlineExceeded` went into
+  `guardmem_core.errors` because RULES 2.3 is one table and handlers never invent
+  status codes - so it arrived with the rule updated and both drift guards updated.
+- **`services/worker`**, the third deployable. arq, one job, and its own composition
+  root - the fourth in the repository, which the independence contract makes
+  deliberate.
+- **`POST /memory/propose`**, both modes. Async enqueues and returns 202; strict runs
+  the pipeline at K=1 FAST, or answers 503 when no provider is configured.
+- **S8.3's idempotency finally has a caller**, so "two identical responses, one
+  assertion" is testable and tested.
+
+**What broke / what I learned**
+
+- **`BaseHTTPMiddleware` was costing a factor of nine hundred.** A single request
+  measured 16 ms of server time and `/healthz` answered in 3 ms, so service time was
+  never the problem - the latency appeared only under concurrency. Isolated over one
+  trivial POST route:
+
+  | stack | p50 | throughput |
+  |---|---|---|
+  | no middleware | 0.2 ms | 1859 rps |
+  | 6 x BaseHTTPMiddleware | 196.5 ms | 217 rps |
+  | 6 x pure ASGI | 0.22 ms | 2678 rps |
+
+  Each instance gives a request an anyio task group and a pair of memory object
+  streams so `dispatch` can look like request-to-response. Six nested is a different
+  thing. All six layers are now pure ASGI; end to end that took p50 330 -> 120 ms.
+- **Redis was ruled out first, then turned out to be the remaining ceiling - but not
+  the way it looked.** 500 SETs one per round trip: 2761 ops/sec. The same 500 in one
+  pipeline: **154,914 ops/sec**. Redis is not slow; a *round trip* costs 0.36 ms on
+  Windows to a container over loopback, against microseconds on a Linux host. The
+  propose path makes roughly seven, so it is round-trip bound. In-process throughput
+  is 240 rps at concurrency 1 and 241 at concurrency 50 - no gain from concurrency at
+  all, which is the signature.
+- **So the p95 target is not verifiable on this machine.** CI and production are
+  Linux. Recording the number here rather than tuning against a platform artifact:
+  the honest next step is to measure on the runner, not to pipeline three Redis calls
+  to beat a laptop.
+- **`Turn` cannot be an HTTP request model.** `GMModel` is strict, so `"user"` is not
+  a `TurnRole` and an ISO string is not a `datetime` - FastAPI validates from parsed
+  dicts, so every well-formed request 422'd naming the field types. `checkpoint_b_generate`
+  hit this and wrote it down; `TurnIn` is the lenient edge that round-trips through
+  JSON, which is the one path a strict model accepts.
+- **Four test modules had each grown their own fake `GatewayState`.** Every field
+  added to it broke four files with `Missing positional arguments`, twice this week.
+  `tests/fixtures/gateway.py` is now the one harness.
+- **Five modules hit RULES 2.4's caps and were split along real seams**, plus the
+  first function-body cap: `lifespan` was doing two things and only the opening grew.
+
+**Still open**
+
+- The labelling session. 238 rows, `keep: null` on every one.
+- S8.4's p95, on Linux.
+- `settings.py` is at exactly 400 of 400 lines. The next field breaks it and there is
+  no cheap seam - it is one cohesive class whose length is documentation. Nested
+  config models would rename every env var. This needs a decision, not a fourth
+  shave.
+
+**Tomorrow's first step**
+
+Read the CI run for the p95 - the runner is Linux and is the only honest measurement
+available.
+
+---
+
 ---
 
 ---

@@ -21,8 +21,8 @@ export PYTHONIOENCODING := utf-8
 
 UV        := uv run
 CORE_SRC  := packages/guardmem-core/src
-# Every deployable service's source root. Two entries: S6.1's MCP server and
-# S8.1's REST gateway. `worker` is added here at S8.4.
+# Every deployable service's source root. Three entries: S6.1's MCP server, S8.1's
+# REST gateway and S8.4's async worker.
 #
 # Spelled out rather than globbed as `services/*/src`, for the PORTABILITY rule
 # at the top of this file: Make does not expand wildcards in a variable itself,
@@ -32,7 +32,7 @@ CORE_SRC  := packages/guardmem-core/src
 # would expand in Make and be portable, but it silently yields nothing when the
 # directory is missing, which is the same gate-quietly-stops-running failure in
 # a different costume.
-SVC_SRC   := services/mcp_server/src services/gateway/src
+SVC_SRC   := services/mcp_server/src services/gateway/src services/worker/src
 # Cleared by `make clean`. `.import_linter_cache` is on this list for a reason:
 # it is keyed on file mtime, so restoring a file with an older mtime (a `git
 # checkout`, a restored backup) leaves it serving a stale verdict - a false

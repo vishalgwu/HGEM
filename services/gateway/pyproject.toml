@@ -26,6 +26,9 @@ dependencies = [
   "fastapi==0.141.1",
   "uvicorn[standard]==0.52.4",
   "redis==5.3.1",
+  # S8.4. The gateway enqueues; the worker consumes. Both need arq, and the
+  # queue name is the one string they must agree on - see `worker.main.QUEUE`.
+  "arq==0.28.0",
   "opentelemetry-sdk==1.44.0",
 ]
 

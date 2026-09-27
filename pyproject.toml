@@ -23,6 +23,9 @@ dependencies = [
   # on import in CI while passing on any machine that had ever run
   # `uv pip install -e services/gateway`.
   "guardmem-gateway",
+  # S8.4, same reason again: a workspace member nothing depends on is locked and
+  # not installed, so a test importing it fails in CI and passes locally.
+  "guardmem-worker",
   # Migration toolchain, owned by the workspace rather than by the library.
   # `infra/migrations/` is not a package and nothing under `guardmem_core`
   # imports these yet: S3.2's pgvector store is the step that adds sqlalchemy,
@@ -71,6 +74,7 @@ constraint-dependencies = [
 guardmem-core = { workspace = true }
 guardmem-mcp = { workspace = true }
 guardmem-gateway = { workspace = true }
+guardmem-worker = { workspace = true }
 
 # Dev toolchain (BUILD_NOTEBOOK.md S1.1, extended at S1.2).
 #
@@ -324,7 +328,7 @@ branch = true
 # coverage reported 91% while measuring none of it. A package absent here is not
 # reported as uncovered, it is not reported at all, which is the failure mode this
 # line has to be read for whenever a service is added.
-source_pkgs = ["guardmem_core", "mcp_server", "gateway"]
+source_pkgs = ["guardmem_core", "mcp_server", "gateway", "worker"]
 
 [tool.coverage.report]
 fail_under = 85
@@ -346,7 +350,7 @@ exclude_also = ["^\\s*\\.\\.\\.$"]
 # are meaningful today are declared - the layered contract (apps -> services ->
 # packages -> stores) arrives when services/ and apps/ do.
 [tool.importlinter]
-root_packages = ["guardmem_core", "mcp_server", "gateway"]
+root_packages = ["guardmem_core", "mcp_server", "gateway", "worker"]
 # Required whenever a contract forbids modules outside the root packages.
 include_external_packages = true
 
@@ -417,7 +421,7 @@ forbidden_modules = [
 [[tool.importlinter.contracts]]
 name = "the services do not import each other"
 type = "independence"
-modules = ["mcp_server", "gateway"]
+modules = ["mcp_server", "gateway", "worker"]
 
 [[tool.importlinter.contracts]]
 name = "guardmem-core never imports a service"
@@ -427,7 +431,7 @@ source_modules = ["guardmem_core"]
 # phrased about `mcp_server` alone would have passed while the newer service
 # acquired exactly the dependency this forbids - the quiet failure the store
 # contract above records the same way.
-forbidden_modules = ["mcp_server", "gateway"]
+forbidden_modules = ["mcp_server", "gateway", "worker"]
 
 # ---------------------------------------------------------------------------
 # A note on pyproject vs requirements/

@@ -385,7 +385,7 @@ harfile==0.5.0
     # via schemathesis
 hf-xet==1.6.0
     # via huggingface-hub
-hiredis==3.4.1
+hiredis==3.4.2
     # via redis
 hpack==4.2.0
     # via h2

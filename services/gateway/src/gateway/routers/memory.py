@@ -26,15 +26,31 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Final
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from gateway.dependencies import EmbedderDep, PrincipalDep, StoreDep
+from gateway.composition import build_deps
+from gateway.dependencies import EmbedderDep, GatewayDep, PrincipalDep, StoreDep
+from gateway.propose import (
+    Accepted,
+    Decided,
+    IdempotencyKey,
+    ProposeRequest,
+    enqueue,
+    namespace_of,
+    request_body_hash,
+    require_write,
+    trace_for,
+)
+from guardmem_core.llm.base import Tier
+from guardmem_core.pipeline.orchestrator import Proposal, run
 from guardmem_core.types import Namespace
 
 if TYPE_CHECKING:
     from gateway.auth import Principal
+    from gateway.lifespan import GatewayState
     from guardmem_core.memory.vector.base import ScoredAssertion
+    from guardmem_core.types import TraceId
 
 __all__ = ["router"]
 
@@ -195,4 +211,132 @@ def _hit(item: ScoredAssertion) -> Hit:
         object=item.assertion.object,
         confidence=item.assertion.confidence,
         cosine=item.cosine,
+    )
+
+
+@router.post(
+    "/propose",
+    summary="Submit a proposal for governing",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": Decided, "description": "mode=strict: governed inline."},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid credential."},
+        status.HTTP_403_FORBIDDEN: {"description": "The credential lacks memory:write."},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "description": "mode=strict with no model provider configured."
+        },
+    },
+)
+async def propose(
+    request: Request,
+    state: GatewayDep,
+    caller: PrincipalDep,
+    body: ProposeRequest,
+    idempotency_key: IdempotencyKey = None,
+) -> Accepted | Decided:
+    """Accept a proposal, or govern it inline.
+
+    Args:
+        request: For the body hash the `BodyHash` layer computed.
+        state: Process resources - the queue, and the pipeline's shared parts.
+        caller: The authenticated principal. **The only source of the tenant.**
+        body: The validated proposal.
+        idempotency_key: Optional. A repeat with the same key and the same body
+            returns the stored response without re-running anything.
+
+    Returns:
+        `Accepted` with 202 for `mode=async`, `Decided` with 200 for `mode=strict`.
+
+    Raises:
+        HTTPException: 403 without `memory:write`; 503 for `mode=strict` with no model
+            provider configured, which is the refusal `GatewayState.llm` documents
+            rather than a crash.
+        DeadlineExceeded: the request budget is spent. 504 via the domain hierarchy.
+
+    **The idempotency check is before the work and the store is after it.** A replay
+    returns the first response; a first attempt does the work and then records what it
+    answered. Recording before would make a crash mid-pipeline look like a completed
+    write to the next replay, which is the one outcome worse than doing it twice.
+    """
+    require_write(caller)
+    body_hash = request_body_hash(request)
+    if idempotency_key is not None and body_hash is not None:
+        stored = await state.idempotency.get(caller, idempotency_key, body_hash)
+        if stored is not None:
+            return _replayed(stored)
+    trace = trace_for(body.namespace)
+    answer: Accepted | Decided
+    if body.mode == "strict":
+        answer = await _strict(state, caller, trace, body)
+    else:
+        await enqueue(state, caller.tenant_id, trace, body, body_hash)
+        answer = Accepted(trace_id=str(trace), body_hash=body_hash)
+    if idempotency_key is not None and body_hash is not None:
+        await state.idempotency.put(caller, idempotency_key, body_hash, answer.model_dump())
+    return answer
+
+
+def _replayed(stored: dict[str, object]) -> Accepted | Decided:
+    """Rebuild the response a previous attempt returned.
+
+    Args:
+        stored: What `IdempotencyStore` held.
+
+    Returns:
+        The same model the first attempt did.
+
+    Discriminated on `status` rather than on which keys are present. The two models
+    differ by more than one field, and "has a `scored` key" would silently pick the
+    wrong one the first time either gains a field - whereas `status` is a literal on
+    both and exists precisely to be read.
+    """
+    if stored.get("status") == "decided":
+        return Decided.model_validate(stored)
+    return Accepted.model_validate(stored)
+
+
+async def _strict(
+    state: GatewayState, caller: Principal, trace: TraceId, body: ProposeRequest
+) -> Decided:
+    """Govern one proposal inline, at K=1 on the fast tier.
+
+    Args:
+        state: For the pipeline's shared parts.
+        caller: For the tenant the store and the RLS policy are bound to.
+        trace: This proposal's id.
+        body: The validated request.
+
+    Returns:
+        `Decided`, with counts.
+
+    Raises:
+        HTTPException: 503 when no model provider is configured.
+
+    **K=1 and `Tier.FAST` are S8.4's own instruction, and they are what makes the
+    450ms budget reachable.** `MEMORY_ENGINE.md` §1.2's entropy needs a spread of
+    samples, so K=1 means the `uncertainty` term contributes nothing here - a strict
+    decision is deliberately a weaker measurement than a queued one. That is the trade
+    the mode exists to offer, and it is why the queue path sends `default_k` instead.
+    """
+    if state.llm is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="mode=strict needs a model provider; none is configured",
+        )
+    deps = build_deps(state, caller.tenant_id)
+    proposal = Proposal(
+        trace_id=trace,
+        tenant_id=caller.tenant_id,
+        namespace=namespace_of(body),
+        turns=[turn.to_turn() for turn in body.turns],
+        source_tier=body.source_tier,
+        k=1,
+        tier=Tier.FAST,
+    )
+    result, _failures = await run(proposal, deps)
+    return Decided(
+        trace_id=str(trace),
+        scored=len(result.governed),
+        rejected=len(result.rejected),
+        quarantined=len(result.quarantined),
     )

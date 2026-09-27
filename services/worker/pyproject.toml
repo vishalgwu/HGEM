@@ -1,0 +1,42 @@
+[project]
+name = "guardmem-worker"
+version = "0.1.0"
+description = "GuardMem AI async worker - off-queue evaluation, compaction and outbox relay."
+requires-python = ">=3.12"
+# `PROJECT_TREE.md`'s ownership table: a service may import `guardmem-core` and its
+# own framework, and nothing else. `arq` is this one's framework - it is the Redis
+# queue runtime, the equivalent of `fastapi` for the gateway and `mcp` for the MCP
+# server.
+#
+# `redis` is declared although `arq` depends on it, for the reason the gateway
+# declares it too: this service uses the client directly for what the queue does not
+# cover, and a transitive dependency is one a lockfile may move without anyone here
+# choosing to.
+#
+# Pinned exactly, matching `requirements/services.txt` and `requirements/stores.txt`.
+# A floor lets `uv lock` resolve a version the requirements files do not pin, and
+# then the installed version depends on which command ran last.
+dependencies = [
+  "guardmem-core",
+  "arq==0.28.0",
+  "redis==5.3.1",
+]
+
+[project.scripts]
+# `arq worker.main.WorkerSettings` is the documented way to start an arq worker, and
+# a console script is what a Dockerfile's CMD and a developer's terminal both want to
+# name instead of a dotted path.
+guardmem-worker = "worker.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+guardmem-core = { workspace = true }
+
+# Same distribution/package mismatch as the other two services, same reason: the
+# directory says what the thing is in this repository and the distribution name says
+# what it is on an index, where `worker` would be an unhelpfully generic claim.
+[tool.hatch.build.targets.wheel]
+packages = ["src/worker"]
