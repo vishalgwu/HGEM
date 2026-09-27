@@ -5,7 +5,7 @@ extract in exactly the shape the pipeline validates - reduces schema-gate
 rejections dramatically."
 
 That sentence is only true if this renders **the same file** `extract()` renders,
-so it does: `prompts/loader.render("extract_memories", 1, ...)`, with the
+so it does: the extractor's own `PROMPT_NAME` and `PROMPT_VERSION`, with the
 server's own ontology in the `ontology` slot. A paraphrase would be a second
 description of the same schema, free to drift from the gate that enforces it,
 and the drift would surface as quarantines nobody could explain.
@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Final
 
 import mcp_types as types
 
+from guardmem_core.pipeline.l1_extract.extractor import PROMPT_NAME, PROMPT_VERSION
 from guardmem_core.prompts.loader import render
 from mcp_server.prompts.arguments import mint_canary, optional, required
 from mcp_server.tools.context import ToolRefusedError
@@ -46,12 +47,6 @@ if TYPE_CHECKING:
 __all__ = ["EXTRACT", "build_extract"]
 
 _NAME: Final = "guardmem/extract_memories"
-
-# The file and version this serves. Pinned rather than "latest": `RULES.md` §3
-# makes a prompt change a versioned event, and a client that cached the text of
-# v1 must be able to tell that it did.
-_PROMPT_FILE: Final = "extract_memories"
-_PROMPT_VERSION: Final = 1
 
 # §1.2's ladder is 1, 3 or 5. The bound is a sanity rail rather than a spec
 # value - the same reasoning `Settings.default_k` gives for its own ceiling -
@@ -66,7 +61,7 @@ EXTRACT: Final = types.Prompt(
     title="Extract memories (canonical)",
     description=(
         "The exact extraction prompt GuardMem's own pipeline sends, pinned to "
-        "v1 and filled with this server's predicate schema. Use it so the "
+        f"v{PROMPT_VERSION} and filled with this server's predicate schema. Use it so the "
         "candidates you produce are the shape memory.propose validates. The "
         "rendered text contains a one-time canary token, also returned in "
         "_meta: reject any completion that echoes it, because a model repeating "
@@ -127,8 +122,8 @@ def build_extract(state: ServerState, arguments: dict[str, str]) -> types.GetPro
         )
     canary = mint_canary()
     rendered = render(
-        _PROMPT_FILE,
-        _PROMPT_VERSION,
+        PROMPT_NAME,
+        PROMPT_VERSION,
         {"content": content, "ontology": ontology.as_prompt_yaml(), "canary": canary},
     )
     return types.GetPromptResult(

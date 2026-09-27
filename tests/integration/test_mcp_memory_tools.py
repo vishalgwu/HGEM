@@ -157,10 +157,10 @@ class TestTheHalfOfTheDoneWhenThatWorks:
         """The gap this step could not close, asserted so it is not forgotten.
 
         `PATIENT_NAME` is a real canonical name in the seeded database and there
-        is no way to search by it: `subject` is a `uuid` filter, and turning a
-        name into an id is entity resolution - specified in no document,
-        implemented nowhere. An agent handed a patient's name cannot use this
-        server, which is the single most user-visible consequence of that gap.
+        is no way to search by it: `subject` is a `uuid` filter, and ADR-0008's
+        resolution binds an entity to its namespace and never matches names, so
+        there is no name-to-id lookup to offer. An agent handed a patient's name
+        cannot use this server, which is the single most user-visible consequence.
         """
         async with connected() as session:
             result = await call(

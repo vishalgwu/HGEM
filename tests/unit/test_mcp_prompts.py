@@ -22,6 +22,8 @@ from __future__ import annotations
 import pytest
 
 from fixtures.mcp import state
+from guardmem_core.pipeline.l1_extract.extractor import PROMPT_NAME, PROMPT_VERSION
+from guardmem_core.pipeline.l2_validate import nli
 from guardmem_core.prompts.loader import render
 from mcp_server.prompts import _BUILDERS, PROMPTS, PROMPTS_BY_NAME, get_prompt
 from mcp_server.tools.context import ToolRefusedError
@@ -88,8 +90,8 @@ class TestTheExtractionPrompt:
         ontology = state().ontology
 
         expected = render(
-            "extract_memories",
-            1,
+            PROMPT_NAME,
+            PROMPT_VERSION,
             {"content": CONTENT, "ontology": ontology.as_prompt_yaml(), "canary": str(canary)},
         )
 
@@ -118,7 +120,7 @@ class TestTheExtractionPrompt:
         that cached v1's text must be able to tell that it did."""
         result = get_prompt(state(), EXTRACT, {"content": CONTENT})
 
-        assert (result.meta or {})["prompt_version"] == "extract_memories@v1"
+        assert (result.meta or {})["prompt_version"] == f"{PROMPT_NAME}@v{PROMPT_VERSION}"
 
     def test_k_defaults_to_the_middle_arm_of_the_ladder(self) -> None:
         """§3.1 takes entropy over the spread and a single sample has none, so a
@@ -172,7 +174,7 @@ class TestTheAdjudicationPrompt:
             state(), ADJUDICATE, {"candidate": "pharmacy = CVS", "incumbent": "pharmacy = Lloyds"}
         )
 
-        assert (result.meta or {})["prompt_version"] == "adjudicate_conflict@v1"
+        assert (result.meta or {})["prompt_version"] == f"{nli.PROMPT_NAME}@v{nli.PROMPT_VERSION}"
         assert "CVS" in _text(result)
         assert "Lloyds" in _text(result)
 

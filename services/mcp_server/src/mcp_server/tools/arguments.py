@@ -46,14 +46,6 @@ _MAX_LIMIT: Final = 50
 _DEFAULT_TOKEN_BUDGET: Final = 1500
 
 
-#
-# Each of these is a type check the `inputSchema` looks like it already makes.
-# It does not: the SDK validates that `arguments` is an object and leaves the
-# property types to the server, so every value below arrives as whatever the
-# client sent. `ToolRefusedError` rather than a coercion, because a client sending
-# `{"limit": "10"}` has a bug and a silent `int("10")` hides it.
-
-
 def require_query(arguments: dict[str, Any]) -> str:
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
@@ -132,11 +124,11 @@ def store_filters(arguments: dict[str, Any]) -> dict[str, object]:
     **`subject` is an entity id, not a surface form**, and the schema's
     "Optional entity filter" is doing more work than it looks like.
     `assertion.subject_id` is a `uuid` column and the store casts the filter to
-    one, so "Joan Ellery" cannot be passed here - it has to be resolved first,
-    and entity resolution is specified in no document and implemented nowhere.
-    A caller that has an id (from `memory.get_entity`, or from the seed) can
-    filter; a caller that has a name cannot, and gets told so rather than an
-    empty result.
+    one, so "Joan Ellery" cannot be passed here. ADR-0008's resolution binds a
+    namespace to its entity and deliberately never matches names, so there is no
+    name-to-id lookup to offer. A caller that has an id (from `memory.get_entity`,
+    or from the seed) can filter; a caller that has a name cannot, and gets told
+    so rather than an empty result.
     """
     filters: dict[str, object] = {}
     subject = arguments.get("subject")
@@ -170,8 +162,8 @@ def _reject_surface_form(subject: str) -> None:
         raise ToolRefusedError(
             f"`subject` must be a resolved entity id (a UUID), got {subject!r}. "
             "It is an entity filter rather than a name: assertion.subject_id is "
-            "a uuid column. Entity resolution - turning a surface form like "
-            "'Joan Ellery' into an id - is specified in no document and "
-            "implemented nowhere yet, so a name cannot be resolved here. Use "
-            "memory.get_entity, or omit `subject` and filter by `predicates`."
+            "a uuid column. GuardMem binds an entity to its namespace and never "
+            "matches names (ADR-0008), so a surface form like 'Joan Ellery' "
+            "cannot be looked up here. Use memory.get_entity, or omit `subject` "
+            "and filter by `predicates`."
         ) from exc

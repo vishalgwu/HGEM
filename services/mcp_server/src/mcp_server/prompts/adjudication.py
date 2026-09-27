@@ -1,10 +1,11 @@
 """`guardmem/adjudicate_conflict`.  MCP_INTEGRATION.md §4, BUILD_NOTEBOOK.md S6.4
 
 §4: "Structured conflict reasoning: entailment, contradiction, temporal
-ordering, recommended resolution." The file behind it is
-`prompts/adjudicate_conflict/v1.md`, which is what `MEMORY_ENGINE.md` §2.3's
-adjudication sends, and this serves that file rather than a description of it -
-the argument is `extraction.py`'s and applies identically.
+ordering, recommended resolution." The file behind it is the one `LLMJudge`
+renders - `nli.PROMPT_NAME` at `nli.PROMPT_VERSION`, which is what
+`MEMORY_ENGINE.md` §2.3's adjudication sends - and this serves that file rather
+than a description of it. The argument is `extraction.py`'s and applies
+identically.
 
 **§4 says `incumbent` and the template says `incumbents`, and the plural is
 right.** §2.2 retrieves the top ten incumbents before deciding, so adjudication
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Final
 
 import mcp_types as types
 
+from guardmem_core.pipeline.l2_validate.nli import PROMPT_NAME, PROMPT_VERSION
 from guardmem_core.prompts.loader import render
 from mcp_server.prompts.arguments import mint_canary, optional, required
 from mcp_server.tools.context import ToolRefusedError
@@ -40,15 +42,12 @@ __all__ = ["ADJUDICATE", "build_adjudicate"]
 
 _NAME: Final = "guardmem/adjudicate_conflict"
 
-_PROMPT_FILE: Final = "adjudicate_conflict"
-_PROMPT_VERSION: Final = 1
-
 ADJUDICATE: Final = types.Prompt(
     name=_NAME,
     title="Adjudicate a conflict",
     description=(
         "The exact conflict-adjudication prompt GuardMem's pipeline sends, "
-        "pinned to v1: entailment, contradiction, temporal ordering and a "
+        f"pinned to v{PROMPT_VERSION}: entailment, contradiction, temporal ordering and a "
         "recommended resolution over a candidate and what is already believed. "
         "The rendered text contains a one-time canary token, also returned in "
         "_meta: reject any completion that echoes it."
@@ -106,8 +105,8 @@ def build_adjudicate(state: ServerState, arguments: dict[str, str]) -> types.Get
         )
     canary = mint_canary()
     rendered = render(
-        _PROMPT_FILE,
-        _PROMPT_VERSION,
+        PROMPT_NAME,
+        PROMPT_VERSION,
         {"candidate": candidate, "incumbents": incumbent, "canary": canary},
     )
     return types.GetPromptResult(

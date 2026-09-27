@@ -74,12 +74,12 @@ from guardmem_core.schemas.candidate import ExtractedFact, ExtractionResult, Mem
 from guardmem_core.schemas.receipt import Provenance, SourceTier
 from guardmem_core.types import CandidateId, Namespace, TenantId, TraceId
 
-__all__ = ["ExtractionBatch", "ExtractionContext", "extract"]
+__all__ = ["PROMPT_NAME", "PROMPT_VERSION", "ExtractionBatch", "ExtractionContext", "extract"]
 
-_PROMPT_NAME: Final = "extract_memories"
+PROMPT_NAME: Final = "extract_memories"
 # Bumped, never edited in place: `version_id` is the filename and is recorded on
-# every candidate. v2's frontmatter carries what changed and why.
-_PROMPT_VERSION: Final = 2
+# every candidate. v2's frontmatter says why; `mcp_server` serves this version.
+PROMPT_VERSION: Final = 2
 
 _CANARY_BYTES: Final = 8
 
@@ -380,8 +380,8 @@ async def extract(
 
     canary = secrets.token_hex(_CANARY_BYTES)
     prompt = render(
-        _PROMPT_NAME,
-        _PROMPT_VERSION,
+        PROMPT_NAME,
+        PROMPT_VERSION,
         {"content": content, "ontology": ontology_yaml, "canary": canary},
     )
     responses = await _draw(llm, prompt=prompt.text, k=k, tier=tier)

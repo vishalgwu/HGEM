@@ -4,24 +4,16 @@ Both tools are one module because they are one thing with two front doors. §2.3
 says so in as many words: `commit` "still passes the full pipeline — commit is
 not a bypass, it just skips L1 extraction and requires the caller to supply
 provenance explicitly." The argument reading differs; everything after it is the
-same call into `guardmem_core.pipeline.run`.
+same call into `guardmem_core.governance.govern`.
 
-**`memory.propose` runs. `memory.commit` does not, and the reason moved.**
+**`memory.propose` governs and writes. `memory.commit` does not, for a reason.**
 
-`propose` governs raw text end to end as of S6.2's write half: noise filter,
-K-sample extraction, span linking, schema gate, incumbent retrieval, conflict
-detection, confidence, impact, decision. It returns real numbers from a real
-model. What it does **not** do is write - `run()` applies no decision until the
-applier is built (ADR-0010) - so the result carries `applied: false` rather than letting a
-caller read `auto_write` as "stored". `governing.result_of` owns that mapping
-and says why.
-
-The four dependencies that blocked this are closed: `LLMClient` at S9.1,
-`EntailFn` at S5.1's correction 4, `EntityResolver` by ADR-0008,
-`CandidateClassifier` by ADR-0009 - which deleted it rather than implementing
-it. `MISSING_DEPENDENCIES` and `_require_pipeline` are gone with them, and they
-had gone stale first: they were still naming all three after all three landed,
-which is the tool telling a caller something untrue.
+`propose` runs raw text end to end - noise filter, K-sample extraction, span
+linking, schema gate, incumbent retrieval, conflict detection, confidence,
+impact, decision - and then applies each decision through ADR-0010's applier,
+one transaction per candidate with its audit events. The result reports what
+was written as well as what was decided; `governing.result_of` owns that
+mapping and says why the two must read differently.
 
 `commit` still refuses, and **not** for a missing part. §2.3 says it "skips L1
 extraction", so no model draws anything, so §3.1's semantic entropy has no
@@ -31,12 +23,12 @@ every committed assertion 0.35 of its confidence for free, on the one path
 built for high-trust payloads. That is a decision for an ADR rather than
 something to settle inside a handler, and the refusal says so in full.
 
-**Two more fields of §2.2 need steps that do not exist**, recorded here so they
-are not mistaken for oversights when the rest is wired:
+**Two fields of §2.2 are not served here**, recorded so they are not mistaken
+for oversights:
 
-- `mode: "async"` is §2.2's default and needs the Redis stream and arq worker
-  from **S8.4**. With no queue, "returns immediately" would mean "returns and
-  never decides".
+- `mode: "async"` is §2.2's default. S8.4 built its queue behind the REST
+  gateway's `POST /memory/propose`; this server holds no queue client, so
+  "returns immediately" here would mean "returns and never decides".
 - `review_task_id` and `eta_minutes` on a `hitl_review` candidate need the HITL
   queue from **S18.1**. A decision can be *reached* without them; what cannot be
   produced is the ticket a human would clear.
@@ -86,20 +78,22 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
         arguments: The tool call's arguments.
 
     Returns:
-        §2.2's result object - once the pipeline is wired.
+        §2.2's result object, with what was written beside what was decided.
 
     Raises:
-        ToolRefusedError: an argument is invalid, or the pipeline is not wired.
+        ToolRefusedError: an argument is invalid, or no model provider is
+            configured.
 
     Arguments are validated **before** anything is governed, deliberately. A
     caller whose call was also malformed learns one problem and ships the other,
     and a model call is the expensive thing to make before finding out the
     `source_tier` was a typo.
 
-    **`idempotency_key` is read and not yet honoured.** §2.2 publishes it, and
-    what it would suppress is a duplicate *write* - there is no write, so there
-    is nothing to deduplicate. It becomes load-bearing with the applier, and
-    validating it now means the check is already the right one then.
+    **`idempotency_key` is validated and not yet honoured, and since this began
+    writing that is a real gap.** Each call mints a fresh trace, and assertion
+    ids derive from the trace, so a retried call writes its facts a second time.
+    The gateway honours the key through S8.3's Redis store; this server has no
+    such store, and adding one is its own change rather than a line here.
     """
     content = _require_content(arguments)
     tier = _require_source_tier(arguments)
@@ -145,11 +139,12 @@ async def run_commit(context: ToolContext, arguments: dict[str, Any]) -> dict[st
         arguments: The tool call's arguments.
 
     Returns:
-        §2.3's result object - once the pipeline is wired.
+        Nothing yet - every call refuses, for the scoring reason in the module
+        docstring.
 
     Raises:
-        ToolRefusedError: an assertion is malformed or unsourced, or the
-            pipeline is not wired.
+        ToolRefusedError: an assertion is malformed or unsourced, and
+            otherwise always.
 
     **The provenance check runs first and is not deferred with the rest.** §2.3
     is unambiguous - "missing or unverifiable provenance → `GM_VALIDATION`. There
@@ -220,22 +215,22 @@ def _require_mode(arguments: dict[str, Any]) -> str:
 
     **`async` is refused rather than silently served synchronously**, even
     though it is §2.2's *default*. It means "returns immediately, decides
-    later", and deciding later needs the Redis stream and arq worker from S8.4;
-    with no queue behind it, answering immediately would mean answering and never
-    deciding - a fact the caller believes is pending that nothing will ever pick
-    up. Refusing names the gap; serving it synchronously would hide it behind
-    latency that happens to be acceptable in a demo.
+    later", and deciding later needs a queue; S8.4 built one behind the REST
+    gateway, and this server has no client for it. Answering immediately would
+    mean answering and never deciding - a fact the caller believes is pending
+    that nothing will ever pick up. Refusing names the gap; serving it
+    synchronously would hide it behind latency that happens to be acceptable.
     """
     mode = arguments.get("mode", "async")
     if mode not in _MODES:
         raise ToolRefusedError(f"`mode` must be one of {sorted(_MODES)}, got {mode!r}")
     if mode == "async":
         raise ToolRefusedError(
-            "`mode: async` needs the worker queue from BUILD_NOTEBOOK.md S8.4, which "
-            "is not built. It means 'return now, decide later', and with no queue "
-            "the second half never happens. Pass `mode: strict` to be told the "
-            "decision on the call. Note that async is §2.2's default, so this has "
-            "to be passed explicitly until S8.4 lands."
+            "`mode: async` is served by the REST gateway's queue (BUILD_NOTEBOOK.md "
+            "S8.4, POST /memory/propose), and this MCP server has no client for it. It "
+            "means 'return now, decide later', and here the second half would never "
+            "happen. Pass `mode: strict` to be told the decision on the call. Note "
+            "that async is §2.2's default, so strict has to be passed explicitly."
         )
     return str(mode)
 
@@ -247,11 +242,9 @@ def _require_hints(arguments: dict[str, Any]) -> dict[str, Any]:
         ToolRefusedError: `hints` is not an object, or a member has the wrong
             type.
 
-    `hints.subject` is more load-bearing than it looks. `pipeline/deps.py` calls
-    entity resolution "the largest gap in the build", and `Proposal.subject_hint`
-    exists so "a caller that already knows the answer says so" - which makes this
-    field the one route by which a proposal could be governed at all before an
-    `EntityResolver` is specified.
+    `hints.subject` reaches the resolver as the subject's recorded name, not as a
+    binding: ADR-0008's resolver binds a subject from a `<type>:<id>` namespace
+    and never matches names, so the hint labels the entity without choosing it.
     """
     hints = arguments.get("hints")
     if hints is None:

@@ -46,6 +46,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.exceptions import MCPError
 from mcp.shared.memory import create_client_server_memory_streams
 
+from guardmem_core.pipeline.l1_extract.extractor import PROMPT_NAME, PROMPT_VERSION
 from guardmem_core.settings import get_settings
 from mcp_server.lifespan import DEFAULT_ONTOLOGY, lifespan
 from mcp_server.server import SERVER_NAME, build_server
@@ -201,7 +202,7 @@ class TestTheDoneWhen:
             assert isinstance(block, types.TextContent)
             assert canary
             assert canary in block.text
-            assert (result.meta or {})["prompt_version"] == "extract_memories@v1"
+            assert (result.meta or {})["prompt_version"] == f"{PROMPT_NAME}@v{PROMPT_VERSION}"
 
     async def test_a_prompt_that_cannot_be_served_fails_the_request(self) -> None:
         """A refusal rendered as a *message* would enter the transcript as

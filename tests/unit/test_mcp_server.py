@@ -200,20 +200,23 @@ class TestServerIdentity:
         assert options.server_version == SERVER_VERSION
         assert options.server_version, "an unversioned server is unreportable"
 
-    def test_the_instructions_say_what_is_not_there_yet(self) -> None:
-        """Read by the model, not only rendered for the human.
+    def test_the_instructions_say_what_works_and_what_declines(self) -> None:
+        """Read by the model, not only rendered for the human - so it has to be true.
 
-        An agent whose `memory.propose` call is going to be declined should be
-        able to see why from the handshake, rather than concluding the server is
-        broken and working around it - and, more importantly, should not treat
-        anything as remembered on the strength of a tool that exists.
+        It said `memory.propose` declined for eleven days after that tool began
+        writing, which tells an agent not to use the one tool that remembers
+        anything. It must still say what does decline, and why, so an agent
+        refused by `memory.commit` does not conclude the server is broken.
         """
         options = build_server().create_initialization_options()
 
         assert options.instructions == INSTRUCTIONS
         assert "memory.search" in INSTRUCTIONS
-        assert "decline" in INSTRUCTIONS
-        assert "Treat nothing as remembered" in INSTRUCTIONS
+        assert "memory.propose governs" in INSTRUCTIONS
+        assert "memory.commit declines" in INSTRUCTIONS
+        assert "Treat nothing as remembered" not in INSTRUCTIONS, (
+            "memory.propose writes; telling a model otherwise stops it using the tool"
+        )
 
 
 class TestConstructionIsPure:

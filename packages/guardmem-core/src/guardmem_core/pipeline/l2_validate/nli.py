@@ -38,10 +38,19 @@ if TYPE_CHECKING:
     from guardmem_core.llm.base import LLMClient
     from guardmem_core.types import TraceId
 
-__all__ = ["AdjudicationBatch", "Judgement", "LLMJudge", "NLIJudge"]
+__all__ = [
+    "PROMPT_NAME",
+    "PROMPT_VERSION",
+    "AdjudicationBatch",
+    "Judgement",
+    "LLMJudge",
+    "NLIJudge",
+]
 
-_PROMPT_NAME: Final = "adjudicate_conflict"
-_PROMPT_VERSION: Final = 1
+# Public for the reason the extractor's are: `mcp_server` serves this file as
+# `guardmem/adjudicate_conflict`, and must serve the version the judge sends.
+PROMPT_NAME: Final = "adjudicate_conflict"
+PROMPT_VERSION: Final = 1
 
 # Same length as the extractor's, and for the same reason: long enough that a
 # model cannot emit it by chance, short enough not to spend tokens on it.
@@ -148,8 +157,8 @@ class LLMJudge:
             return []
         canary = secrets.token_hex(_CANARY_BYTES)
         prompt = render(
-            _PROMPT_NAME,
-            _PROMPT_VERSION,
+            PROMPT_NAME,
+            PROMPT_VERSION,
             {
                 "candidate": candidate,
                 "incumbents": _numbered(incumbents),

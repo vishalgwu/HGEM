@@ -152,7 +152,11 @@ def _summarise(name: str, payload: dict[str, Any]) -> str:
     if name == "memory.get_entity":
         grouped = payload.get("assertions", {})
         facts = sum(len(items) for items in grouped.values())
-        note = "" if payload.get("graph_backed") else " (graph is in-process and empty; see S7.1)"
+        note = (
+            ""
+            if payload.get("graph_backed")
+            else " (in-process graph; set GM_GRAPH_BACKEND=neo4j for a durable one)"
+        )
         return (
             f"{facts} live assertion(s) across {len(grouped)} predicate(s), "
             f"{len(payload.get('neighbors', []))} neighbour(s){note}."

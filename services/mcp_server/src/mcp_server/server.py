@@ -39,9 +39,10 @@ is the difference between a gap and a mystery.
    ADR-0010's applier writes and the relay makes rows visible. The *feed* did
    not. Nothing tells a live session that a write happened - there is no bus, no
    `LISTEN/NOTIFY`, and on stdio no second process to hear one - so the
-   capability would still be a promise this server cannot keep. It moves to
-   **S8.4**, the worker, which is the first component that watches writes rather
-   than performing them. `capabilities.resources.subscribe` is `false` in the
+   capability would still be a promise this server cannot keep. It was moved to
+   **S8.4**, the worker, as the first component that would watch writes, and
+   S8.4 built a worker that performs writes (`tasks.evaluate`) and watches none,
+   so it has no home yet. `capabilities.resources.subscribe` is `false` in the
    handshake today, and that is checked rather than assumed.
 """
 
@@ -87,9 +88,10 @@ SERVER_NAME: Final = "guardmem"
 # client that cannot tell two builds apart cannot report a bug against one.
 SERVER_VERSION: Final = "0.1.0"
 
-# Shown by clients that render it, and read by models that do not. Deliberately
-# says what the server does *not* do yet: an agent told it has governed memory
-# and offered no tools should be able to see why from the handshake alone.
+# Shown by clients that render it, and read by models that do not - so it has to
+# be true, because a model acts on it. Until 2026-09-27 it said memory.propose
+# declined and told the model to "treat nothing as remembered until a write path
+# exists", for eleven days after memory.propose began governing and writing.
 INSTRUCTIONS: Final = (
     "GuardMem AI governs what an agent is allowed to remember: every candidate "
     "fact is extracted with a verbatim source span, checked against what is "
@@ -98,10 +100,13 @@ INSTRUCTIONS: Final = (
     "either way. Call memory.search before answering anything that depends on "
     "facts about a subject; it returns only currently-believed assertions, each "
     "with the source span it came from, and lists separately what has been "
-    "retired. In this build memory.propose and memory.commit decline: the "
-    "decision pipeline needs a model provider that is not wired yet, and they "
-    "will not invent a decision to look complete. Treat nothing as remembered "
-    "until a write path exists."
+    "retired. memory.propose governs raw text end to end and reports, for each "
+    "candidate, the decision and whether a row was written; it needs a model "
+    "provider configured on the server. A written fact stays hidden from "
+    "memory.search until the outbox relay releases it, and no server in this "
+    "build runs the relay, so do not expect to read back what you just wrote. "
+    "memory.commit declines in this build: its scoring is undecided, and it "
+    "will not invent a decision to look complete."
 )
 
 

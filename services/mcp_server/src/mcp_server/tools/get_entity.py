@@ -19,8 +19,8 @@ outbox relay rebuilds it by replaying, but only events that are still
 undispatched, and a seeded database has none. So `neighbors: []` here means "this
 process has no graph", not "this entity is isolated", and the two are worth
 distinguishing when the field feeds `MEMORY_ENGINE.md` §3.3's blast-radius
-score. **S7.1 is the fix** - Neo4j behind the same protocol is the first durable
-backend - and until it lands the response carries `graph_backed` so a caller
+score. S7.1's Neo4j backend (`GM_GRAPH_BACKEND=neo4j`) is the durable one, and
+the response carries `graph_backed` so a caller on the in-process default
 cannot read a limitation as a finding.
 """
 
@@ -144,9 +144,8 @@ def _require_entity_id(arguments: dict[str, Any]) -> str:
 
     Same reasoning as `search`'s `subject`: `assertion.subject_id` is a `uuid`
     column, so a surface form reaches asyncpg and fails on the cast with a
-    message about input syntax. Entity resolution - name to id - is specified in
-    no document and implemented nowhere, so this cannot accept a name however
-    much a caller wants it to.
+    message about input syntax. ADR-0008 binds entities by namespace and never
+    matches names, so there is no name to look up however much a caller wants.
     """
     entity_id = arguments.get("entity_id")
     if not isinstance(entity_id, str) or not entity_id:
@@ -156,7 +155,7 @@ def _require_entity_id(arguments: dict[str, Any]) -> str:
     except ValueError as exc:
         raise ToolRefusedError(
             f"`entity_id` must be a resolved entity id (a UUID), got {entity_id!r}. "
-            "Entity resolution - turning a name into an id - is specified in no "
-            "document and implemented nowhere yet."
+            "GuardMem binds an entity to its namespace and never matches names "
+            "(ADR-0008), so a name cannot be looked up here."
         ) from exc
     return entity_id
