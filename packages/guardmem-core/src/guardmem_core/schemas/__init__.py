@@ -17,13 +17,15 @@ Layer 1's *input* vocabulary, and nothing it describes has been extracted yet.
 `entity`, `ImpactLevel` from `risk` and `SourceTier` from `receipt`, which is
 the shape of the thing: a predicate declaration is a statement about all three.
 
-Which module owns what follows `PROJECT_TREE.md`. Two things it lists are still
-deliberately absent, each deferred to the step that pins its shape rather than
-guessed at now: `Rule` and `PolicyPack` (S12.2, the policy engine) and
-`Thresholds` (S5.4, where `decide()` takes it). `MemoryProposal` likewise
-arrives with the gateway. The third, `Predicate`, arrived at S3.5 as
+Which module owns what follows `PROJECT_TREE.md`, with three departures.
+`Rule` and `PolicyPack` are still deliberately absent, deferred to S12.2 (the
+policy engine), the step that pins their shape. `Predicate` arrived at S3.5 as
 `PredicateSpec` - named for what it is, since it declares what a predicate may
-say rather than being an instance of one.
+say rather than being an instance of one. And `MemoryProposal` never became a
+schema here: the surfaces that accept a proposal own its wire shape - the
+gateway's `ProposeRequest` (S8.1) and `memory.propose`'s tool schema - and both
+hand the pipeline `Turn`s. `Thresholds` arrived at S5.4, where `decide()`
+takes it.
 """
 
 from __future__ import annotations

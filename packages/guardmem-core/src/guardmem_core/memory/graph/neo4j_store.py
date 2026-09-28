@@ -41,9 +41,9 @@ not from the pipeline.** A node created only ever as an *object* carries no
 `tenant_id` - there is no single tenant it belongs to. Both callers of these
 methods pass a resolved subject `EntityId`, which always has one; the unscoped
 path exists because the protocol permits an arbitrary `EntityId` and the
-contract suite exercises it. The honest fix is a tenant on the protocol, and the
-place that gets one is **S8.2**, where a request first carries an authenticated
-tenant to thread through.
+contract suite exercises it. The honest fix is a tenant on the protocol. S8.2
+gave requests an authenticated tenant to thread through, and the protocol was
+not widened then, so reads still take the tenant off the start node.
 
 **The driver is injected and never constructed here**, exactly as
 `PgVectorStore` takes a pool and the LLM adapters take a transport. `RULES.md`

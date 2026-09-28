@@ -234,7 +234,7 @@ def assertion_from_row(row: Record, provenance: list[Provenance]) -> StoredAsser
 #
 # The statements that encode *behaviour* rather than shape - the supersession
 # UPDATE and the similarity SELECT, which carry the concurrency control and the
-# visibility filter - stay in the store, where the reasoning for them is.
+# visibility filter - live in `queries.py`, split out of the store at S6.2.
 
 INSERT_ASSERTION: Final = f"""
     INSERT INTO assertion ({ASSERTION_COLUMNS}, embedding)

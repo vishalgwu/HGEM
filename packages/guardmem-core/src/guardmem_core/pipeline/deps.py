@@ -1,4 +1,4 @@
-"""What `run()` needs, and the three things nothing in this repository supplies.
+"""What `run()` needs, and the three members composing it revealed.
 
 S5.6's sketch is `async def run(proposal, deps)`, and this is `Deps`. Most of it
 is the infrastructure protocols from S1.7 - an `LLMClient`, a `VectorStore`, a
@@ -24,13 +24,11 @@ before the ADR existed: it splits one patient across three spellings and every
 incumbent lookup then returns nothing, which reads as "this is a novel fact" and
 writes a duplicate.
 
-**Still a `Protocol` with no implementation shipped, and `run()` still cannot be
-called.** Two things the ADR requires and this file does not yet have: `resolve`
-takes an `expected_type` (`PredicateSpec.subject` - the entity type, which is
-`NOT NULL` on the `entity` row and which this signature cannot supply), and
-something has to write that row before the assertion's foreign key will accept
-it. Both are the implementation step; the decision they were waiting on is
-made.
+**Implemented as `memory/entities.py`'s `NamespaceEntityResolver`.** The ADR
+required two things of it beyond the decision: `resolve` takes an
+`expected_type` (`PredicateSpec.subject` - the entity type, which is `NOT NULL`
+on the `entity` row), and it writes that row itself, so the assertion's foreign
+key accepts the write.
 
 **`CandidateClassifier` is gone, and ADR-0009 is why.** It was built to supply
 the three risk features §3.3 names and defines nowhere - `scope`, `pii_class`
@@ -50,20 +48,18 @@ So the protocol had no implementation, no possible implementation that was not
 "read the spec", and one consumer. `CandidateRisk` went with it: three field
 reads do not need a model to group them.
 
-**`entail` is S5.1's `EntailFn`, and `run()` needs it for two different
+**`entail` backs S5.1's `EntailFn`, and `run()` needs it for two different
 questions.** §3.1 clusters K samples by meaning, and §3.2's `S_src` asks whether
 a candidate's own verbatim span entails its claim. Both are "does this text
 entail that text". Injected, so the LID detector §3.1 names can back both
 without this module knowing.
 
-It now has a producer - `llm/entailment.py`'s `LLMEntailer` - which is the
-first of these three gaps to close. **Binding it is not a one-line change**, and
-the reason is in `entropy.py`: `EntailFn` is sync, `LLMEntailer` is async, and
-the resolution S5.1 asked for is that a caller "precompute the pairs it needs
-and pass a lookup". So `Deps.entail` stays what it is, and the orchestrator has
-to assemble the pairs for a candidate and await one lookup before scoring it.
-That is a change to `_score_and_decide`, not to this file, and it is the next
-step rather than this one.
+Its producer is `llm/entailment.py`'s `LLMEntailer`, the first of the three
+gaps to close, and binding it was not a one-line change: `EntailFn` is sync,
+`LLMEntailer` is async, and the resolution S5.1 asked for is that a caller
+"precompute the pairs it needs and pass a lookup". So `Deps.entail` is an
+`EntailLookup`, below, and `per_candidate._confidence_for` assembles a
+candidate's pairs and awaits one lookup before scoring it.
 """
 
 from __future__ import annotations
@@ -201,8 +197,9 @@ def scope_of_namespace(namespace: Namespace) -> Scope:
     `MEMORY_ENGINE.md` line 50 documents the convention this reads -
     `"patient:8812" | "org:acme" | "session:xyz"` - as an illustration of the
     format rather than as a declared vocabulary, which is why this is a shipped
-    *default* and not part of `CandidateClassifier`. A deployment whose
-    namespaces do not follow it should answer the question itself.
+    *default*, and why ADR-0009 left it here when it moved the other two risk
+    features into the ontology. A deployment whose namespaces do not follow it
+    should answer the question itself.
 
     Everything else is `USER` because the pattern is `<type>:<id>` and a
     namespace naming one subject is one subject's blast radius. The case that
@@ -235,7 +232,8 @@ class Deps:
             both questions - the clustering's `K(K-1)` comparisons and the
             one grounding pair - because `inputs.entail_pairs` assembles
             them together.
-        resolver: Surface form to `EntityId`.
+        resolver: Which entity a candidate is about - bound from the namespace
+            or `hints.subject` under ADR-0008, never matched on the surface form.
         ontology: The tenant's pack, already validated.
         thresholds: §3.4's five cut points and their version. Built by
             `Settings.thresholds()`, never read inside `decide()`.

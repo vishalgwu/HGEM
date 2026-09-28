@@ -156,12 +156,12 @@ class OutboxRelay:
                 pending, because `ARCHITECTURE.md` §4's rule for a graph outage
                 is "outbox retries", never "drop the assertion".
 
-        Sequential rather than concurrent, and that is a decision with an expiry
-        date on it. `RULES.md` §2.2 requires fan-out to go through a
-        `TaskGroup` bounded by a semaphore; today the graph backend is in-process
-        and a batch of fifty costs less than the round trip that claimed it, so
-        concurrency would be machinery with nothing to buy. The step that makes
-        the graph a network hop - `S7.1`, Neo4j - is the step that should add it.
+        Sequential rather than concurrent. `RULES.md` §2.2 requires fan-out to go
+        through a `TaskGroup` bounded by a semaphore; on the in-process graph a
+        batch of fifty costs less than the round trip that claimed it, so
+        concurrency would be machinery with nothing to buy. S7.1's Neo4j backend
+        made each dispatch a network hop, which is where it would pay; it was not
+        added then and has not been measured since.
         """
         events = await self._claim()
         dispatched = 0

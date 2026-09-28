@@ -1,7 +1,8 @@
 """A deterministic, offline `Embedder`.  BUILD_NOTEBOOK.md S3.2, S3.6
 
-The only `Embedder` implementation in the package until S9.1 wires a provider,
-and the one three separate callers were each about to write for themselves:
+The only `Embedder` implementation in the package - S9.1 built completion
+adapters and no embedding provider - and the one three separate callers were
+each about to write for themselves:
 `FakeEmbedder` in the unit suite, the S3.6 seed, and eventually the eval
 harness. They must agree - a test that proves the store embeds the right text,
 and a seed whose vectors are supposed to be reproducible, are the same claim
@@ -25,8 +26,8 @@ and the dev stack actually run.
 say, its id, and the original version kept it unconditionally on the grounds
 that recording is free. It is free in a script that exits, which is every caller
 this had when it was written - the seed and the unit suite. It is not free in a
-process that stays up: this is the only `Embedder` in the package until S9.1, so
-it is also what an MCP server or a gateway would be wired with today, and an
+process that stays up: this is the only `Embedder` in the package, so it is
+what the MCP server, the gateway and the worker are wired with today, and an
 unbounded `list[str]` holding every text the process has ever embedded is a leak
 that grows with traffic and is invisible until the container is OOM-killed.
 Opt-in keeps the test affordance and makes the long-lived case the one you get

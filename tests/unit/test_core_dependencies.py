@@ -6,9 +6,9 @@ already marked in the source: that file guards the agreement between **two lockf
 and everything here guards one **pyproject comment block** against rot. They share a
 repo root and nothing else.
 
-Kept as a test rather than a convention because the failure is silent. Four of
-`guardmem-core`'s dependencies are unused today and all four are genuinely coming; the
-next person to run a dependency audit finds four unimported packages and cannot tell
+Kept as a test rather than a convention because the failure is silent. Two of
+`guardmem-core`'s dependencies are unused today and both are genuinely coming; the
+next person to run a dependency audit finds unimported packages and cannot tell
 "not needed yet" from "no longer needed", and removing the wrong one breaks a step
 nobody has written.
 """
@@ -45,13 +45,12 @@ def _normalise(name: str) -> str:
 # `guardmem-core` declares is either imported by it, or annotated with the step
 # that will import it.
 #
-# Four of them are unused today - httpx, structlog, anyio, numpy - and all four
-# are genuinely coming: RULES.md 2.2 and 6 name three of them and S5.1 needs the
-# fourth. Keeping them is right. Keeping them *silently* is not, because the
-# next person to run a dependency audit finds four unimported packages and
-# cannot tell "not needed yet" from "no longer needed" - and removing the wrong
-# one breaks a step that has not been written yet, which is the worst moment to
-# discover it.
+# Four were unused when this was written - httpx, structlog, anyio, numpy - and
+# S9.1 and S5.1 have since imported httpx and numpy. Keeping the rest is right.
+# Keeping them *silently* is not, because the next person to run a dependency
+# audit finds unimported packages and cannot tell "not needed yet" from "no
+# longer needed" - and removing the wrong one breaks a step that has not been
+# written yet, which is the worst moment to discover it.
 #
 # So the comment block in `packages/guardmem-core/pyproject.toml` is the record,
 # and this is what stops it rotting. It checks both directions: an undocumented

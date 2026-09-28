@@ -14,7 +14,7 @@ answer findable.** `scope`, `pii_class` and `irreversibility` were named by §3.
 and defined by nothing. This docstring used to end "the day an ontology field
 appears the mapping has somewhere to live" - ADR-0009 is that day, and the
 mapping did not have to change, only move: `PiiClass` and `Irreversibility` are
-now `PredicateSpec` fields, so they live in `schemas/verdict.py` beside
+now `PredicateSpec` fields, so they live in `schemas/risk.py` beside
 `ImpactLevel`, which is there for exactly the same reason. **The ontology may
 not import from the pipeline**, which is what forced the move and is the right
 direction anyway. They are re-exported here so §3.3's eight features can still

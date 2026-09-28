@@ -89,7 +89,7 @@ def _overlaps(candidate: MemoryCandidate, incumbent: StoredAssertion) -> bool:
     An open `valid_to` means "still true", so it extends to infinity. A missing
     `valid_from` on the candidate means the extractor did not say when the fact
     became true - **which is every candidate today**, because
-    `extract_memories/v1.md` does not ask for it and `ExtractedFact` therefore
+    `extract_memories` (v2 today) does not ask for it and `ExtractedFact` therefore
     has no such field. `None` is read as "unbounded in the past", so an
     undated candidate overlaps any live incumbent, which is the conservative
     reading: it raises the conflict rather than silently missing it.
@@ -132,10 +132,11 @@ async def detect(
     **`resolution_hint` is a hint, and for CONTRADICTION it is deliberately the
     conservative one.** §2.3 resolves a contradiction by "supersede if candidate
     newer *and* C >= tau_hi, else escalate" - and `C` is Layer 3's confidence
-    composite, which does not exist when this runs. So this emits `escalate`,
-    and S5.4's decision matrix is where a confident, newer candidate may be
-    upgraded. `ARCHITECTURE.md` §0: degradation never widens the auto-write
-    path, and guessing `supersede` here would be exactly that.
+    composite, which does not exist when this runs. So this emits `escalate`.
+    Nothing upgrades a confident, newer candidate afterwards - S5.4's
+    `decide()` does not, though this once said it would - so every
+    contradiction escalates. `ARCHITECTURE.md` §0: degradation never widens
+    the auto-write path, and guessing `supersede` here would be exactly that.
 
     The rest of §2.3's table - DUPLICATE, REFINEMENT, and the precedence that
     picks one answer out of ten incumbents - is `dedupe.classify` and

@@ -32,13 +32,12 @@ it. The contract `guardmem_core.pipeline` never imports a concrete store said
 no, correctly - and the right answer was not to relax it but to notice that what
 text a fact embeds as is a decision about meaning, not about column order.
 
-**Retrieval takes a resolved `EntityId`, and nothing in this repository
-produces one.** `MemoryCandidate.subject` is a surface form; `VectorStore`
-filters on `subject_id`, a UUID. Entity resolution is the bridge, and it is
-specified nowhere - not in the notebook, not in `MEMORY_ENGINE.md`, not in
-`PROJECT_TREE.md`. Rather than invent one inside a retrieval function, this
-takes the resolved id as an argument and the gap is written down where it will
-be read: `DAILY_LOG.md`, and the `subject_id` docstring below.
+**Retrieval takes a resolved `EntityId`.** `MemoryCandidate.subject` is a
+surface form; `VectorStore` filters on `subject_id`, a UUID. Entity resolution
+is the bridge, and when this shipped it was specified nowhere, so rather than
+invent one inside a retrieval function this takes the resolved id as an
+argument. ADR-0008 has since decided it - resolution binds from the namespace
+or `hints.subject` and never matches names - and `Deps.resolver` supplies it.
 """
 
 from __future__ import annotations
@@ -110,12 +109,9 @@ async def retrieve_incumbents(
         candidate: The proposed fact, after the schema gate has admitted it. A
             quarantined or rejected candidate has no business here - its
             predicate is not in the vocabulary these incumbents are indexed by.
-        subject_id: The **resolved** entity. Not derived from
-            `candidate.subject`, which is still a surface form: Layer 1 extracts
-            what the speaker said and nothing in this repository turns "Joan
-            Ellery" into an entity id. See the module docstring - the absence is
-            a specification gap, not an oversight here, and passing the id in
-            keeps the gap visible instead of burying a guess in this function.
+        subject_id: The **resolved** entity - `Deps.resolver`'s answer. Not
+            derived from `candidate.subject`, which is a surface form: ADR-0008
+            binds entities and never turns "Joan Ellery" into an id.
         vector: The store to search. Bound to the tenant already, which is why
             no tenant is passed.
         graph: The graph to expand from.
@@ -139,12 +135,14 @@ async def retrieve_incumbents(
     `visible`, which is what "incumbent" means. A superseded fact is not
     something a new one can contradict; it has already lost.
 
-    Sequential rather than concurrent, like the S3.3 relay's dispatch and for
-    the same reason. `RULES.md` §2.2 wants fan-out through a `TaskGroup`, and
-    there is nothing here to overlap: the graph backend is in-process until
-    S7.1, so a task group would add machinery to save the cost of a dictionary
-    lookup. S7.1 makes the graph a network hop and is the step that should
-    revisit this.
+    Sequential rather than concurrent, like the S3.3 relay's dispatch.
+    `RULES.md` §2.2 wants fan-out through a `TaskGroup`, and on the default
+    in-process graph there is nothing to overlap. S7.1's Neo4j backend made
+    the walk a network hop, so overlapping it with the search would save a
+    round trip per candidate there; that is neither measured nor built. It
+    would also need `common.draw_samples`'s unwrapping, or a failed store
+    would surface as an `ExceptionGroup` rather than the `StoreUnavailable`
+    documented above.
     """
     embedding = (await embedder.embed([embed_text(candidate)]))[0]
     nearest = await vector.search(
@@ -180,9 +178,9 @@ def _widening(edges: list[Edge], nearest: list[ScoredAssertion]) -> list[Edge]:
 
     They stay `Edge` rather than becoming assertions because turning one back
     into a `StoredAssertion` means fetching it by id, and `VectorStore` has no
-    such method - it searches. Adding one is a protocol change, and S4.3 is the
-    step that will know whether the checks need the provenance or only the
-    shape.
+    such method - it searches. Adding one is a protocol change, and S4.3 did
+    not need it: the three checks read `nearest` only. Nothing reads these
+    edges yet - §2.2 asks for them and no check consumes them.
     """
     seen = {hit.assertion.assertion_id for hit in nearest}
     return [edge for edge in edges if edge.assertion_id not in seen]

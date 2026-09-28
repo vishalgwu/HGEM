@@ -257,9 +257,9 @@ async def _score_and_decide(
         # No escalation loop yet. 3.4's ESCALATE means "re-run Layer 3 on the
         # FRONTIER tier with K=5 and the incumbent context", which is a second
         # pass this function does not make - so every candidate is a first pass
-        # and an ESCALATE is returned for the caller to act on. S9.1 gives the
-        # tiers real providers and is where a loop could be measured rather than
-        # guessed.
+        # and an ESCALATE is returned for the caller to act on. S9.1 gave the
+        # tiers real providers; S9.2's router, which sends FRONTIER only on
+        # ESCALATE, is where the second pass belongs.
         False,
         override_signals(
             candidate, spec=spec, policy_version=deps.policy_version, kind=conflict.kind

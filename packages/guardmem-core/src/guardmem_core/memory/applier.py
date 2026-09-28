@@ -15,8 +15,8 @@ ADR-0010 makes that this.
 **One transaction per candidate, not per proposal.** A batch-wide unit would
 discard nineteen decided writes because the twentieth lost a supersession race.
 Candidates are independent by construction - their own subject, their own
-conflict report, their own audit entry - and `_score_one` already makes this
-argument about scoring, where the stakes are lower.
+conflict report, their own audit entry - and `per_candidate.score_candidate`
+already makes this argument about scoring, where the stakes are lower.
 
 **Every decision is audited, including the three that write nothing.** A
 `REJECT` that leaves no trace cannot be explained to the person whose fact was

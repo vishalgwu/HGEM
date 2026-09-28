@@ -125,7 +125,7 @@ class NamespaceEntityResolver:
             pool: The process-wide pool. `RULES.md` §2.2 puts pool creation in
                 lifespan, and this is a consumer of one rather than an owner.
             timeout_s: Ceiling on each round trip, from
-                `settings.db_timeout_s`. Passed explicitly rather than left to
+                `settings.store_timeout_s`. Passed explicitly rather than left to
                 the pool default, per §2.2.
         """
         self._pool = pool
@@ -159,8 +159,9 @@ class NamespaceEntityResolver:
                 caller errors with a stated remedy, and both are refusals rather
                 than guesses - see the module docstring on why a wrong guess
                 here is unrecoverable. Raised **without** a `trace_id`: the
-                `EntityResolver` protocol carries none, and `_score_one`
-                attributes the failure to its candidate, which is where a reader
+                `EntityResolver` protocol carries none, and
+                `per_candidate.score_candidate` attributes the failure to its
+                candidate, which is where a reader
                 looks first. Widening the protocol for one error path was not
                 worth it.
             StoreUnavailable: the entity row could not be written.

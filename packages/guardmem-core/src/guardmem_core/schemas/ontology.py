@@ -8,10 +8,10 @@ predicate; §2.2(b) turns a second value for a `ONE` predicate into a
 `CARDINALITY` conflict "regardless of NLI"; §3.3 floors `RiskVerdict.risk` at
 the declared impact; §3.2's `S_cor` is what `requires_corroboration` demands.
 
-Three of those consumers do not exist yet. This module is deliberately only the
-*declaration* and the loader that validates it - the coercion table that turns
-`{type: coded}` into a Python type belongs with `l2_validate/schema_gate.py`,
-which is the code that will use it.
+This module is deliberately only the *declaration* and the loader that validates
+it; each consumer reads what it needs. The coercion table that turns
+`{type: coded}` into a Python type lives in `l2_validate/schema_gate.py`, which
+is the code that uses it.
 
 **The loader lives beside the models because `PROJECT_TREE.md` puts it there,**
 and because the pair is the same thing said twice: the models are what a pack

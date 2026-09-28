@@ -113,7 +113,7 @@ _COUNTERFACTUAL: Final[frozenset[str]] = frozenset({"would", "might"})
 # Relation nouns. Used ONLY to route a turn to the classifier, never to drop it:
 # whether a claim about somebody else matters to this namespace is an ontology
 # question - family history, emergency contact, counterparty, dependant - and
-# the ontology arrives at S3.5.
+# this filter does not take the ontology S3.5 built, so a model judges it.
 _RELATIONS: Final[frozenset[str]] = frozenset(
     """
     aunt boss boyfriend brother colleague cousin coworker
@@ -273,7 +273,7 @@ def rule_verdict(turn: Turn, history: TurnHistory) -> NoiseReason | None:
     every case ephemeral cannot.
 
     `NoiseReason.THIRD_PARTY` is never returned here. Deciding it needs the
-    ontology (S3.5); until then it is a classifier judgement.
+    ontology, which this filter does not take, so it is a classifier judgement.
     """
     normalised = normalise(turn.text)
     tokens = normalised.split()
@@ -310,8 +310,8 @@ def is_ambiguous(turn: Turn, history: TurnHistory) -> bool:
     all is kept without a model call - that is where §1.1's "cheap 70%" comes
     from - so every call this returns `True` for has a nameable reason:
 
-    - it mentions a relation, which needs the ontology (S3.5) to settle and a
-      model's judgement until then;
+    - it mentions a relation, which only the ontology could settle and this
+      filter does not read, so a model judges it;
     - it is a conditional the counterfactual test did not catch;
     - it is agent-directed but carries content, so the imperative rule declined;
     - it is short without being pure filler;

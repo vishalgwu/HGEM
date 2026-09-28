@@ -14,10 +14,26 @@ from typing import Any, Final
 
 __all__ = ["grammar_safe"]
 
-# Ollama's grammar compiler rejects repetition bounds at or above this, so they
-# are dropped rather than compiled. See `grammar_safe` for why dropping is sound.
+# Ollama turns `format` into a GBNF grammar, and a bounded length or item count
+# becomes a *repetition* in that grammar. Repetitions of this many or more are
+# refused outright, with `400 Failed to initialize samplers: failed to parse
+# grammar` - the whole schema, not the one field - so they are dropped rather
+# than compiled. See `grammar_safe` for why dropping is sound.
+#
+# Measured against Ollama 0.34.0 with `llama3.1:8b`, by bisection: **1999
+# compiles and 2000 does not**, for `maxLength`, `minLength` and `maxItems`
+# alike. A sharp boundary at a round number, so it is a constant in the
+# compiler rather than a size blow-up.
+#
+# Not hypothetical. `ExtractedFact.verbatim` declares `max_length=2000`,
+# mirroring `Provenance.verbatim`, which put the extraction schema exactly one
+# over the line - so **no extraction ran on Ollama at all** until this was
+# found, and CHECKPOINT B was recorded twice as runnable locally when it was
+# not.
 GRAMMAR_REPETITION_LIMIT: Final = 2000
 
+# The keywords that become repetitions. `minimum`/`maximum` do not - they bound
+# a numeric *value*, not a count - and were measured to pass at 2000.
 REPETITION_KEYWORDS: Final = frozenset({"maxItems", "maxLength", "minItems", "minLength"})
 
 

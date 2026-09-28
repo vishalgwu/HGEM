@@ -3,7 +3,7 @@
 `ARCHITECTURE.md` §2.4 gives this module two jobs. It "decides destination per
 assertion", and it "coordinates the dual write via a Postgres outbox". Only the
 second is real today, and this file says so rather than pretending otherwise -
-see `route` for why the first cannot be built yet and what will build it.
+see `route` for why the first is not.
 
 **What the router is actually for, at this step.** It is the app-layer half of
 `RULES.md` §4's defence in depth: "RLS *and* namespace prefixing *and* an
@@ -18,8 +18,8 @@ sees the row it has already been relabelled, and the insert is perfectly legal.
 This is the only layer that can, so it does.
 
 **What it deliberately is not.** Not a `supersede` coordinator: retiring an
-incumbent as part of writing its successor is `MEMORY_ENGINE.md` §2.3, and the
-conflict detection that decides *whether* to is Layer 2, which does not exist.
+incumbent as part of writing its successor is `MEMORY_ENGINE.md` §2.3: Layer 2
+decides *whether* to, and ADR-0010's applier does it inside the write.
 Not a visibility authority either - nothing here can make a row readable, and
 that is the point of the step. The router's write returns with the facts
 durable, sourced, committed, and invisible.
@@ -96,8 +96,8 @@ class StoreRouter:
         content -> vector; typed relational predicates -> graph; most facts ->
         both" - and the distinguishing property is the predicate's declared
         type, which lives in the ontology. `MEMORY_ENGINE.md` §2.1 owns that
-        ontology and `S3.5` builds its loader, so until then there is no
-        information in the system with which to return anything else.
+        ontology and S3.5 built its loader, but the router is not given it,
+        so it has no information with which to return anything else.
 
         Returning the "most facts" answer is the right stand-in rather than a
         placeholder. Guessing the other two would be a guess in the direction

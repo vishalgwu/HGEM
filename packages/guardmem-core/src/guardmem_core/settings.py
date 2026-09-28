@@ -20,9 +20,9 @@ from a section that was there all along.
 `.env.example` is still the inventory of record, for a reason that survives the
 correction: it is checked against this class by `tests/unit/test_settings.py`, so
 a field added here and not there fails CI. Appendix B is a plan-time table that
-nothing checks - it lists `GM_GRAPH_BACKEND` and `GM_BUDGET_DAILY_USD`, which are
-not fields yet - so read it as the roadmap it is and `.env.example` as the state
-of the world.
+nothing checks - it listed `GM_GRAPH_BACKEND` before S7.1 made it a field, and
+still lists `GM_BUDGET_DAILY_USD`, which is not one - so read it as the roadmap
+it is and `.env.example` as the state of the world.
 
 **`extra="forbid"` is the sharp edge.** Any key in `.env` that is not declared
 below raises at construction - including keys with no `GM_` prefix. That is
@@ -118,8 +118,8 @@ class Settings(BaseSettings):
     neo4j_uri: AnyUrl
     neo4j_user: str
     # `SecretStr`, so it is `**********` in any repr or f-string and has to be
-    # asked for by name. Nothing in this repository reads it yet - S7.1's Neo4j
-    # backend is the first - which is exactly when to get the type right.
+    # asked for by name - which `graph/selection.build_graph` does, once, when it
+    # opens S7.1's Neo4j driver.
     neo4j_password: SecretStr
 
     # Which `GraphStore` the composition roots build. S7.1's flag, verbatim
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     # A tag, and RULES.md 3 wants a pinned id - `_reject_floating_tag` refuses
     # `:latest` and the adapter's docstring says why a tag is still weaker
-    # evidence than a Claude id. The three `model_*` fields above are Claude ids
+    # evidence than a Claude id. The three `model_*` fields below are Claude ids
     # and cannot serve a local run, which is why this is separate rather than
     # another spelling of `model_fast`.
     ollama_model: str = "llama3.1:8b"
@@ -200,20 +200,20 @@ class Settings(BaseSettings):
     # --- mcp server (S6.2) --------------------------------------------------
     # Which tenant and namespace the MCP server acts for.
     #
-    # **These exist because authentication does not.** `MCP_INTEGRATION.md` §1
-    # carries a `GUARDMEM_API_KEY`, and in the finished system that key is what a
-    # request's tenant is resolved from - by the gateway (S8.1) and its auth and
-    # RLS-context middleware (S8.2). Neither exists, and this server talks
-    # straight to Postgres, so there is nothing to resolve a tenant *from*. A
-    # server that guessed would be a cross-tenant read, which is the isolation
-    # failure the product exists to prevent, so it is stated in configuration
-    # instead and the tools refuse to run without it.
+    # **These exist because this server has no authentication.**
+    # `MCP_INTEGRATION.md` §1 carries a `GUARDMEM_API_KEY`, and a request's tenant
+    # is resolved from a key - as the gateway does, through S8.2's auth and
+    # RLS-context middleware. This server speaks stdio to one client and talks
+    # straight to Postgres, so there is no request to carry a key and nothing to
+    # resolve a tenant *from*. A server that guessed would be a cross-tenant
+    # read, which is the isolation failure the product exists to prevent, so it
+    # is stated in configuration instead and the tools refuse to run without it.
     #
     # Empty by default, and deliberately not required: `Settings` has nine
     # required fields and every one of them is needed by *every* entry point,
     # while these two are needed by one service. A blank value is the honest
     # representation of "this process is not configured to serve memory tools",
-    # and `mcp_server/context.py` turns it into a refusal that names the
+    # and `mcp_server/tools/context.py` turns it into a refusal that names the
     # variable rather than a query that returns somebody else's rows.
     #
     # `mcp_default_namespace` is §2.1's "defaults to server-configured

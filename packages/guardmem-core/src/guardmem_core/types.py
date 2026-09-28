@@ -79,7 +79,7 @@ ReviewTaskId = NewType("ReviewTaskId", str)
 TurnId = NewType("TurnId", str)
 
 # The human who decided a review task, e.g. "rn:sarah.r"
-# (MCP_INTEGRATION.md 2.1). Distinct from TaskId for the usual reason: both are
+# (MCP_INTEGRATION.md 2.1). Distinct from ReviewTaskId for the usual reason: both are
 # opaque strings, both appear together on every ReviewDecision, and BUILD
 # NOTEBOOK S18.3 makes reviewer identity a security property - it comes from the
 # token, never from the request body.

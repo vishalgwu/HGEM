@@ -66,25 +66,6 @@ _CHAT: Final = "/api/chat"
 # a guess - exactly what `RULES.md` §3 forbids.
 _FLOATING: Final = "latest"
 
-# Ollama turns `format` into a GBNF grammar, and a bounded length or item count
-# becomes a *repetition* in that grammar. Repetitions of 2000 or more are
-# refused outright, with `400 Failed to initialize samplers: failed to parse
-# grammar` - the whole schema, not the one field.
-#
-# Measured against Ollama 0.34.0 with `llama3.1:8b`, by bisection: **1999
-# compiles and 2000 does not**, for `maxLength`, `minLength` and `maxItems`
-# alike. A sharp boundary at a round number, so it is a constant in the
-# compiler rather than a size blow-up.
-#
-# This is not hypothetical. `ExtractedFact.verbatim` declares `max_length=2000`,
-# mirroring `Provenance.verbatim`, which put the extraction schema exactly one
-# over the line - so **no extraction ran on Ollama at all** until this was
-# found, and CHECKPOINT B was recorded twice as runnable locally when it was
-# not.
-
-# The keywords that become repetitions. `minimum`/`maximum` do not - they bound
-# a numeric *value*, not a count - and were measured to pass at 2000.
-
 
 class OllamaClient:
     """An `LLMClient` over a local Ollama server."""

@@ -22,7 +22,7 @@ import asyncio
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import pytest
 
@@ -45,9 +45,6 @@ from guardmem_core.schemas.turn import Turn, TurnRole
 from guardmem_core.schemas.verdict import Decision, Thresholds
 from guardmem_core.types import EntityId, Namespace, TenantId, TraceId, TurnId
 
-if TYPE_CHECKING:
-    pass
-
 TENANT: Final = TenantId("11111111-1111-1111-1111-111111111111")
 NS: Final = Namespace("patient:8812")
 SUBJECT: Final = EntityId("e-1")
@@ -60,8 +57,8 @@ THRESHOLDS: Final = Thresholds(
 class ScriptedResolver:
     """An `EntityResolver` that always answers the same entity.
 
-    Nothing in the package implements this protocol - see `deps.py` - so the
-    suite supplies one, and a constant is the right one here: entity resolution
+    `NamespaceEntityResolver` writes to Postgres, so the unit suite supplies
+    its own, and a constant is the right one here: entity resolution
     is not what these tests are about, and a fake that guessed would make every
     assertion below depend on the guess.
     """

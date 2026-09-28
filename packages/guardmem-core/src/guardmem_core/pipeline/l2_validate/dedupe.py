@@ -12,7 +12,7 @@ the judge - and this reads it.
 question before any judge is paid for, so they stay on the near side of that
 call and never reach `classify`. Everything downstream of the judge is a table
 lookup with no I/O, no clock and no ordering - which is what makes it testable
-the way `decide()` will be at S5.4.
+the way `decide()` is.
 
 **Two places this departs from the table as printed, both recorded because they
 are deliberate.**
@@ -54,8 +54,10 @@ Layer 3's composite and does not exist when Layer 2 runs, so the conjunct cannot
 be established and the row's own `else` applies. S4.3 recorded this as a
 deviation that "S4.4 owns closing"; it closes as a *total function* rather than
 a TODO - the rule is implemented in full, and `escalate` is what the rule
-itself returns when confidence is unknown. S5.4's `decide()` is where a
-confident, newer candidate may be upgraded, with the number in hand.
+itself returns when confidence is unknown. This said S5.4's `decide()` would
+upgrade a confident, newer candidate with the number in hand; S5.4 built
+`decide()` without that, and nothing else does it, so every contradiction
+escalates - the conservative direction, and a gap in §2.3 rather than a bug.
 """
 
 from __future__ import annotations

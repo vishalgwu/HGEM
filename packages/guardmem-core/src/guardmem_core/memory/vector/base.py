@@ -130,9 +130,9 @@ class Embedder(Protocol):
     Injected rather than constructed, so `guardmem-core` never imports a
     provider SDK - the same reason `LLMClient` is a Protocol. The store owns
     write-side embedding (see the module docstring) but not the *choice* of
-    model: `settings.embed_model` names the pin, `llm/providers/` implements it
-    from S9.1, and the eval harness and the unit suite pass deterministic
-    doubles.
+    model: `settings.embed_model` names the pin. Nothing implements it yet -
+    S9.1's `llm/providers/` are completion adapters only - so every service
+    passes `HashEmbedder`, as the unit suite does.
     """
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:

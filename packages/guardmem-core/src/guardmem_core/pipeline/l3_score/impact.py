@@ -31,8 +31,9 @@ the way `ConfidenceWeights` does. **`RiskVerdict` has nowhere to put it.**
 `policy_version` but nothing for beta. After the first refit,
 `scripts/replay_trace.py` would recompute a different `R` and print a diff it
 cannot explain. Flagged rather than fixed here: adding a field to a spec-of-
-record model is an ADR (`RULES.md` §8), and S5.5's audit chain and S5.6's replay
-are the steps that will actually feel it.
+record model is an ADR (`RULES.md` §8). S5.5's audit chain and S5.6's replay
+are what feel it, and both shipped with it open: the first refit is where the
+unexplained diff appears.
 """
 
 from __future__ import annotations

@@ -22,8 +22,8 @@ dependencies = [
   "pydantic-settings>=2.5",
   "rapidfuzz>=3.10",
   # --- DECLARED AND NOT YET IMPORTED ---------------------------------------
-  # These four are S1.1's list and every one of them is unused by the package
-  # as it stands. They are kept deliberately, each annotated with the step that
+  # Two remain of S1.1's four - `httpx` and `numpy` moved below when S9.1 and
+  # S5.1 imported them. They are kept deliberately, each annotated with the step that
   # makes it real, because an audit that finds an unimported dependency and
   # cannot tell "not needed yet" from "no longer needed" removes the wrong one.
   # Re-check this block whenever one of those steps lands: a dependency that is
@@ -31,17 +31,15 @@ dependencies = [
   #
   # `structlog` S13.1 observability. RULES.md 6: structured JSON logging only,
   #                   every line carrying trace_id, tenant_id and namespace.
-  # `anyio`     S9.1  CPU-bound work off the event loop. RULES.md 2.2 routes it
-  #                   through anyio.to_thread, and S9.1's local embedder is the
-  #                   first such work the package owns.
-  #                   RETAGGED FROM S4.3, per this block's own re-check rule.
-  #                   S4.3 shipped and did not import it: the step chose a
-  #                   BALANCED-tier LLM judge, which is a network call, and
-  #                   deferred the local cross-encoder ("swap in a local
-  #                   cross-encoder in week 2 if latency demands it"). That
-  #                   cross-encoder still needs this, behind the NLIJudge
-  #                   protocol, but "week 2" is not a step id and S9.1 is the
-  #                   nearer honest one. Kept, not removed.
+  # `anyio`     S11.3 CPU-bound work off the event loop. RULES.md 2.2 routes it
+  #                   through anyio.to_thread, and S11.3's Presidio analysis
+  #                   (`guardrails/pii.py`) is the first CPU-bound work a step
+  #                   puts in this package - synchronous NLP on every proposal.
+  #                   RETAGGED TWICE, per this block's own re-check rule: from
+  #                   S4.3, which chose a BALANCED-tier LLM judge over the
+  #                   local cross-encoder it deferred, and from S9.1, which
+  #                   built network adapters and no local embedder. Either of
+  #                   those would need it too, if it is ever built.
   "structlog>=24.4",
   "anyio>=4.6",
   # --- model providers, imported today -------------------------------------

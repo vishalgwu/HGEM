@@ -169,9 +169,9 @@ class AnthropicClient:
         """Issue `n` requests concurrently and return every reply.
 
         Returns:
-            The messages, in the order the samples were requested - `gather`
-            preserves argument order regardless of completion order, which is
-            what makes "sample 0 is canonical" meaningful.
+            The messages, in the order the samples were requested -
+            `draw_samples` returns request order regardless of completion
+            order, which is what makes "sample 0 is canonical" meaningful.
 
         Raises:
             ProviderUnavailable, BudgetExceeded: as `complete`.

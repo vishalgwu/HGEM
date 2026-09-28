@@ -161,9 +161,9 @@ def link_span(verbatim: str, source: str) -> SpanMatch | None:
     # almost any source, so the exact pass below would find it and return a span
     # quoting a single space - non-empty, so `Provenance` accepts it, and a
     # citation of nothing, which `RULES.md` §1.1 treats exactly as no span at
-    # all. The fuzzy path already refused it in `_snap`; without this the two
-    # halves of the same function disagreed about the same input. Found by the
-    # I1 property test, not by a hand-written case.
+    # all. This check refuses it for both passes: `_snap` has no whitespace case
+    # of its own, for the reason its docstring gives. Found by the I1 property
+    # test, not by a hand-written case.
     if not verbatim.strip() or not source:
         return None
 

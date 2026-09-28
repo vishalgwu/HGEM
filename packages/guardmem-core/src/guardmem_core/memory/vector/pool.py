@@ -243,8 +243,8 @@ async def tenant_transaction(
             the caller's own statements take it again, so a transaction's worst
             case is a multiple of this rather than this. That is the existing
             convention applied consistently; ADR-0012 records why a genuine
-            end-to-end budget is S8.2's problem and not a third meaning for this
-            argument.
+            end-to-end budget is not a third meaning for this argument, and the
+            gateway's `deadline.py` is where that budget was built.
 
     Yields:
         A connection with `app.tenant_id` set and a transaction open.

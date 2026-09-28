@@ -13,11 +13,10 @@ is counted and sampled into the dashboard funnel - you must be able to see what
 the filter is eating."* A `dropped` list of bare turns cannot satisfy that, so
 `DroppedTurn` carries the reason and the tier that decided it.
 
-`MemoryProposal` - the API object that carries these in - is still deferred to
-the gateway (S8.1), for the reason `schemas/candidate.py` gives: its shape is
-published in `MCP_INTEGRATION.md` §2.2 as a tool schema, and `memory.propose`
-takes `content` as one string. Splitting that string into turns is the
-gateway's job; this module is what it produces.
+The API objects that carry these in live with the surfaces that accept them,
+for the reason `schemas/candidate.py` gives. The gateway's `ProposeRequest`
+(S8.1) takes a conversation already split into turns; `memory.propose` takes
+`content` as one string (`MCP_INTEGRATION.md` §2.2) and makes it one turn.
 
 Import direction: this module depends on `base` and `types` only, so it hangs
 off the bottom of the chain that `schemas/__init__.py` documents rather than

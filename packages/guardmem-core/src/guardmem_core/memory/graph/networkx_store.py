@@ -32,8 +32,8 @@ safe failure, and is how you find out you wanted Neo4j.
 **Nothing here is `to_thread`ed.** `RULES.md` §2.2 sends CPU-bound work to a
 thread, and these methods are `async` because the protocol is - but the work is
 a dict lookup and an adjacency walk over an in-process graph. A thread hop would
-cost more than the traversal. The step that makes this a network call is S7.1,
-and that one is genuinely I/O.
+cost more than the traversal. S7.1's Neo4j backend is the network-bound one,
+and genuinely I/O.
 """
 
 from __future__ import annotations
@@ -144,9 +144,9 @@ class NetworkXGraphStore:
 
         Multi-hop follows a string object back to an entity of that id, which is
         the assumption `Edge.object` documents and the same one the fake makes:
-        the ontology decides whether a string is an entity reference, and there
-        is no ontology until S3.5. Cycles terminate because each edge is visited
-        once.
+        the ontology decides whether a string is an entity reference, and the
+        graph store is not given one - `keys.object_key` treats every string as
+        a reference. Cycles terminate because each edge is visited once.
         """
         seen: set[AssertionId] = set()
         found: list[Edge] = []

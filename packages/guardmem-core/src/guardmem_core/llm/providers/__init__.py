@@ -34,7 +34,7 @@ and the composition root holds the lifetime after all. See its module docstring.
 S9.2 routes between these, S9.3 adds the breaker and the cross-provider
 fallback `ARCHITECTURE.md` §4 requires, and S10.1 turns `cost_usd` into a
 per-tenant ledger. None of that is here: this package answers "can we call a
-model at all", which until now was no.
+model at all", which before S9.1 was no.
 """
 
 from guardmem_core.llm.providers.anthropic_client import AnthropicClient

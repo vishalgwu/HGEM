@@ -14,18 +14,20 @@ backend an operator decision and a Qdrant store has no Postgres transaction to
 join. Writing and auditing atomically is therefore a Postgres-specific
 composition owning one connection, and building it here would mean either
 widening the protocol or teaching the store about audit. Both are ADR-sized
-(`RULES.md` §8). What ships is the decision layer, complete and replayable.
+(`RULES.md` §8), and ADR-0010 made it `memory/applier.py`, one Postgres
+transaction per candidate; `governance.govern` is run-then-apply. What stays
+here is the decision layer, complete and replayable.
 
-**Layers 2 and 3 live in `candidate.py`.** This module is the per-*proposal*
+**Layers 2 and 3 live in `per_candidate.py`.** This module is the per-*proposal*
 half - noise filter, extraction, schema gate, and the bounded fan-out - and
 that split is the one the paragraph below already described before
 `RULES.md` §2.4's cap made it structural.
 
 **Candidates are scored concurrently and the bound is explicit.** S5.6's sketch
 says "bounded by semaphore, TaskGroup" and `RULES.md` §2.2 says the same for any
-fan-out. Each candidate costs up to three model calls - the judge, and `entail`
-twice - so an unbounded batch of forty is forty concurrent completions against
-one provider's rate limit. The bound comes off `Deps`, which reads it from
+fan-out. Each candidate costs up to two model calls - the judge, and one
+batched entailment lookup - so an unbounded batch of forty is forty concurrent
+completions against one provider's rate limit. The bound comes off `Deps`, which reads it from
 `settings.max_concurrent_scores`: this module shipped with a module-level
 constant instead, which meant the setting S1.4 declared for exactly this had no
 reader, and `GM_MAX_CONCURRENT_SCORES=2` changed nothing while looking as though
@@ -155,8 +157,8 @@ async def run(proposal: Proposal, deps: Deps) -> tuple[PipelineResult, list[Cand
 
     Args:
         proposal: What to govern.
-        deps: Everything to govern it with. See `deps.py` on the three
-            dependencies nothing in this repository supplies.
+        deps: Everything to govern it with, as `governance.build_deps`
+            composes it.
 
     Returns:
         The result, and one `CandidateFailure` per candidate that raised.

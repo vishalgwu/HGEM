@@ -25,7 +25,7 @@ ordering has a consequence worth stating: override 6's `require_review` cannot
 pull a REJECT up into a review. An obligation tightens, and a rejection is
 already tighter.
 
-**Three of the seven need inputs `decide()`'s declared signature cannot
+**Four of the seven need inputs `decide()`'s declared signature cannot
 supply**, which is why `OverrideSignals` exists - see its docstring.
 """
 

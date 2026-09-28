@@ -1,8 +1,9 @@
 """Which adapter a composition root builds.  S6.2, S9.1
 
-Two roots need this and they need the same answer: `mcp_server/lifespan.py`,
-which serves `memory.propose`, and `scripts/checkpoint_b_generate.py`, which
-fills the gate's corpus. A second copy of the mapping would be free to drift on
+Every composition root needs this and they need the same answer: the MCP
+server's and the gateway's lifespans, the worker's startup, and
+`scripts/checkpoint_b_generate.py`, which fills the gate's corpus. A second
+copy of the mapping would be free to drift on
 which provider a blank key falls back to - and "it quietly ran on a different
 model than you asked for" is the one thing that makes two AUROCs incomparable.
 

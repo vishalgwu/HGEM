@@ -8,10 +8,10 @@ types.py". The two instructions conflict only in spelling - `NewType` erases to
 `str` at runtime, so the wire format and the database column are identical
 either way. The stricter reading wins.
 
-`MemoryProposal`, the API-level input that produces these, is **not** here. Its
-shape is published in `MCP_INTEGRATION.md` §2.2 as a tool schema rather than as
-a domain model, and the gateway is what turns one into candidates (S8.1); it
-arrives with the surface that accepts it.
+The API-level input these come from is **not** here. Its shape belongs to the
+surfaces that accept it - `MCP_INTEGRATION.md` §2.2 publishes it as a tool
+schema, and the gateway's `ProposeRequest` (S8.1) is the REST form - and both
+hand the pipeline turns; extraction is what makes candidates of them.
 """
 
 from __future__ import annotations
@@ -161,8 +161,10 @@ class ExtractionResult(GMModel):
             answer to a question no document asks: when three of five samples
             propose a fact, is `K` three or five? Three discards real evidence
             of uncertainty; five needs a rule for what an absence clusters *as*.
-            Either choice silently recalibrates `C`, so it belongs with **S5.6**,
-            which composes the pipeline and can see both ends.
+            Either choice silently recalibrates `C`, so **S5.6**, which composes
+            the pipeline and can see both ends, settled it: `K` is the draw
+            count and an absence is a sample of its own (`pipeline/inputs.py`'s
+            `draws_for`, and `entropy.py` on why).
             Note this is not redundant with `candidates` - it includes facts
             that were dropped for want of a span, which is what makes the
             funnel's drop sample possible.

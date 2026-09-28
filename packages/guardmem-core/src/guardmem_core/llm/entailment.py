@@ -4,11 +4,11 @@
 chooses one: §3.1's reuse note says the clustering there "is the same machinery
 as LID's semantic-entropy detector", and S5.1 asks that the callable stay
 injected "so LID can back it later without touching this module". Nothing
-injected one. `pipeline/deps.py` records the consequence - `entail` is one of
-the three `Deps` members with no producer - and it is the largest of the three
-by weight: §3.2 gives `w_H = 0.35` to the entropy term this clusters for and
-`w_src = 0.25` to the grounding it measures, so **0.60 of `C` arrives through
-this file**.
+injected one until this, and `entail` was the largest of the three `Deps`
+members that had no producer: §3.2 gives `w_H = 0.35` to the entropy term this
+clusters for and `w_src = 0.25` to the grounding it measures, so **0.60 of `C`
+arrives through this file**. `governance.build_deps` wires `LLMEntailer.lookup`
+into every service.
 
 **Why an LLM and not a cross-encoder.** §2.2(a) asks for "DeBERTa-v3-MNLI class,
 or BALANCED-tier LLM judge", and `l2_validate/nli.py` already took the second
@@ -33,7 +33,8 @@ scored is precisely the failure CHECKPOINT B's list calls "a scorer that
 produces plausible numbers with no discriminative power", and S9.1 found a live
 instance of it - a fixed seed made every entropy sample identical and `H_norm`
 would have been 0 forever, with no error anywhere. A missing pair is a caller
-bug; it raises, `_score_one` attributes it to its candidate, and the batch keeps
+bug; it raises, `per_candidate.score_candidate` attributes it to its candidate,
+and the batch keeps
 its other results.
 
 **What this does not do.** It does not cache across calls. Two proposals that

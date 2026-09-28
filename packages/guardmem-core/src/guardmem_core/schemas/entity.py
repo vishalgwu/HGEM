@@ -20,9 +20,9 @@ Two places where the model deliberately does not mirror the SQL one-to-one:
 
 `Predicate` is listed for this module by `PROJECT_TREE.md` and is not here. Its
 fields - cardinality, impact, `min_source_tier`, `requires_corroboration` - are
-specified by `MEMORY_ENGINE.md` §2.1 as *ontology* content, and S3.5 builds
-`schemas/ontology.py` with the loader that validates them. Defining half of it
-here would give the ontology two homes.
+specified by `MEMORY_ENGINE.md` §2.1 as *ontology* content, and S3.5 built them
+into `schemas/ontology.py` as `PredicateSpec`, beside the loader that validates
+them. Defining half of it here would give the ontology two homes.
 """
 
 from __future__ import annotations

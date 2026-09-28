@@ -282,7 +282,7 @@ class PgVectorStore:
             StoreUnavailable: Postgres is unreachable.
             KeyError: `filters` named something outside the vocabulary.
 
-        `_predicates` builds the shared clauses and is reused rather than
+        `queries.predicates` builds the shared clauses and is reused rather than
         copied - the tenant is applied by `SET LOCAL` on the transaction and the
         namespace and filter binding are identical, so a second hand-written
         WHERE here would be a second place for the isolation rules to drift.
@@ -376,8 +376,8 @@ class PgVectorStore:
             applied. `SET LOCAL`, and `pool.py` explains at length why the
             `LOCAL` is the load-bearing word.
 
-        A one-line forward rather than an import used directly at the three call
+        A one-line forward rather than an import used directly at the four call
         sites: the tenant is a property of *this store*, and spelling it out
-        three times is three chances to pass someone else's.
+        four times is four chances to pass someone else's.
         """
         return tenant_transaction(self._pool, self._tenant_id, timeout_s=self._timeout_s)
