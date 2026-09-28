@@ -264,6 +264,35 @@ def test_the_pre_commit_mypy_hook_checks_what_make_typecheck_checks() -> None:
     )
 
 
+def _installed_groups(job: str) -> set[str]:
+    """The dependency groups one CI job's `uv sync` installs."""
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    (command,) = [
+        step["run"] for step in workflow["jobs"][job]["steps"] if "uv sync" in step.get("run", "")
+    ]
+    tokens = command.split()
+    groups = {tokens[index + 1] for index, token in enumerate(tokens) if token == "--group"}
+    return groups | ({"dev"} if "--dev" in tokens else set())
+
+
+def test_the_hooks_job_installs_what_the_gates_job_does() -> None:
+    """Both jobs run one mypy command over the same trees - `gates` as `make
+    typecheck`, `hooks` through the hook the test above pins to it - so both
+    need every package those trees import.
+
+    Pinning the hook to the Makefile was not enough on its own. The hook's CI job
+    installed less than `gates`, so once a828c64 widened the hook to `bench`,
+    `pre-commit` failed on `import locust` while `gates` passed the same check on
+    the same commit - b48f722 and 3cfd4c8, until 67fc0f6 fixed the install.
+    """
+    assert _installed_groups("hooks") >= _installed_groups("gates"), (
+        "the pre-commit job installs fewer dependency groups than the gates job, "
+        "so its mypy hook can fail on an import `make typecheck` resolves"
+    )
+
+
 def test_the_scan_finds_the_imports_it_is_supposed_to_find() -> None:
     """The control.
 
