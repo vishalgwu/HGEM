@@ -108,9 +108,9 @@ async def run_propose(context: ToolContext, arguments: dict[str, Any]) -> dict[s
         namespace=context.namespace,
         # §2.2's `content` is one string; `Proposal.turns` is the structured
         # form the noise filter needs. One turn, because a caller sending raw
-        # text has not told us where its boundaries are - S8.1's gateway is
-        # what splits a real conversation, and inventing boundaries here would
-        # put fabricated `turn_id`s into provenance.
+        # text has not told us where its boundaries are - S8.1's gateway takes
+        # a conversation already split into turns, and inventing boundaries
+        # here would put fabricated `turn_id`s into provenance.
         turns=[
             Turn(
                 turn_id=TurnId("t1"),

@@ -127,7 +127,8 @@ def result_of(
     return {
         "trace_id": str(result.trace_id),
         # §2.2's own vocabulary: "decided" for strict, "accepted" for async.
-        # `_require_mode` refuses async until S8.4, so this is always the former.
+        # `_require_mode` refuses async - this server has no queue client - so
+        # this is always the former.
         "status": "decided",
         "candidates": [
             _candidate(item.candidate, item.record, outcomes.get(str(item.candidate.candidate_id)))

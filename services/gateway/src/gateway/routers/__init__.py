@@ -10,9 +10,10 @@ registered by hand is a router somebody can forget to register, or register afte
 the middleware that was supposed to cover it, and neither mistake fails a test
 that only checks the endpoints it knows about.
 
-Only `health` carries endpoints today. The other five are declared and empty,
-each naming the step that fills it - see their module docstrings for why an empty
-router is the honest state rather than a stub.
+`health` and `memory` carry endpoints - S8.1's probes, and the search and
+propose S8.2-S8.4 built. The other four are declared and empty, each naming the
+step that fills it - see their module docstrings for why an empty router is the
+honest state rather than a stub.
 """
 
 from __future__ import annotations

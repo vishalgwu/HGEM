@@ -1,22 +1,14 @@
 """What the server process owns, and how long it owns it.  BUILD_NOTEBOOK.md S6.1
 
 S6.1's instruction is "wire lifespan: settings, Postgres pool, LLM client,
-pipeline deps". Three of those four are wired here. The fourth cannot be, and
-the reason is the same one that has CHECKPOINT B recorded as BLOCKED:
-**there is no `LLMClient` implementation in this repository.** `llm/base.py`
-declares the Protocol, `tests/fixtures/fakes.py` implements it for the suite,
-and S9.1 builds the provider adapters. Binding `FakeLLM` here to make the
-sentence come true would give the first user-facing surface in the project a
-scripted model behind it, which is the one thing a governed-memory server must
-not have.
-
-`pipeline.Deps` follows it for the same reason plus one more: `EntityResolver`
-is a Protocol that nothing implements, so `Deps` cannot be constructed at all
-today. (`CandidateClassifier` was the second until ADR-0009, which deletes it
-rather than implements it - two of §3.3's three undeclared features become
-ontology fields and the third always came off the namespace.) That is what S6.2
-is actually blocked on - not on writing tool handlers - and it is better known
-now than discovered halfway through the step.
+pipeline deps". The first three are opened here. The LLM client came with
+S9.1's adapters - until then this deliberately bound nothing rather than
+`FakeLLM`, because a scripted model behind the first user-facing surface is
+the one thing a governed-memory server must not have - and `_llm_or_none`
+leaves it `None` when no provider is configured, so the read tools still
+serve. `pipeline.Deps` is not built here: it binds a tenant's store, so
+`tools/governing.deps_for` composes it per call through
+`governance.build_deps`.
 
 **Why a pool opens for a server that serves no tools.** Because the alternative
 makes S6.1's DONE WHEN check nothing. "The inspector connects and lists zero
@@ -119,12 +111,11 @@ class ServerState:
             which, because nothing downstream should have to ask.
         embedder: Write-side embedding, typed as the `Embedder` protocol for
             the reason `graph` is. **The `HashEmbedder` bound today models no
-            semantics** -
-            it hashes text, so identical text retrieves identically and nothing
-            else does. It is here because it is the only `Embedder` in the
-            package until S9.1, and naming it in the state is better than a
-            handler reaching for one on its own. Nothing measured against it is
-            a retrieval quality number.
+            semantics** - it hashes text, so identical text retrieves identically
+            and nothing else does. It is here because it is the only `Embedder`
+            in the package - S9.1 built no embedding provider - and naming it in
+            the state is better than a handler reaching for one on its own.
+            Nothing measured against it is a retrieval quality number.
         ontology: The validated predicate pack, loaded once. `load_ontology` is
             itself cached, so this field is about making the dependency visible
             rather than about avoiding a second parse.

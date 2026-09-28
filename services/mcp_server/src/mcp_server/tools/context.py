@@ -1,11 +1,11 @@
 """Who a tool call speaks for, and what it is allowed to touch.  S6.2
 
 Every one of the four tools needs the same two answers before it can do
-anything: which tenant, and which namespace. In the finished system neither is a
-question - `MCP_INTEGRATION.md` §1's `GUARDMEM_API_KEY` carries the tenant, the
-gateway resolves it (S8.1) and its middleware sets the RLS context (S8.2), and a
-tool handler never sees the decision. None of that exists, and this server talks
-straight to Postgres.
+anything: which tenant, and which namespace. Behind the gateway neither is a
+question - `MCP_INTEGRATION.md` §1's `GUARDMEM_API_KEY` carries the tenant and
+S8.2's middleware resolves it and sets the RLS context, so a handler never sees
+the decision. This server is not behind the gateway: it speaks stdio to one
+client and talks straight to Postgres, with no request to carry a key.
 
 So the tenant comes from configuration and the refusal to proceed without it is
 the whole point of this module. `RULES.md` §4 wants defence in depth - "RLS

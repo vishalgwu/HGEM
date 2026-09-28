@@ -6,28 +6,20 @@
     uv run python -m scripts.checkpoint_b score corpus.jsonl
     uv run python -m scripts.checkpoint_b agreement first.jsonl second.jsonl
 
-**The discrimination test cannot be run yet, and the reason is structural rather
-than missing work.** Step 3 is "run the pipeline, collect `C` for each", and the
-pipeline needs a real `LLMClient` to extract candidates and judge conflicts.
-There is no implementation: `llm/base.py` declares the Protocol, `FakeLLM`
-implements it for tests, and S9.1 builds the provider adapters. Scoring against
-`FakeLLM` would measure scripted responses.
-
-Nor can the corpus be hand-written around that. The candidates have to come from
-real extraction, because what the gate measures is whether `C` separates the
-facts a model *actually proposes* - hand-authoring 200 of them would grade the
-scorer against the author's idea of a plausible mistake, which is the "no model
-grading" problem wearing a different hat.
-
-So this ships as everything except generation:
+**The candidates have to come from real extraction.** Step 3 is "run the
+pipeline, collect `C` for each", and what the gate measures is whether `C`
+separates the facts a model *actually proposes* - hand-authoring 200 of them
+would grade the scorer against the author's idea of a plausible mistake, which
+is the "no model grading" problem wearing a different hat. Scoring against
+`FakeLLM` would measure scripted responses, which is why this sat BLOCKED until
+a real provider existed.
 
 - `verify` runs the manual checks B1-B8 by running the tests that cover them.
-- `template` writes the corpus format, which is the contract generation has to
-  fill.
+- `generate` runs the real pipeline over a proposals file and writes an
+  unlabelled corpus.
+- `template` writes the corpus format, which is the contract generation fills.
 - `score` is the gate: AUROC, the per-term diagnostics, the sign-off block.
 - `agreement` is diagnostic 3, the self-consistency check on the labels.
-
-`score` works end to end today against a corpus file.
 
 **Generation shipped 2026-09-15** as `scripts/checkpoint_b_generate.py`, after
 the four things that had been in its way: no `LLMClient` (S9.1), no
@@ -36,10 +28,10 @@ the four things that had been in its way: no `LLMClient` (S9.1), no
 It is a separate module because composing a real `Deps` - a pool, a provider, a
 resolver, an ontology - is a composition root, and this file is a CLI.
 
-So all four subcommands work. What is *not* solved is the corpus: one
-conversation is one subject under one namespace, and the shipped transcript is
-forty turns for one patient. Reaching the checkpoint's 200 candidates means more
-conversations, which is why `generate` reads a proposals file.
+One conversation is one subject under one namespace, so reaching the
+checkpoint's 200 candidates took many conversations, which is why `generate`
+reads a proposals file. The corpus is `evals/datasets/checkpoint_b/`, and its
+README is the record of how it was made and what a score from it means.
 """
 
 from __future__ import annotations

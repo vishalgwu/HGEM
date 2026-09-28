@@ -8,8 +8,8 @@ product exists to prevent people inventing.
 
 | Prompt | S6.4 | Why |
 |---|---|---|
-| `guardmem/extract_memories` | served | `extract_memories/v1.md`, which the pipeline sends |
-| `guardmem/adjudicate_conflict` | served | `adjudicate_conflict/v1.md`, likewise |
+| `guardmem/extract_memories` | served | the file the extractor renders, at its `PROMPT_VERSION` |
+| `guardmem/adjudicate_conflict` | served | the file `LLMJudge` renders, likewise |
 | `guardmem/review_brief` | declines | the review queue is **S18.1**; no task to render |
 | `guardmem/memory_hygiene_report` | declines | drift is unmeasured; see `hygiene.py` |
 

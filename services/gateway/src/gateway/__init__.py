@@ -10,11 +10,11 @@ speaking HTTP. Both surfaces front the same `guardmem_core` pipeline, which is
 what `ARCHITECTURE.md` §2.2 means by the engine running identically in the
 gateway, the worker and the eval harness.
 
-What ships at S8.1 is the skeleton: the process starts, opens its resources,
-serves `/healthz` and `/readyz`, and publishes an OpenAPI document. Auth, tenancy
-and RLS context are S8.2; rate limiting and idempotency are S8.3; the async path
-is S8.4. The five routers those steps fill are declared and empty - see
-`routers/__init__.py`.
+S8.1 shipped the process: it starts, opens its resources, serves `/healthz` and
+`/readyz`, and publishes an OpenAPI document. S8.2 added auth, tenancy and the
+RLS context, S8.3 rate limiting and idempotency, and S8.4 the async path; the
+`memory` router carries their endpoints, and four routers are still declared
+and empty - see `routers/__init__.py`.
 
 `main.py` owns the application, `lifespan.py` owns the process's resources, and
 they are separate because they fail differently: a handler bug is a bad response

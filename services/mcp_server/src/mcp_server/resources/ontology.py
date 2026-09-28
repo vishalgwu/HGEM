@@ -57,7 +57,7 @@ async def read_ontology(context: ToolContext, namespace: str) -> types.TextResou
         `text/yaml`, prefixed by a comment naming the pack and its version.
 
     `as_prompt_yaml()` rather than a bespoke rendering, and that is the point of
-    the resource: it is **byte-for-byte what `extract_memories/v1.md` is given**
+    the resource: it is **byte-for-byte what the extraction prompt is given**
     when the pipeline runs. An agent that formats a candidate against this is
     formatting against the same description the extractor was, so a shape that
     reads as correct here is one the schema gate accepts. A second rendering

@@ -1,12 +1,13 @@
 """The write and read path.  BUILD_NOTEBOOK.md S8.2, S8.4
 
-Propose a candidate, search, fetch an entity.
+Search and propose. Fetching an entity has no endpoint here yet; MCP's
+`memory.get_entity` serves it.
 
-**One endpoint at S8.2, and it is a read.** S8.2's DONE WHEN is "a token for
+**One endpoint at S8.2, and it was a read.** S8.2's DONE WHEN is "a token for
 tenant A cannot read tenant B's assertions through REST, MCP, or the SDK", and a
 claim about reading needs something to read through. `GET /memory/search` is that
-surface. The write path is S8.4's, where the async mode and the 202 contract are
-decided together.
+surface. The write path came at S8.4, where the async mode and the 202 contract
+were decided together.
 
 **What makes the isolation real is what is absent.** `queries.py` contains no
 tenant predicate - not one - so nothing here filters by tenant and nothing here

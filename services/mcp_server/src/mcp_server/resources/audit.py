@@ -6,12 +6,12 @@ severity as a wrong decision" - and this resource is the first surface where
 that claim is something a person can check rather than take on trust.
 
 **Every event for the trace, not only the decision.** ADR-0010's applier writes
-`DECISION` for all four outcomes and adds `WRITE`, `SUPERSEDE` or `REVIEW` where
-state changed, in one transaction. A resource that returned only the `DECISION`
-would answer "what did it decide" and not "what did it do", and the second
-question is the one an audit is for. The digests come too: `prev_digest` and
-`digest` are what make the chain checkable, and omitting them would turn a
-tamper-evident record into a list of claims.
+`DECISION` for all four outcomes and adds `WRITE` and `SUPERSEDE` where state
+changed, in one transaction; `REVIEW` joins them when S18.1's queue exists. A
+resource that returned only the `DECISION` would answer "what did it decide" and
+not "what did it do", and the second question is the one an audit is for. The
+digests come too: `prev_digest` and `digest` are what make the chain checkable,
+and omitting them would turn a tamper-evident record into a list of claims.
 
 **It reads the tenant's whole chain and filters in Python, which is honest for
 now and will not be for a busy tenant.** `audit_store.read_chain` says the same

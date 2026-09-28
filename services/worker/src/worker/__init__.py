@@ -6,10 +6,16 @@ proposal in under 80 ms and the governing happens here, off the request. `PRD.md
 only true if it runs somewhere nobody is waiting.
 
 One job ships at S8.4 - `evaluate`. `PROJECT_TREE.md` names `compact`, `reindex`,
-`digest`, `sla_sweeper` and the outbox relay binding, and each arrives with the step
-that needs it. The relay is worth a note: `S3.3` put its logic in
-`guardmem_core.memory.relay`, so the task here will be the arq binding that calls
-`run_once()` rather than a second implementation.
+`digest` and `sla_sweeper`, and each arrives with the step that needs it.
+
+**The outbox relay binding was this step's, and it is missing.** S3.3 put the
+relay's logic in `guardmem_core.memory.relay` and gave "the arq task that calls it
+on a schedule" to the step that builds the worker. S8.4 shipped without it, so no
+process runs the relay: a written row stays `visible=false`, and only
+`scripts/seed_demo_tenant.py` drains the outbox. The binding is an arq cron calling
+`run_once()`, not a second implementation - but on the default in-process graph
+its graph writes would live only in the worker's memory, so it wants
+`GM_GRAPH_BACKEND=neo4j` decided first.
 
 `main.py` owns the process and its resources; `composition.py` owns the pipeline's
 thirteen dependencies. They are separate because they fail differently - a bad

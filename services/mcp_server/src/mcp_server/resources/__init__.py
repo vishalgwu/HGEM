@@ -32,8 +32,9 @@ ADR-0010's applier and nothing tells a *session* about it - there is no bus, no
 `LISTEN/NOTIFY`, and on stdio no second process to hear one. Advertising
 `subscribe` would promise `notifications/resources/updated` that never arrive,
 and "subscribed and silent" is indistinguishable from "nothing has changed",
-which is the failure-with-no-symptom that note exists to refuse. It belongs with
-the worker at S8.4, which is the first thing in this system that watches writes.
+which is the failure-with-no-symptom that note exists to refuse. It was moved
+to the worker at S8.4, as the first thing that would watch writes, and S8.4
+built a worker that performs writes and watches none - so it has no home yet.
 """
 
 from __future__ import annotations

@@ -1,8 +1,9 @@
 """Reads over the hash-chained audit log, including chain verification.  BUILD_NOTEBOOK.md S11.x
 
-Empty at S8.1. The chain is already written - `observability/audit.py` owns it
-and `replay_trace.py` already reads it - so what is missing is the tenant
-scoping that stops one tenant reading another's trace, which is S8.2.
+Empty. The chain is already written - `observability/audit.py` owns it and
+`replay_trace.py` reads it - and since S8.2 a request carries the authenticated
+tenant that would scope a read, so what is missing is only the endpoints, which
+are the step this module is titled with.
 
 The router is declared now rather than at the step that fills it, for the
 reason the Makefile declares its later targets: the router list is S8.1's

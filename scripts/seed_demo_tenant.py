@@ -18,17 +18,18 @@ property S3.2 and S3.3 built for the relay's replay, reaching its second caller
 unchanged - which is the useful signal here: the seed needed no idempotence
 machinery of its own.
 
-**Seeded vectors are reproducible noise.** There is no `Embedder` in the package
-until S9.1, so this uses a deterministic hash embedder. Identical text embeds
+**Seeded vectors are reproducible noise.** The package's only `Embedder` is the
+deterministic hash one - S9.1 built no embedding provider. Identical text embeds
 identically and different text lands somewhere unrelated; *semantic* similarity
 is not modelled at all. Nothing about retrieval quality may be measured against
 seeded data - `RULES.md` §5 puts that in the nightly eval suite, where there is
 a labelled corpus.
 
-**Confidence is a placeholder and says so.** Layer 3 does not exist, so nothing
-here is scored; `risk` is the impact floor `MEMORY_ENGINE.md` §3.3 declares for
-the predicate's declared impact, which is the one part of the number that is
-real. Do not calibrate anything against these values.
+**Confidence is a placeholder and says so.** The seed writes through the store,
+not the pipeline - it predates Layer 3 and stays deterministic by not running
+it - so nothing here is scored; `risk` is the impact floor `MEMORY_ENGINE.md`
+§3.3 declares for the predicate's declared impact, which is the one part of the
+number that is real. Do not calibrate anything against these values.
 """
 
 from __future__ import annotations

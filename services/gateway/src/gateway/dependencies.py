@@ -1,7 +1,7 @@
 """How a handler reaches what the process owns.  BUILD_NOTEBOOK.md S8.1
 
-One dependency, and it exists so that no handler writes
-`request.app.state.gateway` itself. `app.state` is untyped - Starlette declares
+The dependencies a handler takes, starting with the one that means no handler
+writes `request.app.state.gateway` itself. `app.state` is untyped - Starlette declares
 it as an object you may set anything on - so every direct read is a place where
 `mypy --strict` sees `Any` and stops checking. `RULES.md` §2.1's whole argument
 for `NewType` over `str` applies to the same effect here: the types are only

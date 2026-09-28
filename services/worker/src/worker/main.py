@@ -113,8 +113,9 @@ class WorkerSettings:
 
     Attributes:
         functions: Every job this worker can run. One today; `compact`, `reindex`,
-            `digest`, `sla_sweeper` and the outbox relay binding are named in
-            `PROJECT_TREE.md` and arrive with the steps that need them.
+            `digest` and `sla_sweeper` are named in `PROJECT_TREE.md` and arrive
+            with the steps that need them. The outbox relay binding is missing -
+            see the package docstring.
         queue_name: Must equal the gateway's `QUEUE`.
         redis_settings: Built from `GM_REDIS_URL` by `main`, so the worker and the
             gateway cannot be pointed at different Redis instances by drift.

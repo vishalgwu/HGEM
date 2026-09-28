@@ -1,9 +1,8 @@
 """`memory.search`.  MCP_INTEGRATION.md §2.1, BUILD_NOTEBOOK.md S6.2
 
 The read half of S6.2's DONE WHEN - "find it via `memory.search` with its
-provenance" - and the one core tool that is complete today. It needs a store, an
-embedder and a namespace, and all three exist; nothing here touches the pipeline,
-so none of S9.1's absent dependencies reach it.
+provenance". It needs a store, an embedder and a namespace; nothing here
+touches the pipeline, so it serves with no model provider configured.
 
 **`excluded` is the field this tool exists to get right.** §2.1: "the agent
 should be able to tell the difference between 'we have no record' and 'we
@@ -80,8 +79,9 @@ async def run_search(context: ToolContext, arguments: dict[str, Any]) -> dict[st
     wires today and it models **no semantics** - identical text retrieves
     identically and nothing else does - so ranking here is lexical identity, not
     meaning. That is stated on `ServerState.embedder` and it is the single
-    biggest gap between this tool and its description; S9.1's real embedder is
-    what closes it, and nothing measured against these vectors is a retrieval
+    biggest gap between this tool and its description. A provider-backed
+    embedder is what closes it, and none exists yet - S9.1 built completion
+    adapters only. Nothing measured against these vectors is a retrieval
     quality number.
     """
     query = require_query(arguments)
@@ -316,8 +316,8 @@ def _trace_id(context: ToolContext) -> TraceId:
 
     §2.1 returns one, and a read is worth tracing for the same reason a write
     is: "why did the agent answer that?" is answered by what it retrieved. Minted
-    here because nothing upstream supplies one - the gateway that would assign a
-    request id is S8.1.
+    here because nothing upstream supplies one - the gateway's `request_id`
+    middleware does that for REST, and this server is not behind the gateway.
     """
     del context  # Nothing about the caller distinguishes one read from another yet.
     return TraceId(f"tr_{uuid4().hex[:12]}")
