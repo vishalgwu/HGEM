@@ -22,9 +22,9 @@ extraction prompt "reduces schema-gate rejections dramatically", which is only
 true if it is the same file, byte for byte, that `extract()` renders.
 
 **The canary is the sharp edge, and a served prompt blunts it.** Both real
-templates carry a `{{canary}}` slot: the pipeline fills it with
-`secrets.token_hex`, sends the prompt, and raises `InjectionDetected` if the
-model's reply echoes it - content that talked the model into repeating its
+templates carry a `{{canary}}` slot: the pipeline fills it from
+`guardmem_core.prompts.canary`, sends the prompt, and raises `InjectionDetected`
+if the model's reply echoes it - content that talked the model into repeating its
 instructions is content that has escaped being data. A client invoking the
 prompt gets the text and runs its own completion, so **nobody checks the echo
 unless the client does**. Every served prompt therefore mints a fresh canary,

@@ -48,20 +48,19 @@ happens on a dead provider - the proposal parks in `pending_eval`.
 
 from __future__ import annotations
 
-import secrets
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Final
 
 from pydantic import ValidationError
 
-from guardmem_core.errors import InjectionDetected
 from guardmem_core.llm.base import LLMClient, LLMResponse
 from guardmem_core.pipeline.l1_extract.noise_rules import (
     TurnHistory,
     is_ambiguous,
     rule_verdict,
 )
+from guardmem_core.prompts.canary import mint_canary, reject_echo
 from guardmem_core.prompts.loader import render
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.turn import DecidedBy, DroppedTurn, NoiseReason, NoiseResult, Turn
@@ -71,10 +70,6 @@ __all__ = ["NoiseClassification", "NoiseVerdict", "filter_noise"]
 
 _PROMPT_NAME: Final = "classify_noise"
 _PROMPT_VERSION: Final = 1
-
-# Long enough that a model cannot produce it by chance, short enough to stay
-# cheap in the prompt. Same construction S2.2 uses for the extraction canary.
-_CANARY_BYTES: Final = 8
 
 
 class NoiseVerdict(GMModel):
@@ -173,7 +168,7 @@ async def _classify(
         ProviderUnavailable: propagated from the client.
         BudgetExceeded: propagated from the client.
     """
-    canary = secrets.token_hex(_CANARY_BYTES)
+    canary = mint_canary()
     prompt = render(
         _PROMPT_NAME,
         _PROMPT_VERSION,
@@ -189,8 +184,7 @@ async def _classify(
         temperature=0.0,
         n=1,
     )
-    if any(canary in sample for sample in response.samples):
-        raise InjectionDetected("noise classifier echoed the canary token", trace_id=trace_id)
+    reject_echo(canary, response.samples, stage="noise classifier", trace_id=trace_id)
     return _confident_drops(response, turns)
 
 

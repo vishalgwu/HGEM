@@ -58,16 +58,16 @@ is S4.1's schema gate sending the candidate to quarantine (§2.1).
 from __future__ import annotations
 
 import hashlib
-import secrets
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Final
 
 from pydantic import ValidationError
 
-from guardmem_core.errors import InjectionDetected, ProviderUnavailable, ValidationRejected
+from guardmem_core.errors import ProviderUnavailable, ValidationRejected
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 from guardmem_core.pipeline.l1_extract.span_linker import link_span
+from guardmem_core.prompts.canary import mint_canary, reject_echo
 from guardmem_core.prompts.loader import render
 from guardmem_core.schemas.base import GMModel
 from guardmem_core.schemas.candidate import ExtractedFact, ExtractionResult, MemoryCandidate
@@ -80,8 +80,6 @@ PROMPT_NAME: Final = "extract_memories"
 # Bumped, never edited in place: `version_id` is the filename and is recorded on
 # every candidate. v2's frontmatter says why; `mcp_server` serves this version.
 PROMPT_VERSION: Final = 2
-
-_CANARY_BYTES: Final = 8
 
 # §1.2's ladder is 1 on LOW, 3 by default, 5 on HIGH. Not enforced here - which
 # arm applies is the caller's routing decision (S9.x), and `settings.default_k`
@@ -378,15 +376,15 @@ async def extract(
     if k < _MIN_K:
         raise ValueError(f"k must be at least {_MIN_K}, got {k}")
 
-    canary = secrets.token_hex(_CANARY_BYTES)
+    canary = mint_canary()
     prompt = render(
         PROMPT_NAME,
         PROMPT_VERSION,
         {"content": content, "ontology": ontology_yaml, "canary": canary},
     )
     responses = await _draw(llm, prompt=prompt.text, k=k, tier=tier)
-    if any(canary in sample for response in responses for sample in response.samples):
-        raise InjectionDetected("extraction echoed the canary token", trace_id=context.trace_id)
+    drawn = [sample for response in responses for sample in response.samples]
+    reject_echo(canary, drawn, stage="extraction", trace_id=context.trace_id)
 
     samples = _parse(responses, k=k, trace_id=context.trace_id)
     return _assemble(

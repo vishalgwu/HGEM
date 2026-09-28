@@ -45,13 +45,13 @@ would have to be invalidated on a prompt-version bump this module does not own.
 
 from __future__ import annotations
 
-import secrets
 from typing import TYPE_CHECKING, Annotated, Final, NamedTuple
 
 from pydantic import Field
 
-from guardmem_core.errors import InjectionDetected, ValidationRejected
+from guardmem_core.errors import ValidationRejected
 from guardmem_core.llm.base import Tier
+from guardmem_core.prompts.canary import mint_canary, reject_echo
 from guardmem_core.prompts.loader import render
 from guardmem_core.schemas.base import GMModel
 
@@ -66,10 +66,6 @@ __all__ = ["EntailmentBatch", "EntailmentPair", "LLMEntailer"]
 
 _PROMPT_NAME: Final = "entail_pairs"
 _PROMPT_VERSION: Final = 1
-
-# Same length and same reason as the extractor's and the judge's: long enough
-# that a model cannot emit it by chance, short enough not to spend tokens on it.
-_CANARY_BYTES: Final = 16
 
 # `entail(x, x)` is 1.0 by the definition of entailment, so it is answered here
 # rather than bought from a provider. Not an optimisation dressed as a rule: a
@@ -185,7 +181,7 @@ class LLMEntailer:
             InjectionDetected: the reply echoed the canary.
             ValidationRejected: see `_parse`.
         """
-        canary = secrets.token_hex(_CANARY_BYTES)
+        canary = mint_canary()
         prompt = render(
             _PROMPT_NAME,
             _PROMPT_VERSION,
@@ -194,8 +190,7 @@ class LLMEntailer:
         reply = await self._llm.complete(
             prompt=prompt.text, schema=EntailmentBatch, tier=Tier.BALANCED, temperature=0.0
         )
-        if any(canary in sample for sample in reply.samples):
-            raise InjectionDetected("entailment scoring echoed the canary token", trace_id=trace_id)
+        reject_echo(canary, reply.samples, stage="entailment scoring", trace_id=trace_id)
         return _parse(reply.samples[0], expected=len(pairs), trace_id=trace_id)
 
 

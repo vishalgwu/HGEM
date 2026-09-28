@@ -1,4 +1,4 @@
-"""Argument reading and canary minting, shared by the served prompts.  S6.4
+"""Argument reading, shared by the served prompts.  S6.4
 
 Separate from `prompts/__init__.py` for the import-cycle reason `resources/uris.py`
 gives: the package `__init__` imports each builder so it can dispatch, so a
@@ -14,34 +14,11 @@ point about the tool surface for the opposite reason: there the `inputSchema`
 
 from __future__ import annotations
 
-import secrets
-from typing import Any, Final
+from typing import Any
 
 from mcp_server.tools.context import ToolRefusedError
 
-__all__ = ["CANARY_BYTES", "mint_canary", "optional", "required"]
-
-# Matches `pipeline/l1_extract/extractor.py`'s `_CANARY_BYTES`, deliberately.
-# The token a served prompt carries has to be the same shape as the one the
-# pipeline uses, or a client that learns to strip it from one will not recognise
-# it in the other. Sixteen hex characters is long enough that a model cannot
-# emit it by chance and short enough not to eat the context it is protecting.
-CANARY_BYTES: Final = 8
-
-
-def mint_canary() -> str:
-    """A fresh injection canary for one rendered prompt.
-
-    Returns:
-        A hex token, new on every call.
-
-    Never cached, never derived from the arguments, never a constant. The canary
-    works because content cannot predict it: a value reused across calls is one
-    an attacker can learn from a single transcript and then instruct the model
-    to avoid, which leaves the check passing while the injection succeeds.
-    `secrets`, not `random`, for the same reason `extractor.py` uses it.
-    """
-    return secrets.token_hex(CANARY_BYTES)
+__all__ = ["optional", "required"]
 
 
 def required(arguments: dict[str, str], name: str, prompt: str) -> str:

@@ -22,13 +22,13 @@ list and returns one judgement per entry, in order.
 
 from __future__ import annotations
 
-import secrets
 from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import Field
 
-from guardmem_core.errors import InjectionDetected, ValidationRejected
+from guardmem_core.errors import ValidationRejected
 from guardmem_core.llm.base import Tier
+from guardmem_core.prompts.canary import mint_canary, reject_echo
 from guardmem_core.prompts.loader import render
 from guardmem_core.schemas.base import GMModel
 
@@ -51,10 +51,6 @@ __all__ = [
 # `guardmem/adjudicate_conflict`, and must serve the version the judge sends.
 PROMPT_NAME: Final = "adjudicate_conflict"
 PROMPT_VERSION: Final = 1
-
-# Same length as the extractor's, and for the same reason: long enough that a
-# model cannot emit it by chance, short enough not to spend tokens on it.
-_CANARY_BYTES: Final = 16
 
 
 class Judgement(GMModel):
@@ -155,7 +151,7 @@ class LLMJudge:
         """
         if not incumbents:
             return []
-        canary = secrets.token_hex(_CANARY_BYTES)
+        canary = mint_canary()
         prompt = render(
             PROMPT_NAME,
             PROMPT_VERSION,
@@ -168,10 +164,7 @@ class LLMJudge:
         reply = await self._llm.complete(
             prompt=prompt.text, schema=AdjudicationBatch, tier=Tier.BALANCED, temperature=0.0
         )
-        if any(canary in sample for sample in reply.samples):
-            raise InjectionDetected(
-                "conflict adjudication echoed the canary token", trace_id=trace_id
-            )
+        reject_echo(canary, reply.samples, stage="conflict adjudication", trace_id=trace_id)
         return _parse(reply.samples[0], expected=len(incumbents), trace_id=trace_id)
 
 

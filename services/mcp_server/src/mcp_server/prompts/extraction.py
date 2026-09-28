@@ -37,8 +37,9 @@ from typing import TYPE_CHECKING, Final
 import mcp_types as types
 
 from guardmem_core.pipeline.l1_extract.extractor import PROMPT_NAME, PROMPT_VERSION
+from guardmem_core.prompts.canary import mint_canary
 from guardmem_core.prompts.loader import render
-from mcp_server.prompts.arguments import mint_canary, optional, required
+from mcp_server.prompts.arguments import optional, required
 from mcp_server.tools.context import ToolRefusedError
 
 if TYPE_CHECKING:
