@@ -17,23 +17,18 @@ what the numbers *mean*; this module covers where they come from.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 
 import pytest
-from pydantic import BaseModel
 
 from fixtures.extraction import response
-from fixtures.fakes import FakeLLM, RecordedCall
+from fixtures.fakes import FakeLLM
+from fixtures.llm_faults import EchoingLLM
 from guardmem_core.errors import InjectionDetected, ValidationRejected
-from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
+from guardmem_core.llm.base import Tier
 from guardmem_core.pipeline.l2_validate import LLMJudge
 from guardmem_core.types import TraceId
 
 TRACE = TraceId("tr_s43")
-
-# The prompt wraps both untrusted blocks in `<untrusted_content canary="...">`,
-# so this is how a test recovers a token that is minted per call.
-_CANARY_MARKER = 'canary="'
 
 
 def reply(*scores: tuple[float, float, float]) -> str:
@@ -46,40 +41,6 @@ def reply(*scores: tuple[float, float, float]) -> str:
             ]
         }
     )
-
-
-def canary_of(prompt: str) -> str:
-    """Recover the canary token `render` put into `prompt`."""
-    return prompt.split(_CANARY_MARKER, 1)[1].split('"', 1)[0]
-
-
-@dataclass(slots=True)
-class EchoingLLM:
-    """An `LLMClient` that returns the prompt's own canary token.
-
-    Written out rather than scripted into `FakeLLM` because the canary is minted
-    per call: a fixed string in a scripted response would only prove that
-    `LLMJudge` rejects *that* string, which is a test of a constant. This reads
-    back whatever the prompt actually carried, so it still holds if the token
-    changes length or the template moves it.
-    """
-
-    calls: list[RecordedCall] = field(default_factory=list)
-
-    async def complete(
-        self,
-        *,
-        prompt: str,
-        schema: type[BaseModel] | None = None,
-        tier: Tier,
-        temperature: float = 0.0,
-        n: int = 1,
-    ) -> LLMResponse:
-        """Return a reply containing this prompt's canary."""
-        self.calls.append(
-            RecordedCall(prompt=prompt, tier=tier, temperature=temperature, n=n, schema=schema)
-        )
-        return response(json.dumps({"judgements": [], "note": canary_of(prompt)}))
 
 
 class TestOneCallForTheWholeSet:
@@ -214,7 +175,9 @@ class TestRefusals:
         would be read as judgements.
         """
         with pytest.raises(InjectionDetected, match="canary"):
-            await LLMJudge(EchoingLLM()).compare("claim", ["incumbent"], trace_id=TRACE)
+            await LLMJudge(EchoingLLM({"judgements": []})).compare(
+                "claim", ["incumbent"], trace_id=TRACE
+            )
 
     async def test_the_refusal_names_the_proposal(self) -> None:
         """`RULES.md` §2.3: a raise inside the pipeline carries its trace."""
@@ -224,8 +187,3 @@ class TestRefusals:
             await LLMJudge(llm).compare("claim", ["incumbent"], trace_id=TRACE)
 
         assert raised.value.trace_id == TRACE
-
-
-# Structural conformance, checked by the tool that can actually check it - see
-# the note at the foot of `tests/fixtures/fakes.py`.
-_client: LLMClient = EchoingLLM()

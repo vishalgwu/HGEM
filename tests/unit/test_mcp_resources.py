@@ -24,7 +24,8 @@ from __future__ import annotations
 import pytest
 
 from fixtures.assertions import NS, TENANT, WHEN, stored_assertion
-from fixtures.mcp import context, settings, state, store_with
+from fixtures.mcp import context, state, store_with
+from fixtures.settings import settings
 from mcp_server.resources import (
     _READERS,
     RESOURCE_TEMPLATES,

@@ -27,60 +27,23 @@ module covers where they come from.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 
 import pytest
-from pydantic import BaseModel
 
 from fixtures.extraction import response
-from fixtures.fakes import FakeLLM, RecordedCall
+from fixtures.fakes import FakeLLM
+from fixtures.llm_faults import EchoingLLM
 from guardmem_core.errors import InjectionDetected, ValidationRejected
-from guardmem_core.llm.base import LLMResponse, Tier
+from guardmem_core.llm.base import Tier
 from guardmem_core.llm.entailment import EntailmentPair, LLMEntailer
 from guardmem_core.types import TraceId
 
 TRACE = TraceId("tr_s51")
 
-# The prompt wraps its untrusted block in `<untrusted_content canary="...">`, so
-# this is how a test recovers a token that is minted per call.
-_CANARY_MARKER = 'canary="'
-
 
 def reply(*scores: float) -> str:
     """An `EntailmentBatch` reply carrying `scores`, in order."""
     return json.dumps({"scores": list(scores)})
-
-
-def canary_of(prompt: str) -> str:
-    """Recover the canary token `render` put into `prompt`."""
-    return prompt.split(_CANARY_MARKER, 1)[1].split('"', 1)[0]
-
-
-@dataclass(slots=True)
-class EchoingLLM:
-    """An `LLMClient` that returns the prompt's own canary token.
-
-    Written out rather than scripted into `FakeLLM` for `test_nli_judge.py`'s
-    reason: the canary is minted per call, so a fixed string in a scripted
-    response would only prove that `LLMEntailer` rejects *that* string.
-    """
-
-    calls: list[RecordedCall] = field(default_factory=list)
-
-    async def complete(
-        self,
-        *,
-        prompt: str,
-        schema: type[BaseModel] | None = None,
-        tier: Tier,
-        temperature: float = 0.0,
-        n: int = 1,
-    ) -> LLMResponse:
-        """Return a reply containing this prompt's canary."""
-        self.calls.append(
-            RecordedCall(prompt=prompt, tier=tier, temperature=temperature, n=n, schema=schema)
-        )
-        return response(json.dumps({"scores": [0.5], "note": canary_of(prompt)}))
 
 
 class TestOneCallForTheWholeBatch:
@@ -284,10 +247,14 @@ class TestTheCanary:
     async def test_a_reply_echoing_the_canary_is_an_injection(self) -> None:
         """The premise of an `S_src` pair is source text a stranger wrote."""
         with pytest.raises(InjectionDetected, match="echoed the canary"):
-            await LLMEntailer(EchoingLLM()).lookup([EntailmentPair("a", "b")], trace_id=TRACE)
+            await LLMEntailer(EchoingLLM({"scores": [0.5]})).lookup(
+                [EntailmentPair("a", "b")], trace_id=TRACE
+            )
 
     async def test_the_injection_carries_the_trace(self) -> None:
         with pytest.raises(InjectionDetected) as caught:
-            await LLMEntailer(EchoingLLM()).lookup([EntailmentPair("a", "b")], trace_id=TRACE)
+            await LLMEntailer(EchoingLLM({"scores": [0.5]})).lookup(
+                [EntailmentPair("a", "b")], trace_id=TRACE
+            )
 
         assert caught.value.trace_id == TRACE

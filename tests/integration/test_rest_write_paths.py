@@ -30,8 +30,8 @@ from test_applier import chain
 from fixtures.extraction import ALLERGY, CONTENT, PHARMACY, response
 from fixtures.fakes import FakeLLM
 from fixtures.gateway import WRITE_KEY, fake_state
-from fixtures.mcp import settings
 from fixtures.pgvector import TIMEOUT_S, WHEN
+from fixtures.settings import settings
 from gateway.auth import InvalidCredentialError, Principal
 from gateway.main import build_app
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore

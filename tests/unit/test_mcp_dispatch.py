@@ -21,7 +21,8 @@ from typing import Any
 import pytest
 
 from fixtures.assertions import NS, TENANT, WHEN, stored_assertion
-from fixtures.mcp import context, settings, state, store_with
+from fixtures.mcp import context, state, store_with
+from fixtures.settings import settings
 from mcp_server.tools import _HANDLERS, _summarise, call_tool
 from mcp_server.tools.context import ToolRefusedError, context_for
 from mcp_server.tools.search import run_search

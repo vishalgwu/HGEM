@@ -42,7 +42,7 @@ import schemathesis
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from fixtures.mcp import settings as build_settings
+from fixtures.settings import settings as build_settings
 from gateway.lifespan import SERVICE
 from gateway.main import build_app
 

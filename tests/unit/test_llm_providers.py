@@ -35,12 +35,12 @@ from fixtures.providers import (
     openai_client,
     openai_transport,
 )
+from fixtures.settings import settings as build_settings
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import OllamaClient, OpenAIClient, tier_models
 from guardmem_core.llm.providers.common import MAX_SAMPLES, require_samples
 from guardmem_core.llm.providers.ollama_client import BASE_SEED
 from guardmem_core.llm.providers.pricing import PRICES, estimate_cost
-from guardmem_core.settings import Settings
 
 _TIMEOUT_S: Final = 5.0
 
@@ -188,22 +188,7 @@ class TestBoundsAndPinning:
     def test_a_blank_model_id_is_refused_at_construction(self) -> None:
         """Pydantic catches a *missing* required id and not an empty one, and an
         empty id reaches the provider as a request for a model named `""`."""
-        # Built through a `dict[str, Any]`, as `test_settings.py` does. The DSN
-        # fields are typed `PostgresDsn`/`RedisDsn`/`AnyUrl`, which pydantic
-        # coerces from a string at runtime and `mypy --strict` rejects at the
-        # keyword.
-        fields: dict[str, Any] = {
-            "database_url": "postgresql+asyncpg://localhost:5432/db",
-            "redis_url": "redis://localhost:6379/0",
-            "neo4j_uri": "bolt://localhost:7687",
-            "neo4j_user": "neo4j",
-            "neo4j_password": "unused-by-these-tests",  # pragma: allowlist secret
-            "model_fast": "",
-            "model_balanced": "claude-sonnet-5",
-            "model_frontier": "claude-opus-5",
-            "embed_model": "text-embedding-3-large",
-        }
-        settings = Settings(_env_file=None, **fields)
+        settings = build_settings(model_fast="")
 
         with pytest.raises(ValueError, match="no model id configured"):
             tier_models(settings)

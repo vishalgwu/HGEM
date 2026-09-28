@@ -13,42 +13,16 @@ record and the code follows it, not the other way round.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from conftest import REPO_ROOT
+from fixtures.settings import REQUIRED
+from fixtures.settings import settings as build
 from guardmem_core.settings import Settings, get_settings
 
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
-
-# The fields with no default. Supplied by every test that expects success.
-#
-# These deliberately are NOT the dev credentials from `.env.example`. Test
-# fixtures do not need credential-shaped strings, and putting them here would
-# mean either suppressing a secret-scanner finding or baselining a line number
-# inside a file that changes often - and a baseline entry that moves on every
-# edit is what makes people stop reading baseline diffs. The Postgres DSN
-# carries no userinfo for the same reason; it validates identically without it.
-REQUIRED: dict[str, Any] = {
-    "database_url": "postgresql+asyncpg://localhost:5432/guardmem_test",
-    "redis_url": "redis://localhost:6379/0",
-    "neo4j_uri": "bolt://localhost:7687",
-    "neo4j_user": "neo4j",
-    # The `*password*` key trips the keyword detector whatever the value is, so
-    # this one is marked rather than disguised.
-    "neo4j_password": "unused-by-these-tests",  # pragma: allowlist secret
-    "model_fast": "claude-haiku-4-5",
-    "model_balanced": "claude-sonnet-5",
-    "model_frontier": "claude-opus-5",
-    "embed_model": "text-embedding-3-large",
-}
-
-
-def build(**overrides: Any) -> Settings:
-    """Construct Settings from explicit values, ignoring any local `.env`."""
-    return Settings(_env_file=None, **{**REQUIRED, **overrides})
 
 
 def test_builds_from_explicit_values() -> None:

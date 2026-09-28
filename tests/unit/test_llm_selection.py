@@ -23,7 +23,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from fixtures.mcp import settings
+from fixtures.settings import settings
 from guardmem_core.llm.providers import (
     AnthropicClient,
     OllamaClient,

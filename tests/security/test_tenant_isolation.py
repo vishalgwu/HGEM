@@ -58,8 +58,8 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 
 from fixtures.assertions import NS
-from fixtures.mcp import settings as build_settings
 from fixtures.pgvector import TIMEOUT_S, assertion, write_and_reveal
+from fixtures.settings import settings as build_settings
 from gateway.auth import SettingsAuthBackend
 from gateway.lifespan import GatewayState
 from gateway.limits import Decision

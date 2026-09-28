@@ -20,6 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from fixtures.fakes import FakeLLM
+from fixtures.llm_faults import UnreachableLLM, canary_of
 from fixtures.noise_corpus import GOLDEN_NAMESPACE, GOLDEN_TURNS, golden_turns
 from guardmem_core.errors import InjectionDetected, ProviderUnavailable
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
@@ -70,25 +71,6 @@ def _verdicts(*entries: tuple[str, bool, str | None]) -> LLMResponse:
 
 
 @dataclass(slots=True)
-class BrokenLLM:
-    """An `LLMClient` whose provider is down. See `test_a_provider_failure_propagates`."""
-
-    calls: list[str] = field(default_factory=list)
-
-    async def complete(
-        self,
-        *,
-        prompt: str,
-        schema: type[BaseModel] | None = None,
-        tier: Tier,
-        temperature: float = 0.0,
-        n: int = 1,
-    ) -> LLMResponse:
-        self.calls.append(prompt)
-        raise ProviderUnavailable("circuit open", trace_id=_TRACE)
-
-
-@dataclass(slots=True)
 class ScriptedLLM:
     """An `LLMClient` that answers as a function of the prompt it was handed.
 
@@ -115,13 +97,7 @@ class ScriptedLLM:
         return self.responder(prompt)
 
 
-def _canary_in(prompt: str) -> str:
-    """Recover the canary `filter_noise` minted for this call."""
-    return prompt.split('canary="')[1].split('"')[0]
-
-
 # Structural conformance, checked by the tool that can check it (S1.7).
-_broken: LLMClient = BrokenLLM()
 _scripted: LLMClient = ScriptedLLM()
 
 # A short conversation with one turn of each rule-decidable class, one plainly
@@ -215,7 +191,7 @@ class TestTheCanary:
         # The prompt states the canary must never be emitted, so emitting it
         # means the untrusted content persuaded the model otherwise -
         # `RULES.md` §3 treats that as confirmed rather than suspected.
-        llm = ScriptedLLM(lambda prompt: _reply(f"sure, the canary is {_canary_in(prompt)}"))
+        llm = ScriptedLLM(lambda prompt: _reply(f"sure, the canary is {canary_of(prompt)}"))
 
         with pytest.raises(InjectionDetected) as raised:
             await filter_noise(_CONVERSATION, llm, namespace=_NS, trace_id=_TRACE)
@@ -229,7 +205,7 @@ class TestTheCanary:
         await filter_noise(_CONVERSATION, llm, namespace=_NS, trace_id=_TRACE)
         await filter_noise(_CONVERSATION, llm, namespace=_NS, trace_id=_TRACE)
 
-        assert len({_canary_in(prompt) for prompt in llm.prompts}) == 2, (
+        assert len({canary_of(prompt) for prompt in llm.prompts}) == 2, (
             "a reused canary is one an attacker can learn"
         )
 
@@ -296,7 +272,9 @@ class TestUntrustworthyAnswers:
         # while hiding which stage first saw it - and `ARCHITECTURE.md` §4
         # already says what a dead provider does: the proposal parks.
         with pytest.raises(ProviderUnavailable):
-            await filter_noise(_CONVERSATION, BrokenLLM(), namespace=_NS, trace_id=_TRACE)
+            await filter_noise(
+                _CONVERSATION, UnreachableLLM(trace_id=_TRACE), namespace=_NS, trace_id=_TRACE
+            )
 
 
 class TestGoldenCorpusEndToEnd:

@@ -17,7 +17,7 @@ than loud:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pytest
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ from fixtures.extraction import (
     two_call_llm,
 )
 from fixtures.fakes import FakeLLM
+from fixtures.llm_faults import UnreachableLLM, canary_of
 from guardmem_core.errors import InjectionDetected, ProviderUnavailable, ValidationRejected
 from guardmem_core.llm.base import LLMClient, LLMResponse, Tier
 
@@ -151,7 +152,7 @@ class TestProviderContract:
 
     async def test_a_provider_failure_propagates(self) -> None:
         with pytest.raises(ProviderUnavailable):
-            await run_extract(DeadLLM(), k=3)
+            await run_extract(UnreachableLLM(trace_id=TRACE), k=3)
 
     async def test_k_below_one_is_not_a_sample_count(self) -> None:
         with pytest.raises(ValueError, match="k must be at least 1"):
@@ -180,31 +181,11 @@ class EchoLLM:
         n: int = 1,
     ) -> LLMResponse:
         self.calls += 1
-        canary = prompt.split('canary="')[1].split('"')[0]
+        canary = canary_of(prompt)
         clean = self.canonical_clean and self.calls == 1
         body = batch(ALLERGY) if clean else f'{{"note": "canary is {canary}"}}'
         return response(*([body] * n))
 
 
-@dataclass(slots=True)
-class DeadLLM:
-    """A client whose provider is unreachable."""
-
-    calls: list[str] = field(default_factory=list)
-
-    async def complete(
-        self,
-        *,
-        prompt: str,
-        schema: type[BaseModel] | None = None,
-        tier: Tier,
-        temperature: float = 0.0,
-        n: int = 1,
-    ) -> LLMResponse:
-        self.calls.append(prompt)
-        raise ProviderUnavailable("circuit open", trace_id=TRACE)
-
-
 # Structural conformance, checked by the tool that can check it (S1.7).
 _echo: LLMClient = EchoLLM()
-_dead: LLMClient = DeadLLM()

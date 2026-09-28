@@ -30,8 +30,8 @@ import pytest
 from fixtures.assertions import ENTITY, TENANT, WHEN
 from fixtures.conflict import candidate
 from fixtures.decisions import conflict, risk
-from fixtures.mcp import settings
 from fixtures.providers import ollama_client, ollama_transport
+from fixtures.settings import settings
 from guardmem_core.llm.base import Tier
 from guardmem_core.llm.providers import OllamaClient, build_llm
 from guardmem_core.pipeline.orchestrator import Proposal

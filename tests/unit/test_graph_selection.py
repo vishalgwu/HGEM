@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from neo4j import exceptions as neo4j_errors
 
-from fixtures.mcp import settings
+from fixtures.settings import settings
 from guardmem_core.errors import StoreUnavailable
 from guardmem_core.memory.graph.neo4j_store import Neo4jGraphStore
 from guardmem_core.memory.graph.networkx_store import NetworkXGraphStore

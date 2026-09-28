@@ -26,7 +26,7 @@ import pytest
 from fastapi import FastAPI, Request
 from starlette.testclient import TestClient
 
-from fixtures.mcp import settings as build_settings
+from fixtures.settings import settings as build_settings
 from gateway.auth import InvalidCredentialError, Principal, credential_from
 from gateway.limits import Decision
 from gateway.main import build_app

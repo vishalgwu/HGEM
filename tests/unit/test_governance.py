@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fixtures.assertions import TENANT
 from fixtures.fakes import FakeGraphStore, FakeLLM, FakeVectorStore
-from fixtures.mcp import settings
+from fixtures.settings import settings
 from guardmem_core.governance import build_deps
 from guardmem_core.memory.entities import NamespaceEntityResolver
 from guardmem_core.memory.vector.hash_embedder import HashEmbedder
