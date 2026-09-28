@@ -17,6 +17,25 @@ repository; the log records what happened while changing it.
 
 ### Fixed
 
+- **The gateway's strict path and the worker decided and wrote nothing.** Both
+  called `pipeline.run()`, which applies no decision by design, so every REST
+  decision was computed and dropped - no row and no audit event. Every service now
+  calls `governance.govern`, which is run-then-apply. The worker also refused every
+  queued job (the strict `Proposal` rejected the queue's enum strings), and a
+  strict decision was returned as 202.
+- **The MCP server served `extract_memories@v1` while the pipeline sent v2**, and
+  its handshake told models `memory.propose` declines. The served prompts now take
+  their versions from the pipeline's own constants.
+- **CI's pre-commit job could not import `locust`**, after its mypy hook was widened
+  to `bench/` without the job installing `--group bench`. A test now holds that
+  job's installs to the gates job's.
+- **Five modules minted their own injection canary, at two lengths**, while their
+  comments said "same length". `guardmem_core.prompts.canary` owns it.
+- **The Neo4j reads scanned every node.** `START_TENANT`, `DEGREE` and `HOP` matched
+  their start node without a label, so the per-label key index went unused;
+  `EXPLAIN` on 5.26 moves from `AllNodesScan` to `NodeUniqueIndexSeek`.
+- **`checkpoint_b score` printed "human-labelled" for any corpus.** It now names the
+  labellers from `keep_by` and prints a verdict over model labels as PROVISIONAL.
 - **A fixed seed made every sample in a K-sample draw identical, and nothing
   raised.** The first Ollama adapter sent one seed per draw; Ollama honours a
   seed exactly, so at temperature 0.7 with K=3 the three "independent" samples
@@ -112,6 +131,12 @@ repository; the log records what happened while changing it.
 
 ### Added
 
+- **Provisional labels for CHECKPOINT B**, `evals/datasets/checkpoint_b/corpus.ai_labelled.jsonl`,
+  written by a model to keep work moving until the human pass. Against them `C`
+  reads AUROC 0.643 - a FAIL, and not the gate.
+- `guardmem_core.governance` (`build_deps`, `govern`) and `applier.apply_all`: one
+  composition of the pipeline and one apply loop, shared by the three services and
+  the CHECKPOINT B generator.
 - **S9.1 — provider adapters, and the first real model calls this repository has
   ever made.** `AnthropicClient`, `OpenAIClient` and `OllamaClient`, all behind
   `LLMClient`: the official SDKs for the two vendors (each owns its retry
@@ -231,6 +256,13 @@ repository; the log records what happened while changing it.
 
 ### Changed
 
+- **Comments and docstrings through S8.4 say what is true.** A sweep for text that
+  described finished steps as future, names that had drifted and counts that were
+  wrong, each checked against the code. It put four gaps in writing where they are
+  read: no process runs the outbox relay, no embedding provider exists, S5.4's
+  `decide()` never upgrades a confident, newer contradiction, and incumbent
+  retrieval fetches graph neighbours nothing reads.
+- Test doubles consolidated into `fixtures/llm_faults.py` and `fixtures/settings.py`.
 - **CHECKPOINT B is gated on S9.1, not on Day 5, and the notebook now says so.**
   Its step 3 is "run the pipeline, collect `C` for each", and no `LLMClient`
   implementation exists — `llm/base.py` declares the Protocol, `FakeLLM`

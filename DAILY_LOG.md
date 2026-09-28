@@ -5564,6 +5564,79 @@ fix, and the remaining gap is Redis round-trip cost on this Windows host, not co
 Read the CI run for the p95 - the runner is Linux and is the only honest measurement
 available.
 
+## 2026-09-28 - a debug pass through S8.4, and CHECKPOINT B's first number
+
+A requested pass over everything through S8.4: find what is broken, remove what is
+duplicated or dead, and correct what the comments claim. It found the REST write
+path non-functional, and it produced the first discrimination number this project
+has had - a provisional one, and a FAIL.
+
+**Shipped**
+
+- **The REST write path writes.** The gateway's strict mode and the worker both
+  called `pipeline.run()`, which by design applies nothing, so every REST decision
+  was computed and dropped. `guardmem_core.governance.govern` is run-then-apply and
+  all three services call it. The worker also refused every queued job - the strict
+  `Proposal` rejected the queue's enum strings - and a strict decision came back 202.
+- **One composition, one apply loop.** `governance.build_deps` and
+  `applier.apply_all` replace a copy in each service and in the CHECKPOINT B
+  generator.
+- **MCP says what it does.** It served `extract_memories@v1` while the pipeline
+  sent v2, and its handshake told every model that `memory.propose` declines.
+- **CHECKPOINT B has a provisional corpus.** `corpus.ai_labelled.jsonl` carries a
+  model's labels beside the unlabelled `corpus.jsonl`, every row naming its
+  labeller; three contradicted the ontology and were corrected. `score` names its
+  labellers and prints a model-labelled verdict as PROVISIONAL - it used to say
+  "human-labelled" for any corpus.
+- **Reuse.** One canary module (five copies at two lengths); shared LLM fault
+  doubles and one test `Settings` builder; three read-path duplicates.
+- **Neo4j reads use the key index.** `EXPLAIN` showed `AllNodesScan` for every
+  `degree()` and every hop; labelling the start node `:Entity` makes it
+  `NodeUniqueIndexSeek`.
+- **A comment sweep of about sixty modules**, each claim checked against the code.
+
+**What broke / what I learned**
+
+- **The first number is a FAIL: AUROC 0.643 against provisional labels**, and
+  `grounding` alone (0.658) beats the composite. Those are a model's labels
+  measuring a model's pipeline, so it is not the gate - but a single term beating
+  the composite is the shape the checkpoint's diagnostics say to read first.
+- **No test had ever run a successful strict call or a queued job.** That is how
+  three S8.4 bugs survived their own step. `test_rest_write_paths.py` runs both
+  against real Postgres now.
+- **`main` was red for two commits, and I put it there.** I widened the mypy hook
+  to `bench/` and did not check the CI job that runs it, which did not install
+  `locust`. PR #1 fixed the install; `test_the_hooks_job_installs_what_the_gates_job_does`
+  holds it. The fourth time "a CI job is a new environment" has cost a red build.
+- **The outbox relay runs nowhere.** S3.3 gave its arq binding to the worker step;
+  S8.4 shipped without it. Outside `make seed`, every written row stays invisible
+  to search. Not four lines: on the default in-process graph the relay's writes
+  would live only in the worker's memory.
+- **A forward reference goes false the day its step ships without doing it.** "S7.1
+  is the step that should add it", "until S9.1 wires a provider", "S5.4's
+  `decide()` is where it may be upgraded" - each step shipped, the promise did not,
+  and nothing checked. That was most of the sixty.
+
+**Still open**
+
+- The human labelling of `corpus.jsonl`, blind to the provisional file, after
+  settling the four labelling-policy questions in the dataset README.
+- The relay binding, which needs the graph-backend decision first.
+- A provider-backed embedder: every service embeds with `HashEmbedder`.
+- §2.3 row 3's upgrade - a confident, newer contradiction superseding - is
+  implemented nowhere; every contradiction escalates.
+- MCP's `idempotency_key` is validated and not honoured: a retried propose writes
+  twice.
+- Incumbent retrieval fetches graph neighbours that nothing reads.
+- `settings.py` is still at 400 of 400 lines.
+
+**Tomorrow's first step**
+
+Settle the four labelling questions, then label `corpus.jsonl` by hand without
+opening `corpus.ai_labelled.jsonl`.
+
+---
+
 ---
 
 ---

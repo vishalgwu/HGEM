@@ -1,14 +1,14 @@
 # Contributing to GuardMem AI
 
-> **Status: early build.** `guardmem_core` now carries settings, domain ids, the
-> error hierarchy, the schema layer, the store and LLM protocols, the versioned
-> prompt loader, and Layer 1 end to end — noise filter, K-sample extractor and
-> span linker (S1.1 – S2.3). The gates around it have been real since S1.2 —
-> `make lint`, `make typecheck`, `make test`, the pre-commit hooks and CI all
-> run today, at 100% branch coverage. The suite-level gates below (integration,
-> contract, e2e, eval) become enforceable at the step that creates them. They
-> are written down now because, as `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the
-> gates are not in place on day 1, you will not add them on day 15."*
+> **Status: built through `BUILD_NOTEBOOK.md` S8.4.** `guardmem_core` runs all
+> three layers and writes what it decides; the MCP server, the REST gateway and
+> the async worker in `services/` all run it. The gates have been real since
+> S1.2 - `make lint`, `make typecheck`, `make test`, the pre-commit hooks - and CI
+> runs them with the integration suite and a load test on every push. The
+> suite-level gates below that have no suite yet (e2e, eval) become enforceable
+> at the step that creates them. They are written down now because, as
+> `BUILD_NOTEBOOK.md` S1.2 puts it: *"if the gates are not in place on day 1, you
+> will not add them on day 15."*
 
 ## Before you change anything
 
@@ -30,7 +30,10 @@ The two that catch people most often:
 uv venv --python 3.12 --prompt HGEM --seed .venv
 .venv\Scripts\activate                       # or: source .venv/Scripts/activate
 uv pip install -r requirements-dev.txt       # third-party deps + dev toolchain
-uv pip install -e packages/guardmem-core     # the workspace package, editable
+uv pip install -e packages/guardmem-core     # the decision engine, editable
+uv pip install -e services/mcp_server        # and the three services
+uv pip install -e services/gateway
+uv pip install -e services/worker
 python -m spacy download en_core_web_lg
 cp .env.example .env                         # paste your own keys; never commit .env
 ```
@@ -48,8 +51,8 @@ import-linter contracts; run `make` with no target for the full list.
 `make` is not installed on Windows and does not ship with Git for Windows —
 `winget install ezwinports.make`, then restart your shell.
 
-If `pytest` reports `ModuleNotFoundError: guardmem_core`, you skipped the
-editable install on the second line — `requirements-dev.txt` carries only
+If `pytest` reports `ModuleNotFoundError` for `guardmem_core` or a service, you
+skipped one of the editable installs — `requirements-dev.txt` carries only
 third-party packages.
 
 **Never run bare `uv sync`.** It is *exact* and uninstalls everything absent from

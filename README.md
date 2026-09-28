@@ -4,22 +4,17 @@
 
 **A memory governance gateway for long-running AI agents.**
 
-> **Status: Layer 1 works end to end, and it now has somewhere to write to.**
-> The design suite, the toolchain and the gates are in place; `guardmem_core`
-> carries its typed foundation — settings, domain ids, the error hierarchy, the
-> Pydantic schema layer, the store and LLM protocols — the whole of **Layer 1**
-> (noise filter, K-sample extractor, span linker), and from S3.1–S3.5 the
-> bitemporal Postgres schema, the pgvector store over it, the outbox that
-> coordinates the dual write, the graph store on the other side of it, and the
-> ontology that says what a predicate is allowed to mean — with `make seed`
-> putting all of it together, and S4.1 starting Layer 2 by enforcing that
-> vocabulary, S4.2 retrieving what it already believes, S4.3 deciding
-> whether the two can both be true and S4.4 settling what to do about it:
-> write, search, supersede, point-in-time recall of a fact that has since been
-> retired, and a partial write that is never retrievable. Nothing yet validates,
-> scores or decides a candidate — that is Layer 2. Every performance
-> and quality figure below is a **target**, not a measurement — see
-> [Status](#status) before quoting any number.
+> **Status: the pipeline governs and writes, behind MCP and REST, through
+> `BUILD_NOTEBOOK.md` S8.4.** All three layers run end to end on a real model —
+> extraction with verbatim spans, conflict detection against what is already
+> believed, confidence and risk scoring, the decision matrix — and each decision
+> is written with its hash-chained audit events in one Postgres transaction. The
+> MCP server, the REST gateway (auth, row-level security, rate limits,
+> idempotency) and the async worker all run it. **CHECKPOINT B has not passed:**
+> scored against provisional AI labels it reads AUROC 0.643, a FAIL, and the
+> human labelling that decides it is still to do. Every performance and quality
+> figure below is a **target**, not a measurement — see [Status](#status) before
+> quoting any number.
 
 ---
 
@@ -80,7 +75,7 @@ Four stances drive the rest of the design:
 ```
 docs/              the design suite - start here
 packages/          guardmem-core, the decision engine
-services/          the deployable units - mcp_server today, gateway and worker later
+services/          the deployable units - mcp_server, gateway, worker
 scripts/           operational commands - seed, replay, the checkpoint harness
 infra/             the dev datastore stack and the Alembic migrations
 tests/             unit / integration / contract / property / security
@@ -125,6 +120,8 @@ uv venv --python 3.12 --prompt HGEM --seed .venv
 uv pip install -r requirements.lock.txt      # third-party deps, 313 packages
 uv pip install -e packages/guardmem-core     # the decision engine
 uv pip install -e services/mcp_server        # the MCP server (S6.1)
+uv pip install -e services/gateway           # the REST gateway (S8.1)
+uv pip install -e services/worker            # the async worker (S8.4)
 python -m spacy download en_core_web_lg      # presidio needs this; ~400 MB
 
 cp .env.example .env                         # then paste your API keys into .env
@@ -142,13 +139,12 @@ Windows. `winget install ezwinports.make` gives GNU Make 4.4.1 with no MSYS
 dependency; restart your shell afterwards so the PATH change takes effect. Run
 `make` with no target for the full list.
 
-The two editable installs are not optional and are easy to skip.
-`requirements.lock.txt` pins only third-party packages; `guardmem_core` and
-`mcp_server` live in this repo and are installed from source in editable mode, so
-your edits take effect without reinstalling. Omit them and every import of
-`guardmem_core` — or, since S6.1, of `mcp_server` — fails with
-`ModuleNotFoundError` on an otherwise perfectly good environment, and
-`guardmem-mcp` is not on your PATH.
+The four editable installs are not optional and are easy to skip.
+`requirements.lock.txt` pins only third-party packages; `guardmem_core` and the
+three services live in this repo and are installed from source in editable mode,
+so your edits take effect without reinstalling. Omit one and every import of it
+fails with `ModuleNotFoundError` on an otherwise perfectly good environment - and
+for `mcp_server`, `guardmem-mcp` is not on your PATH.
 
 > **Do not run bare `uv sync` here.** It is *exact* — it uninstalls everything
 > not in `uv.lock`, which today means roughly 300 of the 313 packages above.
@@ -197,40 +193,28 @@ which and why.
 
 ## Status
 
-The decision engine is built and the write path is not. The repository was reset
-to a documentation baseline on 2026-09-09; `BUILD_NOTEBOOK.md` Day 1 is complete
-(S1.1 – S1.7), Layer 1 is complete (S2.1 – S2.3), the storage layer is complete
-(**Day 3, S3.1 – S3.6**), **Layer 2 is complete (S4.1 – S4.4)** — the schema
-gate, incumbent retrieval, conflict detection, and the resolution matrix with the
-merge behind it — **Day 5 is complete (S5.1 – S5.6)**: semantic entropy, the
-confidence composite, the impact-risk score, the decision matrix, the
-hash-chained audit log, and the orchestrator that runs a proposal through all of
-it — and **Day 6 is at S6.2**: the MCP server, its four core tools, and the
-first user-facing surface this project has had.
+The repository was reset to a documentation baseline on 2026-09-09, and
+`BUILD_NOTEBOOK.md` is complete through **S8.4**: the foundation (Day 1), Layer 1
+(S2.1 – S2.3), storage (S3.1 – S3.6), Layer 2 (S4.1 – S4.4), Layer 3 with the
+audit chain and the orchestrator (S5.1 – S5.6), the MCP server (S6.1 – S6.4),
+Neo4j, coverage and output schemas (S7.1 – S7.4), and the REST gateway with
+its async path (S8.1 – S8.4). **S9.1 is in too**, out of order and
+deliberately: Anthropic, OpenAI and Ollama behind one `LLMClient`.
 
-**S9.1 is in**, out of order and deliberately: Anthropic, OpenAI and Ollama
-behind one `LLMClient`. That retires the first of the two caveats this section
-used to open with — the engine can call a real model now, and does.
-
-One remains, and everything below assumes you know it: **nothing writes an
-assertion.** The pipeline reaches a decision and applies none; the applier needs
-an ADR. Entity resolution has one now — ADR-0008 — and so do §3.3's undeclared
-risk features, ADR-0009. Checkpoint B — the gate that would say whether the
-scoring separates good writes from bad — **still has not run**. See "The gate
-that has not run yet" for what is left, which is no longer a design question.
-
-So the toolchain, the gates, the local datastore stack, the typed foundation of
-`guardmem_core` — settings, domain ids, the error hierarchy, the Pydantic schema
-layer, and the `LLMClient` / `VectorStore` / `GraphStore` protocols with
-in-memory fakes — Layer 1, and durable storage are real.
+Three things everything below assumes you know. **CHECKPOINT B has not passed**
+- see "The gate that has not passed". **No process runs the outbox relay**, so
+a written fact stays hidden from search in a running service: the notebook gave
+its arq binding to the worker step, and S8.4 shipped without it. And **every
+service embeds with a deterministic hash**, because S9.1 built completion
+adapters and no embedding provider, so retrieval is not semantic yet.
 
 The noise filter is the first component with a measured number attached, and it
 is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
 drop 17 turns at **precision 1.000** and settle 30 of 40 turns without a model
 call. That is a unit-test gate on one small corpus, not a production figure, and
-two of the five drop classes are deliberately under-detected until the embedder
-(S3.2) and the ontology (S3.5) exist — both now do, and the rules that use them
-are Layer 2.
+two of the five drop classes are deliberately under-detected: deciding them needs
+the embedder and the ontology, which exist now but are not inputs to the noise
+filter, so a model judges those turns.
 
 S2.2 and S2.3 add the extractor and the span linker: K samples with a
 temperature-0 canonical draw, each proposed fact anchored to a verbatim span of
@@ -258,7 +242,9 @@ be made retrievable; the tenant is bound at construction and applied as
 supersession is an `UPDATE` of `valid_to` that raises rather than passing
 quietly when it matches nothing. A retired fact leaves search and stays
 recoverable through `as_of`, which is the claim the product rests on and is
-tested against a real Postgres rather than against a double.
+tested against a real Postgres rather than against a double - a testcontainer,
+started by the suite from the repository's own `initdb` scripts and migrated with
+`alembic upgrade head`, which CI runs on every push.
 
 S3.3 closes the loop. The assertion row and an outbox event commit in one
 transaction; a relay then applies the graph side and sets `visible = true`, and
@@ -299,8 +285,7 @@ it, and whether one source is enough. Those four fields are what Layer 2 and the
 risk scorer read: cardinality is what turns a second live value into a conflict
 regardless of what a language model thinks, and impact is what floors the risk
 score so a confident write to a critical field cannot auto-write on confidence
-alone. Nothing consumes it yet — the schema gate is the first consumer, and it
-is Layer 2.
+alone. The schema gate, the conflict checks and the risk scorer all read it.
 
 S3.6 puts all of it together. `make seed` writes one tenant, seven entities and
 twenty-eight assertions through the real path — router, store, outbox, relay,
@@ -312,13 +297,12 @@ every id is derived from a stable key, which is the same property the outbox
 relay's replay needed.
 
 Two caveats about seeded data, stated here because they are easy to forget. The
-vectors come from a deterministic hash — there is no embedding provider until
-S9.1 — so nothing about retrieval quality can be measured on them. And
-`confidence` is a placeholder, because Layer 3 does not exist yet; only `risk`
-is real, and only because it is the impact floor the ontology declares.
+vectors come from a deterministic hash — there is no embedding provider — so
+nothing about retrieval quality can be measured on them. And `confidence` is a
+placeholder, because the seed writes through the store rather than the pipeline;
+only `risk` is real, and only because it is the impact floor the ontology
+declares.
 
-That Postgres is a testcontainer, started by the suite from the repository's own
-`initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
 S4.1 is the first component of Layer 2 and the first thing in the pipeline to
 read the ontology. Every candidate Layer 1 produced arrives claiming a predicate
 and a value; the gate decides whether the tenant's vocabulary admits it, and
@@ -375,10 +359,11 @@ S4.4 turns that finding into an action. A duplicate is merged rather than
 stored: the new citation is appended to the fact it restates and the source
 count goes up, so three independent mentions of one fact read as a corroborated
 fact rather than as three. A claim that is strictly narrower than what is on
-record supersedes it. A contradiction stops and asks a human, because the rule
-for resolving one automatically depends on a confidence score that Layer 3 has
-not computed yet — the rule is implemented in full, and *ask a human* is what it
-returns when that number is missing.
+record supersedes it. A contradiction is escalated, because the rule for
+resolving one automatically depends on a confidence score Layer 2 does not have -
+the rule is implemented in full, and escalating is what it returns when that
+number is missing. Layer 3 computes it afterwards, and nothing yet goes back to
+apply the rule's other branch.
 
 The invariant underneath it is that a predicate declared to hold one value holds
 one value. That is property-tested over five hundred generated write sequences,
@@ -476,9 +461,10 @@ than taking the rest of the batch down with it.
 
 It stops short of writing. Storing a fact and recording that it was stored have
 to happen together or not at all, and the storage interface is deliberately
-backend-agnostic — it has no transaction to share. Closing that needs a decision
-about which of the two to bend, so what ships is the part that can be trusted:
-every decision, complete and re-checkable.
+backend-agnostic — it has no transaction to share. ADR-0010 settled which to
+bend: an applier that owns one Postgres transaction per candidate writes the
+fact, retires what it supersedes and appends the audit events together, and
+every service calls the pipeline and the applier as one step.
 
 Re-checkable is the last piece. A script re-runs any recorded decision from the
 inputs stored alongside it and reports whether today's code still reaches the
@@ -487,14 +473,15 @@ reproducible, and pretending otherwise would make the check meaningless. What it
 proves is narrower and more useful: that the rules which decided whether a fact
 was believed have not silently moved.
 
-### The gate that has not run yet
+### The gate that has not passed
 
 The build notebook puts a make-or-break checkpoint after Day 5: take 200
 candidates, have a human label each one keep-or-discard, and measure whether the
 confidence score actually separates the two. Everything after that point —
 gateway, guardrails, dashboard, review queue — assumes it does.
 
-**It has not been run.** The measurement needs candidates from real extraction,
+**It has not passed, and it has not been run the way it has to be.** The
+measurement needs candidates from real extraction,
 because hand-writing the 200 would measure the author's idea of a plausible
 mistake — the same problem the "no model grading" rule exists to prevent — and
 scoring against the test double would measure scripted answers.
@@ -520,42 +507,45 @@ prevention to detection rather than being lost.
 to end: real extraction, real conflict adjudication, real entailment, real
 Postgres.
 
-Two further gaps are not dependencies. The harness has no `generate`
-subcommand, so nothing fills a corpus; and the seed transcript is forty turns
-for one patient supporting 28 facts, which is not 200 candidates.
-
-The harness is now complete: generation, the metric, the diagnostics, the label
+The harness is complete: generation, the metric, the diagnostics, the label
 format, the self-consistency check on the labels, and a command that runs the
 eight manual verifications by running the tests that establish them. Those eight
-pass, and `generate` has been driven for real — proposals in, an unlabelled
-corpus out, scored end to end.
+pass.
 
-What does not exist is the **corpus** and the **labels**. One conversation is
-one subject, and the shipped transcript is forty turns for one patient; reaching
-the checkpoint's 200 candidates means writing more conversations, and then
-reading them. The discrimination number does not exist, and this section is here
-so that it is not mistaken for one that does.
+The **corpus** exists: `evals/datasets/checkpoint_b/` holds 238 candidates
+extracted by the real pipeline from 60 conversations. The conversations are
+synthetic, and its README says what that costs. The **human labels** do not
+exist yet. Provisional labels written by a model sit beside the corpus to keep
+work moving, and scored against them `C` reads AUROC **0.643**, a FAIL against
+the gate's 0.80, with the grounding term alone scoring higher than the
+composite. That number is a model's labels measuring a model's pipeline; the
+gate is decided by the human pass, and this section is here so that the
+provisional figure is not mistaken for it.
 
-That Postgres is a testcontainer, started by the suite from the repository's own
-`initdb` scripts and migrated with `alembic upgrade head`; CI runs it on every
-push.
-
-S6.1 and S6.2 are the newest steps: a process that speaks MCP over stdio, starts
+S6.1 and S6.2 made the MCP server: a process that speaks MCP over stdio, starts
 its pool, loads the ontology, and serves the four tools `MCP_INTEGRATION.md` §2
 publishes — `memory.search`, `memory.propose`, `memory.commit` and
-`memory.get_entity`.
+`memory.get_entity`. S6.4 added the resources and prompts.
 
-**Two of the four work and two decline, and that is the honest state rather than
-an unfinished one.** `memory.search` and `memory.get_entity` read governed memory
-end to end: point one at the seeded demo tenant and it returns believed facts
-with the verbatim source span each came from, and lists separately what has been
-*retired* — which is the difference between "we have no record" and "we no longer
-believe that". `memory.propose` and `memory.commit` validate every published
-constraint and then refuse, naming what is missing: the decision pipeline needs a
-model provider (S9.1), an entity resolver (specified in no document) and a
-candidate classifier. **They do not return an invented decision.** The whole claim
-of this project is that a fact was governed before it was believed, and a tool
-that says so without having done it would be worse than no tool at all.
+**Three of the four work and one declines.** `memory.search` and
+`memory.get_entity` read governed memory end to end: point one at the seeded
+demo tenant and it returns believed facts with the verbatim source span each came
+from, and lists separately what has been *retired* — which is the difference
+between "we have no record" and "we no longer believe that". `memory.propose`
+governs raw text and writes what it decides. `memory.commit` validates every
+published constraint and then refuses: it skips extraction, so the entropy term
+has nothing to measure, and how to score it is an ADR rather than a guess.
+**It does not return an invented decision.** The whole claim of this project is
+that a fact was governed before it was believed, and a tool that says so without
+having done it would be worse than no tool at all.
+
+S8.1 – S8.4 put the same pipeline behind REST. The gateway authenticates scoped
+API keys and resolves each request's tenant from its key alone, row-level
+security scoping every read and write to it; Redis backs its rate limits and
+idempotent replays; and `mode=async` accepts a proposal, queues it and returns
+202 while an arq worker governs and writes it. The accept path is load-tested in
+CI against a runner-sized budget (`bench/profiles/p95_targets.yaml`); `PRD.md`'s
+80 ms is the production target and has not been measured on production hardware.
 
 S9.1 adds the three provider adapters, and the interesting part is what they do
 *not* agree about: `n`, `temperature`, `seed`, structured output and every usage
@@ -568,9 +558,10 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself**, and nothing is in front of it but the
-measurement — no missing dependency, no undecided design, no credential, and no
-missing tooling. What remains is transcripts and a labelling session.
+The next step is **Checkpoint B itself**: the corpus exists and the tooling is
+complete, so what remains is a human labelling session - and, on the
+provisional reading, a look at why the composite scores below its own grounding
+term.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and
