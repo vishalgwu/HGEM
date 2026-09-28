@@ -164,8 +164,8 @@ The gate is AUROC of `C` ≥ 0.80. 0.75–0.80 proceeds as MARGINAL and is recor
 Added 2026-09-27 to keep work moving until the human pass, which is still
 planned. It is `corpus.jsonl` row for row - same ids, same order, every pipeline
 field unchanged - with `keep` set by a model, and three fields on every row
-saying so: `keep_by` (`ai-surrogate (Muse)`), `keep_at` and `keep_note`. 191
-kept, 47 not.
+saying so: `keep_by`, `keep_at` and `keep_note`. It arrived with 191 kept and 47
+not, all by `ai-surrogate (Muse)`.
 
 `score` reads `keep_by` and prints any verdict over an `ai-` label as
 PROVISIONAL, so a number from this file cannot be mistaken for the gate's:
@@ -173,6 +173,25 @@ PROVISIONAL, so a number from this file cannot be mistaken for the gate's:
 ```bash
 uv run python -m scripts.checkpoint_b score evals/datasets/checkpoint_b/corpus.ai_labelled.jsonl
 ```
+
+**Three labels were corrected on review**, because each keeps a second value of
+a predicate the ontology allows only one of. Each row records it (`keep_by:
+ai-surrogate (Claude)`, the reason in `keep_note`), and git history keeps the
+labels as they arrived. That leaves 188 kept and 50 not.
+
+| candidate | was kept | why it is not |
+|---|---|---|
+| `tr_ckb_0017_c_2` | `allergy = anaphylaxis` | the reaction, not an allergen: `allergy` is RxNorm-coded, and the allergen, bee stings, is `c_1` |
+| `tr_ckb_0019_c_2` | `preferred_language = English` | cardinality `one`, and the patient asked for Urdu letters (`c_1`); English was only fine by phone |
+| `tr_ckb_0044_c_2` | `insurance_plan = WPA-771204` | a policy reference rather than the Payer the predicate refers to, and a second concurrent value beside `c_1` |
+
+**The provisional result, 2026-09-27: FAIL.** AUROC of `C` is **0.643** against
+the gate's 0.80 - 0.656 before the three corrections. `grounding` alone scores
+0.658 and beats the composite, which `score` reports as "a single term beats the
+composite: the weights are adding noise". `uncertainty` scores 0.586;
+`schema_fit`, `consistency` and `corroboration` sit at chance, the last two by
+construction (see the table above). The labels are a model's, so the number is
+too - but it is the first one this checkpoint has produced, and it is a FAIL.
 
 **Label `corpus.jsonl` without opening this file.** A labeller who has seen a
 model's answer is partly measuring it. After the human pass, `agreement` between
