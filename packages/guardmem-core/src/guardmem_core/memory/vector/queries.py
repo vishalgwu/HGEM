@@ -44,7 +44,10 @@ if TYPE_CHECKING:
     from guardmem_core.types import Namespace
 
 __all__ = [
+    "LIVE_CLAUSE",
+    "RETIRED_CLAUSE",
     "SUPERSEDE",
+    "fetch_citations",
     "nearest_statement",
     "predicates",
     "retired_statement",

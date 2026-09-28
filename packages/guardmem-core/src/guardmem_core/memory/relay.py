@@ -51,12 +51,8 @@ from guardmem_core.memory.outbox import (
     pending_from_row,
 )
 from guardmem_core.memory.vector.pool import tenant_transaction, transaction
-from guardmem_core.memory.vector.rowmap import (
-    SELECT_ASSERTION,
-    SELECT_PROVENANCE,
-    assertion_from_row,
-    provenance_from_row,
-)
+from guardmem_core.memory.vector.queries import fetch_citations
+from guardmem_core.memory.vector.rowmap import SELECT_ASSERTION, assertion_from_row
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -262,10 +258,10 @@ class OutboxRelay:
         )
         if row is None:
             return None
-        citations = await connection.fetch(
-            SELECT_PROVENANCE, [event.assertion_id], timeout=self._timeout_s
-        )
-        return assertion_from_row(row, [provenance_from_row(citation) for citation in citations])
+        # `row["id"]`, not `event.assertion_id`: the citations come back keyed by
+        # the UUID asyncpg returns, and the event carries the id as a string.
+        citations = await fetch_citations(connection, [row["id"]], timeout_s=self._timeout_s)
+        return assertion_from_row(row, citations[row["id"]])
 
     async def _complete(self, event: PendingEvent) -> None:
         """Make the assertion visible and close the outbox row, together.

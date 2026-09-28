@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Final
 import networkx as nx
 
 from guardmem_core.errors import ValidationRejected
-from guardmem_core.memory.graph.keys import object_key as _object_key
+from guardmem_core.memory.graph.keys import object_key
 from guardmem_core.schemas.entity import Edge
 from guardmem_core.types import EntityId
 
@@ -57,11 +57,6 @@ __all__ = ["NetworkXGraphStore"]
 # one would be a silent `None` rather than an error.
 _TENANT: Final = "tenant_id"
 _EDGE: Final = "edge"
-
-# `_object_key` moved to `graph/keys.py` at S7.1 and is imported above. It is the
-# one piece of the graph model both backends must compute identically - two
-# copies would agree until somebody changed one, and the disagreement would show
-# up as a blast-radius score that differs by backend.
 
 
 class NetworkXGraphStore:
@@ -94,7 +89,7 @@ class NetworkXGraphStore:
 
         Args:
             a: The assertion. `subject_id` is an entity node; `object` is an
-                entity node or a literal one, as `_object_key` decides.
+                entity node or a literal one, as `keys.object_key` decides.
 
         Raises:
             ValidationRejected: the subject is already held for a different
@@ -109,10 +104,10 @@ class NetworkXGraphStore:
         subject = str(a.subject_id)
         self._reject_foreign_tenant(subject, a)
         self._graph.add_node(subject, **{_TENANT: a.tenant_id})
-        self._graph.add_node(_object_key(a.object))
+        self._graph.add_node(object_key(a.object))
         self._graph.add_edge(
             subject,
-            _object_key(a.object),
+            object_key(a.object),
             key=a.assertion_id,
             **{
                 _EDGE: Edge(

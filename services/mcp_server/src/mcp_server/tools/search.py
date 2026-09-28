@@ -140,12 +140,8 @@ async def _nearest(
     queries are correct; the list is small by construction, since it names
     predicates a caller cares about.
     """
-    requested = filters.get("predicate")
-    wanted: list[object] = list(requested) if isinstance(requested, list) else [None]
-    base = {key: value for key, value in filters.items() if key != "predicate"}
     merged: dict[str, StoredAssertion] = {}
-    for predicate in wanted:
-        scoped = base if predicate is None else {**base, "predicate": predicate}
+    for scoped in _per_predicate(filters):
         hits = await context.store.search(
             namespace=context.namespace,
             embedding=embedding,
@@ -179,23 +175,39 @@ async def _retired_for(context: ToolContext, filters: dict[str, object]) -> list
     reason for publishing the field is to make "we retired that record"
     *trustworthy*. A footnote that is usually wrong is worse than no footnote.
 
-    So the predicate loop is the same shape as `_nearest`'s, for the same
-    reason: the store's filter is one predicate, the argument is a list, and the
-    list is small because it names predicates a caller cares about. With no
-    predicates given the question genuinely is "what has this namespace retired
-    lately?" and one unscoped query is the right answer to it.
+    So it splits by predicate exactly as `_nearest` does, for the same reason:
+    the store's filter is one predicate, the argument is a list, and the list is
+    small because it names predicates a caller cares about. With no predicates
+    given the question genuinely is "what has this namespace retired lately?"
+    and one unscoped query is the right answer to it.
     """
-    requested = filters.get("predicate")
-    wanted: list[object] = list(requested) if isinstance(requested, list) else [None]
-    base = {key: value for key, value in filters.items() if key != "predicate"}
     merged: dict[str, StoredAssertion] = {}
-    for predicate in wanted:
-        scoped = base if predicate is None else {**base, "predicate": predicate}
+    for scoped in _per_predicate(filters):
         for assertion in await context.store.retired(
             namespace=context.namespace, filters=scoped, limit=_EXCLUDED_LIMIT
         ):
             merged.setdefault(assertion.assertion_id, assertion)
     return list(merged.values())[:_EXCLUDED_LIMIT]
+
+
+def _per_predicate(filters: dict[str, object]) -> list[dict[str, object]]:
+    """The caller's filters as one store query per requested predicate.
+
+    Args:
+        filters: As `store_filters` built them. Read, never mutated.
+
+    Returns:
+        One filter dict per predicate in `filters["predicate"]`, or a single
+        unscoped one when no predicates were named.
+
+    `_nearest` and `_retired_for` both need this split - `VectorStore`'s
+    `predicate` filter takes one value and §2.1's argument is a list - and each
+    carried its own copy of it until 2026-09-28.
+    """
+    requested = filters.get("predicate")
+    wanted: list[object] = list(requested) if isinstance(requested, list) else [None]
+    base = {key: value for key, value in filters.items() if key != "predicate"}
+    return [base if predicate is None else {**base, "predicate": predicate} for predicate in wanted]
 
 
 def assertion_view(assertion: StoredAssertion) -> dict[str, Any]:
