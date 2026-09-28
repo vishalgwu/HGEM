@@ -16,7 +16,7 @@ also why the two produce the same set.
 **One node keyspace, two labels.** `ARCHITECTURE.md` §5 ends an `ASSERTS` edge
 at `(:Entity|:Literal)`, and the `key` property is what both are matched on. A
 string object is an `:Entity` keyed by its own value, exactly as
-`NetworkXGraphStore._object_key` keys it - which is what lets a two-hop walk
+`keys.object_key` keys it for both backends - which is what lets a two-hop walk
 follow an entity reference, and what makes a subject and a string object naming
 it the same node. Anything that cannot be an entity reference - a number, a
 boolean, a structured object - is a `:Literal` under a canonical `literal:` key.
@@ -98,11 +98,17 @@ MERGE (s)-[r:ASSERTS {assertion_id: $assertion_id}]->(o)
     + _SET_EDGE
 )
 
+# Every read below starts at an `:Entity` and says so. Subjects are entities by
+# construction, and the walk only continues through entity objects, so the label
+# changes no result - but the uniqueness constraint that indexes `key` is per
+# label, and without it each of these statements scanned every node in the graph.
+# `EXPLAIN` on Neo4j 5.26: `AllNodesScan` before, `NodeUniqueIndexSeek` after.
+#
 # The tenant a read is scoped to, taken from the node it starts at. Null for a
 # node that has only ever been an object - see `neo4j_store.neighbors` for what
 # that means and why it is reachable from a test and not from the pipeline.
 START_TENANT: Final = """
-MATCH (n {key: $entity})
+MATCH (n:Entity {key: $entity})
 RETURN n.tenant_id AS tenant
 """
 
@@ -115,7 +121,7 @@ RETURN n.tenant_id AS tenant
 # seen, which the protocol requires: an unknown subject is a novel one, and
 # §3.3 prices novelty separately.
 DEGREE: Final = """
-MATCH (n {key: $entity})
+MATCH (n:Entity {key: $entity})
 OPTIONAL MATCH (n)-[r:ASSERTS]-()
 WHERE r.valid_to IS NULL
   AND (n.tenant_id IS NULL OR r.tenant_id = n.tenant_id)
@@ -135,7 +141,7 @@ RETURN count(r) AS degree
 # exactly the objects stored as `:Entity`, so the two walks visit the same
 # nodes.
 HOP: Final = """
-MATCH (s)-[r:ASSERTS]->(o)
+MATCH (s:Entity)-[r:ASSERTS]->(o)
 WHERE s.key IN $frontier
   AND r.valid_to IS NULL
   AND ($tenant IS NULL OR r.tenant_id = $tenant)
