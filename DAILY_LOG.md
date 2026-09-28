@@ -5620,7 +5620,8 @@ has had - a provisional one, and a FAIL.
 **Still open**
 
 - The human labelling of `corpus.jsonl`, blind to the provisional file, after
-  settling the four labelling-policy questions in the dataset README.
+  settling the four labelling-policy questions in the dataset README. Moved to
+  Day 28, the end of the build, by the plan change in the next entry.
 - The relay binding, which needs the graph-backend decision first.
 - A provider-backed embedder: every service embeds with `HashEmbedder`.
 - §2.3 row 3's upgrade - a confident, newer contradiction superseding - is
@@ -5634,6 +5635,9 @@ has had - a provisional one, and a FAIL.
 
 Settle the four labelling questions, then label `corpus.jsonl` by hand without
 opening `corpus.ai_labelled.jsonl`.
+
+*Superseded the same day by the next entry: the human labelling is the last step
+of the build, at Day 28, and the next step is S9.2.*
 
 ---
 

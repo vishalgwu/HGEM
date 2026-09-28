@@ -50,6 +50,11 @@ You are building inside-out, not front-to-back. The reason: the decision engine 
 with real intellectual risk. If the scoring cannot separate good writes from bad writes, nothing
 downstream matters, and you want to learn that in week 1, not week 4.
 
+**Changed 2026-09-28, by decision, for the measurement only.** The build stays inside-out, but
+CHECKPOINT B's human-labelled run moves to the start of Day 28: the rest of the build proceeds on
+provisional model labels, and the final result decides whether the work becomes a research paper
+(AUROC >= 0.80) or is published as a project. `PHASES_AND_ROADMAP.md` §0 owns the decision.
+
 ```
   WEEK 1            WEEK 2             WEEK 3            WEEK 4
   +-----------+     +-----------+      +-----------+     +-----------+
@@ -2685,6 +2690,11 @@ COMMIT: `feat(s5.6): pipeline orchestrator and deterministic replay`
 ---
 
 ## CHECKPOINT B — the pipeline works (make or break)
+
+> **Since 2026-09-28 this gate runs last.** The human labelling is the first step of Day 28, and
+> everything before it is built on provisional model labels. The note under the bands below, the
+> DEFERRED record at the end of this section, and `PHASES_AND_ROADMAP.md` §0 say what the final
+> result decides. The text that follows is the gate as originally planned, after Day 5.
 
 After Day 5. About 60 minutes. This is the most important gate in the project.
 

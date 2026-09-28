@@ -1,25 +1,21 @@
 # GuardMem AI - Project Documentation
 
-GuardMem AI is a planned memory governance gateway for long-running AI agents. It
-extracts sourced facts, checks conflicts, scores confidence and impact, and chooses
-automatic storage, human review, rejection, or one additional model evaluation.
-Every durable decision must have an auditable receipt.
+GuardMem AI is a memory governance gateway for long-running AI agents, built to
+the specifications in this directory. It extracts sourced facts, checks
+conflicts, scores confidence and impact, and chooses automatic storage, human
+review, rejection, or one additional model evaluation. Every durable decision
+must have an auditable receipt.
 
-**Status: the build has started.** The repository was reset to a documentation
-baseline on September 9, 2026. `BUILD_NOTEBOOK.md` Day 1 is complete
-(S1.1 - S1.7), and Layer 1 is complete (S2.1 - S2.3). The toolchain and the gates
-are real - `make lint`, `make typecheck`, `make test`, the pre-commit hooks and
-GitHub Actions all run today - and so is the typed foundation of `guardmem_core`:
-settings, domain ids, the error hierarchy, the Pydantic schema layer, the store
-and LLM protocols with in-memory fakes, the versioned prompt loader, and the
-noise filter, K-sample extractor and span linker that make up Layer 1. S3.1 adds
-the initial migration - bitemporal assertions, provenance, the audit chain, the
-outbox and row-level security - so four of `RULES.md`'s non-negotiables are
-enforced by Postgres rather than by convention, and S3.2 adds the pgvector store
-over it, verified against a testcontainer rather than against a fake. Nothing
-between Layer 1 and that store exists yet: no validation, no scoring, no
-decision, and no relay to make a write visible. The next step is S3.3, the
-outbox.
+**Status: built through `BUILD_NOTEBOOK.md` S8.4, plus S9.1.** The repository was
+reset to a documentation baseline on September 9, 2026. Since then the decision
+engine (all three layers, the hash-chained audit log and the orchestrator), the
+bitemporal Postgres store with its outbox, both graph stores, the MCP server,
+and the REST gateway with its async worker have been built, and the gates -
+`make lint`, `make typecheck`, `make test`, the pre-commit hooks and GitHub
+Actions - run on every push. CHECKPOINT B, the discrimination gate, runs last by
+the 2026-09-28 decision: the human labelling is the first step of Day 28
+([Phases and Roadmap](PHASES_AND_ROADMAP.md) §0). The root `README.md`'s Status
+section says what is not built yet.
 
 Everything in this directory remains specification. Nothing here is evidence of
 an implemented feature; see "How to use this baseline" below.

@@ -87,7 +87,8 @@ tools.
 - [ ] Checkpoint B signed off: AUROC of `C` against 200 human-labelled candidates ≥ 0.80 (0.75–0.80 proceeds as MARGINAL and is recorded)
   <br>(**Deferred to the end of the build by the 2026-09-28 decision - see §0.**
   The provisional reading on model labels is AUROC 0.643, a FAIL and not a
-  sign-off. The corpus is built and the labelling session is all that is left.
+  sign-off. The corpus is built, and the labelling session - at Day 28 - is all
+  this gate still needs.
   As of 2026-09-19 it stands at **238 candidates over the checkpoint's 200**,
   drawn from 60 conversations on
   `llama3.1:8b` under `extract_memories@v2` at **K = 5** - 0 rejected, 0
