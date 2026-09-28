@@ -1,8 +1,8 @@
 """Three providers, one `LLMClient`.  BUILD_NOTEBOOK.md S9.1
 
 `llm/base.py` declared the Protocol at S1.7 and nothing implemented it for eight
-steps - which is why CHECKPOINT B is recorded as BLOCKED, why `memory.propose`
-declines, and why nothing in this repository had ever made a real model call.
+steps - which is why CHECKPOINT B was recorded as BLOCKED, why `memory.propose`
+declined, and why nothing in this repository had ever made a real model call.
 This package is the other end of that.
 
 | Provider | Client | `n` | `temperature` | `seed` | Cost |

@@ -256,6 +256,13 @@ repository; the log records what happened while changing it.
 
 ### Changed
 
+- **CHECKPOINT B runs last.** By the project owner's decision on 2026-09-28, the
+  build continues through Phases 2-4 on the provisional AI labels, and the
+  human-labelled run opens Day 28: at 0.80 or above the work becomes the basis of a
+  research paper, below it the project is published with the number in its
+  limitations. `docs/PHASES_AND_ROADMAP.md` §0 owns the decision.
+  `checkpoint_b score` names the route a human-labelled verdict decides, and no
+  longer says "Do not build the gateway".
 - **Comments and docstrings through S8.4 say what is true.** A sweep for text that
   described finished steps as future, names that had drifted and counts that were
   wrong, each checked against the code. It put four gaps in writing where they are

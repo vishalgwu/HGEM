@@ -2719,6 +2719,14 @@ AUROC 0.75-0.80 -> MARGINAL. Proceed, but record it and revisit when thresholds 
 AUROC < 0.75    -> FAIL. Stop. Do not build the gateway.
 ```
 
+**Changed 2026-09-28, by decision: the gate runs last, and it decides what the work becomes
+rather than whether the build continues.** The bands above stand as written; the consequences do
+not. The rest of the build proceeds on the provisional model labels in
+`evals/datasets/checkpoint_b/corpus.ai_labelled.jsonl`, and the human-labelled run is the first
+thing Day 28 does. At >= 0.80 the work becomes the basis of a research paper; below 0.80 it is
+published as a portfolio project, with the number and its diagnosis in S28.4's limitations section.
+`PHASES_AND_ROADMAP.md` §0 owns the decision.
+
 If it fails, diagnose in this order rather than adding features:
 
 1. Is entropy doing anything? Compute AUROC of `1 - H_norm` alone. If entropy alone beats the
@@ -2881,6 +2889,25 @@ Notes:              I3 (supersession acyclic) was also not property-tested -
                     drive the store into a two-cycle. The invariant holds
                     because the applier mints its successor, and that is a
                     property of the write path rather than of the store.
+```
+
+**Recorded 2026-09-28: DEFERRED to the end of the build, by decision.** The corpus exists -
+238 candidates from 60 conversations, `evals/datasets/checkpoint_b/` - and a provisional run
+against model labels has been scored. It is not a sign-off, and the record says so:
+
+```
+CHECKPOINT B: DEFERRED (provisional reading: FAIL, on model labels)
+Date:               2026-09-28
+AUROC:              0.643 (n=238; 235 ai-surrogate (Muse), 3 ai-surrogate (Claude))
+                    - model labels, printed PROVISIONAL by `checkpoint_b score`
+AUROC entropy-only: 0.586 (the `uncertainty` term, same labels)
+Best single term:   grounding, 0.658 - above the composite
+Decision:           build Phases 2-4 on the provisional labels; label `corpus.jsonl`
+                    by hand as the first step of Day 28 and score it then.
+                    >= 0.80 -> research paper; below -> published as a project.
+                    PHASES_AND_ROADMAP.md §0 owns this.
+Notes:              the dataset README lists four labelling-policy questions to
+                    settle before the human pass, and says why it is done blind.
 ```
 
 ---
@@ -3132,6 +3159,10 @@ WEEK 1 EXIT GATE: the Phase 1 checklist in PHASES_AND_ROADMAP.md section 1, whic
 short: Claude Desktop round-trip with provenance, supersession with tombstone and audit event,
 deterministic replay, no unsourced write possible, Checkpoint B signed off, coverage at the gate,
 suite green. Do not start week 2 with a box unticked — every week after this one assumes all of it.
+
+**Except CHECKPOINT B, since 2026-09-28.** By decision it runs on human labels at the start of
+Day 28 (`PHASES_AND_ROADMAP.md` §0), so weeks 2-4 proceed with that box unticked and a provisional
+reading of 0.643 - a scorer not yet shown to discriminate. Every other box still holds.
 
 Note on coverage: >= 85% is the Week-1 interim floor, and RULES 5 sets the release gate at 90%.
 
@@ -3641,6 +3672,15 @@ provider outage. A runbook you have not walked through is fiction.
 
 ## DAY 28 — Ship
 
+**First, CHECKPOINT B on human labels** - moved here from Day 5 by the 2026-09-28 decision
+(`PHASES_AND_ROADMAP.md` §0). Settle the four labelling questions in
+`evals/datasets/checkpoint_b/README.md`, label `corpus.jsonl` by hand without opening
+`corpus.ai_labelled.jsonl` (the checkpoint's "about two hours"), run `checkpoint_b score`, and
+record the sign-off in the Day 5 section. At >= 0.80, S28.4's eval report is the first draft of a
+research paper; below 0.80, the project is published as it stands and the number goes in that
+report's limitations. Either way S28.1's README reports the human-labelled number, not the
+provisional one.
+
 ### S28.1 -- README with the drift chart
 TIME: 75 min. Lead with the chart, not the architecture. First screen answers: what breaks without
 this, what GuardMem does, what the numbers are.
@@ -3701,7 +3741,7 @@ D24 baselines, security suite
 D25 load bench, cost bench
 D26 terraform, cloud sql migration, ci/cd
 D27 nightly eval gate, runbooks + game day
-D28 readme, demo video, cold-start verification, adrs
+D28 checkpoint b on human labels, readme, demo video, cold-start verification, adrs
 ```
 
 ## B. Environment variables (complete list)

@@ -5637,6 +5637,47 @@ opening `corpus.ai_labelled.jsonl`.
 
 ---
 
+## 2026-09-28 - the plan changes: CHECKPOINT B moves to the end
+
+**Shipped**
+
+- **The decision, written where each document needs it.**
+  `docs/PHASES_AND_ROADMAP.md` §0 owns it: the rest of the build - Phases 2 to 4,
+  the dashboard and the review UI included - proceeds on the provisional AI
+  labels, and the human labelling is the first step of Day 28. At 0.80 or above
+  the work becomes the basis of a research paper; below 0.80 it is published as a
+  portfolio project, with the number in its limitations. The notebook records the
+  change beside the gate's bands, adds a DEFERRED sign-off record with the
+  provisional numbers, suspends the week-1 "no unticked box" rule for this one box,
+  and opens Day 28 with the human-labelled run. The README, the docs index and the
+  dataset README point at §0.
+- **`checkpoint_b score` no longer prints "Do not build the gateway".** A
+  human-labelled verdict names the route it decides; a provisional one names none,
+  and says the gate is decided on human labels at the end of the build.
+
+**What broke / what I learned**
+
+- Nothing broke. What changes is what the rest of the build can assume: every
+  week after Phase 1 now builds on a scorer that has not been shown to
+  discriminate, and the provisional reading - 0.643, with the grounding term alone
+  above the composite - says it may not. The notebook's reason for the gate ("you
+  are about to spend three weeks building operations tooling for a system that
+  does not work") is now a risk taken knowingly rather than one the gate removes,
+  and the portfolio route is what makes that acceptable.
+
+**Still open**
+
+- Everything in the previous entry's list; only the human labelling moves, to
+  Day 28.
+
+**Tomorrow's first step**
+
+S9.2, tier routing - or the outbox relay binding first, once the graph-backend
+decision is made, since saved facts are not searchable in a running service until
+it exists.
+
+---
+
 ---
 
 ---

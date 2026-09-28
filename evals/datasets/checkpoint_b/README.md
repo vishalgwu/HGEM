@@ -159,13 +159,20 @@ uv run python -m scripts.checkpoint_b score evals/datasets/checkpoint_b/corpus.j
 
 The gate is AUROC of `C` ≥ 0.80. 0.75–0.80 proceeds as MARGINAL and is recorded.
 
+**When the human pass happens, and what it decides.** Since 2026-09-28 it is the
+last step of the build, at the start of `BUILD_NOTEBOOK.md` Day 28; everything
+before it is built on the provisional labels below. At 0.80 or above the work
+becomes the basis of a research paper; below 0.80 the project is published as it
+stands, with the number and its diagnosis in the eval report's limitations.
+`docs/PHASES_AND_ROADMAP.md` §0 owns that decision.
+
 ### Provisional labels: `corpus.ai_labelled.jsonl`
 
-Added 2026-09-27 to keep work moving until the human pass, which is still
-planned. It is `corpus.jsonl` row for row - same ids, same order, every pipeline
-field unchanged - with `keep` set by a model, and three fields on every row
-saying so: `keep_by`, `keep_at` and `keep_note`. It arrived with 191 kept and 47
-not, all by `ai-surrogate (Muse)`.
+Added 2026-09-27 to keep work moving until the human pass, which is now the
+last step of the build (above). It is `corpus.jsonl` row for row - same ids,
+same order, every pipeline field unchanged - with `keep` set by a model, and
+three fields on every row saying so: `keep_by`, `keep_at` and `keep_note`. It
+arrived with 191 kept and 47 not, all by `ai-surrogate (Muse)`.
 
 `score` reads `keep_by` and prints any verdict over an `ai-` label as
 PROVISIONAL, so a number from this file cannot be mistaken for the gate's:

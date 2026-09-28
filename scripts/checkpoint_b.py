@@ -64,6 +64,15 @@ _SCRATCH_TENANT: Final = "00000000-0000-5000-a000-0000c4ec4b00"
 # verdict over any such label is provisional however good the number looks.
 _MODEL_LABELLER_PREFIX: Final = "ai-"
 
+# What a human-labelled verdict decides, since the gate moved to the end of the
+# build on 2026-09-28. `PHASES_AND_ROADMAP.md` §0 owns the decision; this only
+# names it where the verdict is printed.
+_ROUTE: Final = {
+    Verdict.PASS: "Route: research paper - the eval report is its first draft.",
+    Verdict.MARGINAL: "Route: published project, with this number in its limitations.",
+    Verdict.FAIL: "Route: published project, with this number in its limitations.",
+}
+
 # CHECKPOINT B's manual verification table, each row bound to the test that
 # actually establishes it. Running them beats reading them: the table says
 # "read the function; no awaits, no settings reads" for B3, and
@@ -194,6 +203,12 @@ def score(path: pathlib.Path) -> int:
     from each row's `keep_by`, and a verdict over any `ai-` label is printed
     PROVISIONAL. The exit code is unchanged, so the provisional number still
     composes into whatever is reading it.
+
+    **A verdict stopped meaning "stop" on 2026-09-28.** The gate runs at the end
+    of the build now (`PHASES_AND_ROADMAP.md` §0), so a FAIL no longer says "do
+    not build the gateway": over human labels the verdict names the route the
+    finished work takes, and over model labels it names none, because a
+    provisional number decides nothing.
     """
     rows = _read(path)
     unlabelled = [row["candidate_id"] for row in rows if row.get("keep") is None]
@@ -216,7 +231,7 @@ def score(path: pathlib.Path) -> int:
     if by_model:
         print(
             f"PROVISIONAL: {by_model} of {len(rows)} labels were set by a model. "
-            "The gate needs human labels."
+            "The gate is decided on human labels, at the end of the build."
         )
     print(f"AUROC:              {report.auroc:.3f}  (n={report.labelled}; {_labelled_by(rows)})")
     for name, value in sorted(report.by_score.items(), key=lambda pair: -pair[1]):
@@ -229,7 +244,9 @@ def score(path: pathlib.Path) -> int:
         # elegant composite that does not separate."
         print("  ^ a single term beats the composite: the weights are adding noise")
     if report.verdict is Verdict.FAIL:
-        print("\nFAIL. Do not build the gateway. Diagnose in the checkpoint's order.")
+        print("\nFAIL. Diagnose in the checkpoint's order.")
+    if not by_model:
+        print(_ROUTE[report.verdict])
     return {Verdict.PASS: 0, Verdict.MARGINAL: 1, Verdict.FAIL: 2}[report.verdict]
 
 

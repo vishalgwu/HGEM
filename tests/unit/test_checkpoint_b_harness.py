@@ -190,6 +190,43 @@ class TestTheScoreSaysWhoLabelled:
         assert "4 by a.labeller" in printed
 
 
+class TestTheVerdictNamesTheRoute:
+    """Since 2026-09-28 the gate runs last and decides what the finished work
+    becomes (`PHASES_AND_ROADMAP.md` §0), so a human-labelled verdict names that
+    route - and a provisional one names none, because it decides nothing."""
+
+    def test_a_human_pass_names_the_paper_route(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rows = [row(*spec, keep_by="a.labeller") for spec in SEPARATING]
+
+        assert score(corpus(tmp_path / "c.jsonl", rows)) == 0
+        assert "Route: research paper" in capsys.readouterr().out
+
+    def test_a_human_fail_names_the_project_route_and_no_stop(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The old message said "Do not build the gateway", and the gateway is
+        built: a FAIL at the end diagnoses, it does not halt anything."""
+        rows = [row(name, keep, 0.5) for name, keep in (("a", True), ("b", False), ("c", True))]
+
+        assert score(corpus(tmp_path / "c.jsonl", [*rows, row("d", False, 0.5)])) == 2
+        printed = capsys.readouterr().out
+        assert "Route: published project" in printed
+        assert "Do not build the gateway" not in printed
+
+    def test_a_provisional_verdict_names_no_route(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rows = [row(*spec, keep_by="ai-surrogate (Muse)") for spec in SEPARATING]
+
+        score(corpus(tmp_path / "c.jsonl", rows))
+
+        printed = capsys.readouterr().out
+        assert "Route:" not in printed
+        assert "decided on human labels, at the end of the build" in printed
+
+
 class TestAgreement:
     def test_consistent_labelling_passes(self, tmp_path: pathlib.Path) -> None:
         rows = [row("a", True, 0.9), row("b", False, 0.1)]

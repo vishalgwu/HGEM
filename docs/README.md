@@ -33,6 +33,8 @@ an implemented feature; see "How to use this baseline" below.
 4. Use [Build Notebook](BUILD_NOTEBOOK.md) for the build steps and
    [Phases and Roadmap](PHASES_AND_ROADMAP.md) for the milestone overview. The Day 5 section
    ends at Checkpoint B, the discrimination gate that decides whether the project is viable.
+   Since 2026-09-28 it runs last, on human labels, and decides whether the finished work
+   becomes a research paper or a published project - Phases and Roadmap §0 owns that.
 
 ## Protected master notebook
 

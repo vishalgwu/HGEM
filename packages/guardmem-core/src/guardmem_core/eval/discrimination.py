@@ -5,6 +5,12 @@ guardrails, dashboard, HITL, evals, deploy - assumes the scoring can tell good
 candidates from bad ones. If it cannot, you are about to spend three weeks
 building operations tooling for a system that does not work."
 
+**Since 2026-09-28 it runs last instead** (`PHASES_AND_ROADMAP.md` §0): the rest
+of the build proceeds on provisional model labels, and the human-labelled result
+at the end decides what the finished work becomes. This module scores either
+kind the same way; `scripts/checkpoint_b.py` is what marks model labels
+PROVISIONAL and names the route a human-labelled verdict decides.
+
 The failure it catches is named there too, and it is the one unit tests cannot
 see: "a scorer that produces plausible numbers with no discriminative power.
 This is the default outcome of implementing a formula correctly without ever
@@ -48,7 +54,9 @@ __all__ = [
 ]
 
 # CHECKPOINT B's bands, verbatim: ">= 0.80 -> PASS", "0.75-0.80 -> MARGINAL",
-# "< 0.75 -> FAIL. Stop. Do not build the gateway."
+# "< 0.75 -> FAIL. Stop. Do not build the gateway." What follows from each changed
+# on 2026-09-28 - the gate runs last and decides paper or project
+# (`PHASES_AND_ROADMAP.md` §0) - and the numbers did not.
 PASS_FLOOR: Final = 0.80
 MARGINAL_FLOOR: Final = 0.75
 

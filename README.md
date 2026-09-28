@@ -10,11 +10,12 @@
 > believed, confidence and risk scoring, the decision matrix — and each decision
 > is written with its hash-chained audit events in one Postgres transaction. The
 > MCP server, the REST gateway (auth, row-level security, rate limits,
-> idempotency) and the async worker all run it. **CHECKPOINT B has not passed:**
-> scored against provisional AI labels it reads AUROC 0.643, a FAIL, and the
-> human labelling that decides it is still to do. Every performance and quality
-> figure below is a **target**, not a measurement — see [Status](#status) before
-> quoting any number.
+> idempotency) and the async worker all run it. **CHECKPOINT B is run last, by
+> decision:** the build continues on provisional AI labels (AUROC 0.643 against
+> them, a FAIL), and human labelling at the end decides it - the basis of a
+> research paper at 0.80 or above, a published project below. Every performance
+> and quality figure below is a **target**, not a measurement — see
+> [Status](#status) before quoting any number.
 
 ---
 
@@ -201,12 +202,13 @@ Neo4j, coverage and output schemas (S7.1 – S7.4), and the REST gateway with
 its async path (S8.1 – S8.4). **S9.1 is in too**, out of order and
 deliberately: Anthropic, OpenAI and Ollama behind one `LLMClient`.
 
-Three things everything below assumes you know. **CHECKPOINT B has not passed**
-- see "The gate that has not passed". **No process runs the outbox relay**, so
-a written fact stays hidden from search in a running service: the notebook gave
-its arq binding to the worker step, and S8.4 shipped without it. And **every
-service embeds with a deterministic hash**, because S9.1 built completion
-adapters and no embedding provider, so retrieval is not semantic yet.
+Three things everything below assumes you know. **CHECKPOINT B has not passed,
+and by decision it is decided last** - see "The gate that has not passed". **No
+process runs the outbox relay**, so a written fact stays hidden from search in a
+running service: the notebook gave its arq binding to the worker step, and S8.4
+shipped without it. And **every service embeds with a deterministic hash**,
+because S9.1 built completion adapters and no embedding provider, so retrieval is
+not semantic yet.
 
 The noise filter is the first component with a measured number attached, and it
 is a narrow one: over a 40-turn hand-labelled corpus, its deterministic rules
@@ -480,6 +482,12 @@ candidates, have a human label each one keep-or-discard, and measure whether the
 confidence score actually separates the two. Everything after that point —
 gateway, guardrails, dashboard, review queue — assumes it does.
 
+**Since 2026-09-28 it runs last instead**, by decision
+([`docs/PHASES_AND_ROADMAP.md`](docs/PHASES_AND_ROADMAP.md) §0). The rest of the
+project is built on provisional labels, and the human-labelled result at the end
+decides what the work becomes: the basis of a research paper at 0.80 or above, a
+published portfolio project below it, with the number in its limitations.
+
 **It has not passed, and it has not been run the way it has to be.** The
 measurement needs candidates from real extraction,
 because hand-writing the 200 would measure the author's idea of a plausible
@@ -519,8 +527,8 @@ exist yet. Provisional labels written by a model sit beside the corpus to keep
 work moving, and scored against them `C` reads AUROC **0.643**, a FAIL against
 the gate's 0.80, with the grounding term alone scoring higher than the
 composite. That number is a model's labels measuring a model's pipeline; the
-gate is decided by the human pass, and this section is here so that the
-provisional figure is not mistaken for it.
+gate is decided by the human pass at the end of the build, and this section is
+here so that the provisional figure is not mistaken for it.
 
 S6.1 and S6.2 made the MCP server: a process that speaks MCP over stdio, starts
 its pool, loads the ontology, and serves the four tools `MCP_INTEGRATION.md` §2
@@ -558,10 +566,12 @@ the semantic-entropy term would have scored **maximum confidence on every
 candidate, forever** — no error, no exception, a plausible number. Every mock
 passed; only a call to a real model showed it.
 
-The next step is **Checkpoint B itself**: the corpus exists and the tooling is
-complete, so what remains is a human labelling session - and, on the
-provisional reading, a look at why the composite scores below its own grounding
-term.
+The next steps are the rest of Phase 2 from S9.2 (tier routing), then Phase 3's
+dashboard and review UI and Phase 4's evals and deployment, all on the
+provisional labels. **Checkpoint B comes last:** the corpus exists and the
+tooling is complete, so what remains is a human labelling session at the start of
+Day 28 - and, on the provisional reading, a look at why the composite scores
+below its own grounding term.
 
 **Nothing in the design suite is evidence of an implemented feature.** All
 runtime paths, service URLs, package names, deployment examples, CI gates and
@@ -576,10 +586,13 @@ Two figures worth stating precisely, because they are the ones people quote:
 - **Coverage** is owned by `RULES.md` §5 — 90% on `guardmem-core` at release,
   with 85% as the Week-1 interim floor.
 
-The single most important milestone is **Checkpoint B** (`BUILD_NOTEBOOK.md`,
-Day 5): the AUROC of `C` against 200 hand-labelled candidates must reach 0.80.
-If the scoring cannot separate good writes from bad ones, nothing downstream
-matters — and that is deliberately learned in week 1, not week 4.
+The single most important milestone is **Checkpoint B**: the AUROC of `C`
+against 200 hand-labelled candidates, with a bar of 0.80. The notebook placed it
+after Day 5 so that a scorer unable to separate good writes from bad would be
+found in week 1, not week 4. By decision on 2026-09-28 it is measured last
+instead, and it decides what the finished work becomes: the basis of a research
+paper at 0.80 or above, a published project below it
+([`docs/PHASES_AND_ROADMAP.md`](docs/PHASES_AND_ROADMAP.md) §0).
 
 ## Licensing
 

@@ -18,13 +18,47 @@ and Appendix A is exactly the one-line-per-day index the original pointer meant.
 
 ---
 
+## 0. Plan change, 2026-09-28: CHECKPOINT B runs last
+
+**Decided by the project owner.** The rest of the build - Phases 2 to 4, the
+dashboard and the review UI included - proceeds on the provisional AI labels in
+`evals/datasets/checkpoint_b/corpus.ai_labelled.jsonl`. The human labelling that
+decides CHECKPOINT B moves to the last day of the build, before
+`BUILD_NOTEBOOK.md` S28.1.
+
+**What the final, human-labelled result decides:**
+
+| AUROC of `C` on human labels | What the work becomes |
+|---|---|
+| ≥ 0.80 (PASS) | the basis of a research paper - S28.4's eval report is its first draft |
+| < 0.80 (MARGINAL or FAIL) | a published portfolio project, with the number, its diagnosis and this history in the eval report's limitations section |
+
+**What it changes.** The notebook's "FAIL. Stop. Do not build the gateway" and its
+week-1 rule "do not start week 2 with a box unticked" no longer hold for
+CHECKPOINT B. The Phase 1 box stays unticked until the end, and every week after
+Phase 1 builds on a scorer that has not been shown to discriminate. The
+provisional reading is **AUROC 0.643**, a FAIL, with the grounding term alone
+(0.658) scoring above the composite - that is what the build proceeds knowing.
+
+**What it does not change.** The bar stays 0.80. Model labels never sign the gate
+off: `checkpoint_b score` prints any verdict over them as PROVISIONAL. The human
+pass labels `corpus.jsonl` without opening the provisional file, after settling
+the four labelling-policy questions in that dataset's README.
+
+**Why.** Time. Finishing the whole system first means it is complete and
+demonstrable whatever the number turns out to be; the number then decides how the
+work is presented, not whether it exists.
+
+---
+
 ## 1. Phase 1 — Core Engine & MCP (Days 1–7)
 
 > **Goal:** `guardmem_core.pipeline.run()` takes raw text and returns an audited decision, and an
 > MCP client can drive it end-to-end from Claude Desktop.
 
 **Steps:** `BUILD_NOTEBOOK.md` Days 1–7 (S1.1 – S7.4). Ends at **Checkpoint B**, the discrimination
-gate in the notebook's Day 5 section — the single most important gate in the project.
+gate in the notebook's Day 5 section — the single most important gate in the project, and since
+2026-09-28 the last one run (§0).
 
 Ships: the Pydantic schema layer and error hierarchy; L1 extraction with span linking; the
 bitemporal store with outbox-coordinated dual writes; L2 validation and conflict detection; L3
@@ -51,9 +85,11 @@ tools.
   against the pipeline. `test_migration_invariants.py::test_an_assertion_without_provenance_cannot_commit`
   is the second half. Ticked 2026-09-16.)
 - [ ] Checkpoint B signed off: AUROC of `C` against 200 human-labelled candidates ≥ 0.80 (0.75–0.80 proceeds as MARGINAL and is recorded)
-  <br>(**The only gate not close, and the critical path.** The corpus is built and
-  the labelling session is all that is left. As of 2026-09-19 it stands at **238
-  candidates over the checkpoint's 200**, drawn from 60 conversations on
+  <br>(**Deferred to the end of the build by the 2026-09-28 decision - see §0.**
+  The provisional reading on model labels is AUROC 0.643, a FAIL and not a
+  sign-off. The corpus is built and the labelling session is all that is left.
+  As of 2026-09-19 it stands at **238 candidates over the checkpoint's 200**,
+  drawn from 60 conversations on
   `llama3.1:8b` under `extract_memories@v2` at **K = 5** - 0 rejected, 0
   quarantined, 0 failed, 59 of 60 contributing (`patient:9056` fails
   reproducibly and is under diagnosis; 238 clears 200 without it). `C` spans 40
@@ -128,13 +164,15 @@ task UI, keyboard flow and typed edit flow; the threshold editor and `threshold_
 Ships: the eval harness and datasets; RAG quality, memory integrity, security and Drift@N suites;
 the baseline comparison against raw-RAG, mem0 and Zep; load and cost benchmarks; Terraform and the
 signed release pipeline; the nightly regression gate; runbooks walked through against staging; the
-README, demo video and public eval report.
+README, demo video and public eval report; and CHECKPOINT B on human labels, moved here by §0.
 
 **Exit gate**
 - [ ] Deployed, reachable, load-tested, with published **measured** SLAs replacing the targets in `PRD.md` §6.1
 - [ ] Eval report with baselines and a stated limitations section
 - [ ] Nightly regression gate live and proven — a deliberate scoring regression blocks the merge
 - [ ] Demo runs cold from a clean clone: `git clone && docker compose up && make seed && make eval`
+- [ ] CHECKPOINT B scored on human labels, and the route it decides recorded - research paper at
+  ≥ 0.80, published project below (§0)
 
 ---
 
@@ -147,10 +185,10 @@ Week 3 ████████ Dashboard + HITL         → "a human can actual
 Week 4 ████████ Evals + Deploy           → "here are the numbers, here's the URL"
 
 Demo-ready checkpoints:
-  Day  5  ▸ Checkpoint B: the scoring separates good writes from bad  (viability proof)
   Day  7  ▸ Claude Desktop writes a governed fact                     (technical proof)
   Day 14  ▸ injection attempt quarantined, live on a dashboard        (security proof)
   Day 21  ▸ nurse clears a real queue inside the review-time target   (product proof)
+  Day 28  ▸ Checkpoint B on human labels: paper or project            (viability proof, §0)
   Day 28  ▸ drift curve: with vs without GuardMem over 100 turns      (value proof)
 ```
 
@@ -185,7 +223,7 @@ nothing. Corrected after reading the notebook rather than the pointer.)
 
 | Week | Top risk | Early warning | Response |
 |---|---|---|---|
-| 1 | Scoring math looks principled but doesn't separate good from bad writes | AUROC of `C` against hand-labelled candidates < 0.75 on a 200-item dev set | Drop to a simpler ensemble; entropy alone is a strong baseline — ship that and iterate. This is Checkpoint B, and a failure here is the most valuable information in the month |
+| 1 | Scoring math looks principled but doesn't separate good from bad writes | AUROC of `C` against hand-labelled candidates < 0.75 on a 200-item dev set | Drop to a simpler ensemble; entropy alone is a strong baseline — ship that and iterate. This is Checkpoint B, and a failure here is the most valuable information in the month. Decided last since 2026-09-28 (§0): the provisional reading - 0.643 on model labels, with the grounding term alone above the composite - is the early warning |
 | 2 | Latency budget blown by NLI + K-sampling | p95 eval > 2.5 s | Batch NLI, quantize the cross-encoder, cut K on LOW risk, move more work off the strict path |
 | 3 | HITL volume too high to be usable | > 25% of candidates routed to review on the demo tenant | Tune τ/ρ per namespace with the tuner; tighten the noise filter; raise the corroboration bar only where impact demands it |
 | 4 | Evals show no drift improvement vs baseline | Drift@100 curves overlap | This is the falsification point — publish it honestly, and dig into whether the failure is retrieval (GC not aggressive enough) or write-path (thresholds too loose) |
